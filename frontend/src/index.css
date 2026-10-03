@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+/* 主题：moxt 语言（参考 drop-harness-framework 后台，2026-10-02 改造）。
+   墨绿深侧栏 × 纯白纸面 + 发丝线卡片 + 品牌绿药丸按钮 + 绿聚焦环。
+   重映射默认色阶实现全站换肤：sky → 品牌绿系（600=#16A34A 主色）；blue → 深绿同族。
+   换色只改 @theme，别动组件类名；语义色（emerald/amber/red/teal）不变。 */
+@theme {
+  --color-sky-50: #f0faf4;
+  --color-sky-100: #dcfce7;
+  --color-sky-200: #bbf7d0;
+  --color-sky-300: #86efac;
+  --color-sky-400: #4ade80;
+  --color-sky-500: #22c55e;
+  --color-sky-600: #16a34a;
+  --color-sky-700: #15803d;
+  --color-sky-800: #166534;
+  --color-sky-900: #14532d;
+  --color-sky-950: #052e16;
+
+  --color-blue-50: #eef7f2;
+  --color-blue-100: #d7ede2;
+  --color-blue-200: #b3dbc9;
+  --color-blue-300: #88c3aa;
+  --color-blue-400: #5ea789;
+  --color-blue-500: #3f8b6e;
+  --color-blue-600: #2f7158;
+  --color-blue-700: #285c4a;
+  --color-blue-800: #224b3e;
+  --color-blue-900: #1d4036;
+  --color-blue-950: #11261f;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-white text-[#171929] antialiased;
+    font-family:
+      "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC",
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer components {
+  /* 卡片：白纸 + 发丝线（16px 大圆角，hover 只加深描边） */
+  .card {
+    @apply rounded-2xl border border-[#e8ecf0] bg-white;
+    box-shadow:
+      0 1px 2px rgba(23, 25, 41, 0.03),
+      0 6px 18px rgba(23, 25, 41, 0.04);
+  }
+  .card-hover {
+    @apply transition-all duration-150;
+  }
+  .card-hover:hover {
+    @apply border-[#c6cfd8];
+  }
+
+  /* 按钮：药丸形（moxt 语法）；primary=近黑药丸，accent=品牌绿实心药丸 */
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-[#171929] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2b2e47] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-accent {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-[#29c16a] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#24b05d] disabled:cursor-not-allowed disabled:opacity-40;
+    box-shadow: 0 2px 8px rgba(41, 193, 106, 0.28);
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-[#e8ecf0] bg-white px-3.5 py-2 text-sm font-medium text-[#6f7683] transition hover:border-[#22c55e] hover:text-[#15803d] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-success {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-[#29c16a] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#24b05d] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-xs {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  /* 输入：中圆角 + 绿聚焦环（moxt 产品层语法） */
+  .input {
+    @apply w-full rounded-lg border border-[#dfe4ea] bg-white px-3 py-2 text-sm outline-none transition placeholder:text-[#a6aeb9] hover:border-[#c6cfd8] focus:border-[#22c55e] focus:ring-4 focus:ring-[rgba(34,197,94,0.13)];
+  }
+  .select {
+    @apply rounded-lg border border-[#dfe4ea] bg-white px-2.5 py-1.5 text-sm text-[#383e47] outline-none transition hover:border-[#c6cfd8] focus:border-[#22c55e];
+  }
+
+  /* 徽章 */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
+  }
+
+  /* 分段选择器：发丝线槽 + 白色滑块 + 绿选中字 */
+  .segment {
+    @apply inline-flex rounded-full border border-[#e8ecf0] bg-[#f7f9fa] p-1;
+  }
+  .segment-item {
+    @apply rounded-full px-4 py-1.5 text-sm font-medium text-[#6f7683] transition hover:text-[#171929];
+  }
+  .segment-item-active {
+    @apply bg-white text-[#15803d] shadow-sm hover:text-[#15803d];
+  }
+}
+
+/* 墨绿侧栏（D2）：选中项金色光条 */
+.navitem-gold {
+  position: relative;
+}
+.navitem-gold::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 22%;
+  bottom: 22%;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #e8c97f, #c9a25c);
+  box-shadow: 0 0 10px rgba(232, 201, 127, 0.55);
+}
+
+/* 墨绿侧栏专用滚动条：米白低透明度（全局浅灰 thumb 在深底上过亮，2026-10-02 用户反馈） */
+.nav-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.nav-scroll::-webkit-scrollbar-thumb {
+  background: rgba(240, 233, 213, 0.16);
+  border: none;
+  border-radius: 4px;
+}
+.nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(240, 233, 213, 0.3);
+}
+.nav-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 数字字体工具：衬线大数字（stat 主角）与等宽数字（表格/指标不抖动） */
+.num-serif {
+  font-family: "Lora", "Noto Serif SC", "Songti SC", "SimSun", serif;
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;
+}
+.mono-num {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 滚动条（白纸统一：10px、灰 thumb 白描边） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #d3dae2;
+  border: 2px solid #ffffff;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b9c3ce;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 页面切换动画 */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: fade-up 0.25s ease-out both;
+}

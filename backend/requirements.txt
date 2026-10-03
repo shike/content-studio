@@ -1,0 +1,14 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+# 钉住 0.0.42：0.0.47 起 datetime 字段改为「必须带时区」，与本库全量 naive-UTC 约定冲突
+# （写入即 ValueError、读回带 tzinfo 导致比较报错）。迁移到 aware 语义需专项改造，见 TDD §14。
+sqlmodel==0.0.42
+pydantic-settings>=2.6
+httpx[socks]>=0.27   # [socks]=住宅出口代理（scripts/home-proxy.sh）所需
+python-multipart>=0.0.12
+markdown>=3.7
+bleach[css]>=6.0
+faster-whisper>=1.0
+Pillow>=10.0
+matplotlib>=3.9
+playwright>=1.48

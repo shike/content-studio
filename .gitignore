@@ -1,0 +1,16 @@
+.venv/
+node_modules/
+frontend/dist/
+data/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+acceptance/fixtures/*.mp4
+services/
+data-acceptance/
+.ms-playwright/
+
+# 开源脱敏：本地真实存档与部署目标不入库
+docs-local/
+scripts/.deploy.env

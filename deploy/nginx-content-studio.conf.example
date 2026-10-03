@@ -1,0 +1,28 @@
+# Content Studio 反向代理 + HTTPS 示例
+# 用法：
+#   1) 改下面 server_name 为你的域名，放到 /etc/nginx/conf.d/content-studio.conf
+#   2) nginx -t && systemctl reload nginx
+#   3) certbot --nginx -d 你的域名   （自动追加 443 与证书路径，并配 HTTP→HTTPS 跳转）
+#   4) .env 里设 COOKIE_SECURE=1（会话 Cookie 只走加密通道），重启服务生效
+#
+# 后端监听 127.0.0.1:8100（deploy-linux.sh 默认值），由 Nginx 对外。
+
+server {
+    listen 80;
+    server_name studio.example.com;          # ← 改成你的域名
+
+    client_max_body_size 2048m;              # 上传视频上限 2GB（默认 1m 会 413）
+    client_body_timeout 600s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # 登录限流按真实来源 IP 计数，此头必传（应用只在直连方为回环时信任它）
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;             # 长任务（LLM/合成轮询）余量
+        proxy_send_timeout 300s;
+    }
+}
