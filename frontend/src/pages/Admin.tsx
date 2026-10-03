@@ -266,6 +266,7 @@ export default function Admin({ role, selfId, onNavigate }: {
         err={err}
         msg={msg}
         reload={reload}
+        onOneTime={(un, p) => { setOneTime({ username: un, password: p }); setMsg('') }}
       />
     )
   }
@@ -587,7 +588,7 @@ function OverviewTab({ onNavigate, onOpenTenant }: { onNavigate?: (k: SectionKey
 
 /* ---------- 租户详情（整页）：KPI / 趋势 / 分账+排行 / 充值+流水+任务 ---------- */
 
-function TenantDetailPage({ tenant, onBack, onNavigate, act, setErr, setMsg, err, msg, reload }: {
+function TenantDetailPage({ tenant, onBack, onNavigate, act, setErr, setMsg, err, msg, reload, onOneTime }: {
   tenant: TenantRow
   onBack: () => void
   onNavigate?: (k: SectionKey) => void
@@ -597,6 +598,7 @@ function TenantDetailPage({ tenant, onBack, onNavigate, act, setErr, setMsg, err
   err: string
   msg: string
   reload: () => Promise<void>
+  onOneTime: (username: string, password: string) => void
 }) {
   const [usage, setUsage] = useState<TenantUsage | null>(null)
   const [usageErr, setUsageErr] = useState('')
@@ -683,6 +685,12 @@ function TenantDetailPage({ tenant, onBack, onNavigate, act, setErr, setMsg, err
         </div>
         <BrandForm initial={tenant.brand ?? {}} onSave={saveBrand} />
 
+      </div>
+
+      {/* 本租户成员：看人/加人/改本租户角色都在租户上下文完成（租户为纲） */}
+      <div className="mt-4">
+        <TenantMembersSection tenantId={tenant.id} onOneTime={onOneTime}
+          onChanged={async () => { await Promise.all([load(), reload()]) }} />
       </div>
       {err && <div className="mb-4"><ErrorLine text={err} /></div>}
 
@@ -874,6 +882,15 @@ function MembersTab({ users, isPlatform, selfId, manageableTenants, showNewUser,
   const [roleF, setRoleF] = useState('all')
   const [statusF, setStatusF] = useState('all')
 
+  // 行内归属摘要：默认租户·身份（＋其余租户数）；平台管理员另挂全局徽章
+  const memSummary = (u: UserRow) => {
+    const ms = u.memberships ?? []
+    if (ms.length === 0) return u.tenant_name || '—'
+    const first = ms.find((m) => m.tenant_id === u.tenant_id) ?? ms[0]
+    const rest = ms.length - 1
+    return `${first.tenant_name || `租户 ${first.tenant_id}`} · ${first.role === 'tenant_admin' ? '管理员' : '成员'}${rest > 0 ? ` ＋${rest} 租户` : ''}`
+  }
+
   // 全局角色位只剩 platform_admin/member；「租户管理员」= 任一归属里有 tenant_admin
   const matchRole = (u: UserRow, r: string) =>
     r === 'tenant_admin'
@@ -925,7 +942,7 @@ function MembersTab({ users, isPlatform, selfId, manageableTenants, showNewUser,
 
       <div className="card overflow-hidden">
         <div className="grid grid-cols-[1fr_1fr_0.9fr_0.9fr_0.7fr_1fr] gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-2 text-[11px] font-medium text-slate-500">
-          <div>用户名</div><div>显示名</div><div>角色</div>
+          <div>用户名</div><div>显示名</div><div>租户归属</div>
           {isPlatform ? <div>所属租户</div> : <div />}
           <div className="text-center">状态</div><div className="text-right">创建时间</div>
         </div>
@@ -944,7 +961,10 @@ function MembersTab({ users, isPlatform, selfId, manageableTenants, showNewUser,
                 )}
               </div>
               <div className="truncate text-slate-600">{u.display_name}</div>
-              <div><span className="badge bg-slate-100 text-slate-600">{ROLE_LABEL[u.role] ?? u.role}</span></div>
+              <div className="truncate text-xs text-slate-600">
+                {u.role === 'platform_admin' && <span className="badge mr-1 bg-violet-50 text-violet-700">平台</span>}
+                {memSummary(u)}
+              </div>
               {isPlatform ? <div className="truncate text-slate-600">{u.tenant_name}</div> : <div />}
               <div className="text-center">
                 <span className={`badge ${u.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
@@ -1112,6 +1132,143 @@ function UserDetail({ user, isPlatform, selfId, act, manageableTenants, onOneTim
   )
 }
 
+/* ---------- 租户详情：成员管理（本租户归属视角，platform_admin） ---------- */
+
+function TenantMembersSection({ tenantId, onOneTime, onChanged }: {
+  tenantId: number
+  onOneTime: (username: string, password: string) => void
+  onChanged: () => Promise<void>
+}) {
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [addId, setAddId] = useState<number | ''>('')
+  const [addRole, setAddRole] = useState('member')
+  const [showNew, setShowNew] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newDisplay, setNewDisplay] = useState('')
+  const [newRole, setNewRole] = useState('member')
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api<{ users: UserRow[] }>('/admin/users')
+      setUsers(d.users)
+    } catch (e) { setErr(String(e)) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const actLocal = async (fn: () => Promise<void>, ok: string) => {
+    setErr(''); setMsg(''); setBusy(true)
+    try {
+      await fn()
+      setMsg(ok)
+      await Promise.all([load(), onChanged()])
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+
+  const memRows = users
+    .map((u) => ({ u, m: (u.memberships ?? []).find((mm) => mm.tenant_id === tenantId) }))
+    .filter((x) => x.m)
+  const addable = users.filter((u) => !(u.memberships ?? []).some((mm) => mm.tenant_id === tenantId))
+
+  const upsert = (userId: number, role: string, name: string) =>
+    actLocal(async () => {
+      await api(`/admin/users/${userId}/memberships`, {
+        method: 'POST', body: JSON.stringify({ tenant_id: tenantId, role }),
+      })
+    }, `已将 ${name} 在本租户的角色改为${role === 'tenant_admin' ? '租户管理员' : '成员'}`)
+
+  const remove = (userId: number, name: string) =>
+    actLocal(async () => {
+      await api(`/admin/users/${userId}/memberships/${tenantId}`, { method: 'DELETE' })
+    }, `已移除 ${name} 的本租户归属（多归属用户保留账号）`)
+
+  const addExisting = () =>
+    actLocal(async () => {
+      await api(`/admin/users/${addId}/memberships`, {
+        method: 'POST', body: JSON.stringify({ tenant_id: tenantId, role: addRole }),
+      })
+      setAddId('')
+    }, '已添加成员归属')
+
+  const createNew = () =>
+    actLocal(async () => {
+      const d = await api<{ one_time_password: string }>('/admin/users', {
+        method: 'POST',
+        body: JSON.stringify({ username: newName.trim(), display_name: newDisplay.trim(), role: newRole, tenant_id: tenantId }),
+      })
+      onOneTime(newName.trim(), d.one_time_password)
+      setShowNew(false); setNewName(''); setNewDisplay(''); setNewRole('member')
+      await load()
+    }, '成员已创建（一次性密码见顶部黄条）')
+
+  return (
+    <div className="card space-y-3 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-sm font-semibold text-slate-800">成员（本租户归属）</div>
+        <span className="text-[11px] text-slate-400">这里的角色=该用户在本租户的身份（管理员可管本租户成员）；多租户用户可在此移除本租户归属</span>
+      </div>
+      {msg && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{msg}</div>}
+      {err && <ErrorLine text={err} />}
+      <div className="space-y-1">
+        {memRows.map(({ u, m }) => (
+          <div key={u.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 px-3 py-1.5 text-xs">
+            <span className={`size-1.5 shrink-0 rounded-full ${u.status === 'active' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <span className="min-w-0 flex-1 truncate">
+              <b className="font-medium text-slate-800">{u.username}</b>
+              <span className="ml-1.5 text-slate-500">{u.display_name}</span>
+              {u.role === 'platform_admin' && <span className="badge ml-1.5 bg-violet-50 text-violet-700">平台管理员</span>}
+              {m!.tenant_id === u.tenant_id && <span className="badge ml-1 bg-slate-100 text-slate-500">默认租户</span>}
+            </span>
+            <select className="select w-32 py-0.5 text-xs" disabled={busy} value={m!.role}
+              onChange={(e) => upsert(u.id, e.target.value, u.username)}>
+              <option value="member">成员</option>
+              <option value="tenant_admin">租户管理员</option>
+            </select>
+            <button className="btn-ghost btn-xs text-red-600" disabled={busy}
+              onClick={() => remove(u.id, u.username)}>
+              移除归属
+            </button>
+          </div>
+        ))}
+        {memRows.length === 0 && <div className="text-xs text-slate-400">本租户还没有成员</div>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5">
+        <select className="select w-52 py-1 text-xs" value={addId} disabled={busy}
+          onChange={(e) => setAddId(e.target.value === '' ? '' : Number(e.target.value))}>
+          <option value="">添加已有用户到本租户…</option>
+          {addable.map((u) => <option key={u.id} value={u.id}>{u.username}（{u.display_name}）</option>)}
+        </select>
+        <select className="select w-32 py-1 text-xs" value={addRole} disabled={busy}
+          onChange={(e) => setAddRole(e.target.value)}>
+          <option value="member">成员</option>
+          <option value="tenant_admin">租户管理员</option>
+        </select>
+        <button className="btn-ghost btn-xs" disabled={busy || addId === ''} onClick={addExisting}>添加归属</button>
+        <span className="text-slate-300">｜</span>
+        {showNew ? (
+          <span className="flex flex-wrap items-center gap-2">
+            <input className="input w-32 py-1 text-xs" placeholder="用户名" value={newName}
+              onChange={(e) => setNewName(e.target.value)} />
+            <input className="input w-28 py-1 text-xs" placeholder="显示名" value={newDisplay}
+              onChange={(e) => setNewDisplay(e.target.value)} />
+            <select className="select w-32 py-1 text-xs" value={newRole} disabled={busy}
+              onChange={(e) => setNewRole(e.target.value)}>
+              <option value="member">成员</option>
+              <option value="tenant_admin">租户管理员</option>
+            </select>
+            <button className="btn-accent btn-xs" disabled={busy || !newName.trim()} onClick={createNew}>创建并加入</button>
+            <button className="btn-ghost btn-xs" onClick={() => setShowNew(false)}>取消</button>
+          </span>
+        ) : (
+          <button className="btn-ghost btn-xs" onClick={() => setShowNew(true)}>+ 新建成员</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ---------- 新建租户 / 新建成员（行内表单） ---------- */
 
 function NewTenantForm({ open, onClose, onDone, setErr }: {
@@ -1186,6 +1343,7 @@ function NewUserForm({ open, isPlatform, onClose, onDone, setErr }: {
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [role, setRole] = useState('member')
+  const [asPlatform, setAsPlatform] = useState(false)
   const [tenantId, setTenantId] = useState<number | ''>('')
   const [tenants, setTenants] = useState<TenantRow[]>([])
   const [busy, setBusy] = useState(false)
@@ -1200,15 +1358,17 @@ function NewUserForm({ open, isPlatform, onClose, onDone, setErr }: {
     if (!username.trim()) return
     setBusy(true); setErr('')
     try {
+      // 角色语义：租户内角色（member/tenant_admin）走 role；“平台管理员”是全局位，复选框叠加
+      const finalRole = asPlatform ? 'platform_admin' : role
       const d = await api<{ one_time_password: string }>('/admin/users', {
         method: 'POST',
         body: JSON.stringify({
-          username: username.trim(), display_name: displayName.trim(), role,
+          username: username.trim(), display_name: displayName.trim(), role: finalRole,
           tenant_id: tenantId === '' ? null : tenantId,
         }),
       })
       const u = username.trim()
-      setUsername(''); setDisplayName(''); setRole('member'); setTenantId('')
+      setUsername(''); setDisplayName(''); setRole('member'); setAsPlatform(false); setTenantId('')
       onDone(u, d.one_time_password)
     } catch (e) {
       setErr(String(e))
@@ -1231,16 +1391,15 @@ function NewUserForm({ open, isPlatform, onClose, onDone, setErr }: {
           <input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-slate-500">角色</label>
+          <label className="mb-1 block text-xs text-slate-500">租户内角色</label>
           <select className="select w-full" value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="member">成员</option>
             <option value="tenant_admin">租户管理员</option>
-            {isPlatform && <option value="platform_admin">平台管理员</option>}
           </select>
         </div>
         {isPlatform && (
           <div>
-            <label className="mb-1 block text-xs text-slate-500">所属租户{role === 'platform_admin' ? ' *' : ''}</label>
+            <label className="mb-1 block text-xs text-slate-500">所属租户</label>
             <select className="select w-full" value={tenantId} onChange={(e) => setTenantId(e.target.value === '' ? '' : Number(e.target.value))}>
               <option value="">（选择租户）</option>
               {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -1248,6 +1407,13 @@ function NewUserForm({ open, isPlatform, onClose, onDone, setErr }: {
           </div>
         )}
       </div>
+      {isPlatform && (
+        <label className="mt-2.5 flex items-center gap-1.5 text-xs text-slate-500">
+          <input type="checkbox" className="size-3.5" checked={asPlatform}
+            onChange={(e) => setAsPlatform(e.target.checked)} />
+          同时设为平台管理员（全局角色，可跨租户管理；仍需选择所属租户作为默认落点）
+        </label>
+      )}
       <div className="mt-3 flex gap-2">
         <button className="btn-accent" disabled={busy || !username.trim()} onClick={submit}>创建并生成初始密码</button>
         <button className="btn-ghost" onClick={onClose}>取消</button>
