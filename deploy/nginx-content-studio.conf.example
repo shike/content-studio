@@ -14,6 +14,24 @@ server {
     client_max_body_size 2048m;              # 上传视频上限 2GB（默认 1m 会 413）
     client_body_timeout 600s;
 
+    # 性能要点（生产实测：不开 gzip 时 bundle 442KB 裸传 ~0.66s，开后 122KB ~0.09s）：
+    # Nginx 默认 gzip_types 只含 text/html——必须显式列 JS/CSS/JSON
+    gzip on;
+    gzip_vary on;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css application/json application/javascript image/svg+xml text/xml application/xml text/javascript;
+
+    # /assets/ 文件名带内容哈希：长缓存 immutable；index.html 必须 no-cache（防部署后旧 JS 已删白屏）
+    location ^~ /assets/ {
+        proxy_pass http://127.0.0.1:8100;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    location = /index.html {
+        proxy_pass http://127.0.0.1:8100;
+        add_header Cache-Control "no-cache";
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8100;
         proxy_http_version 1.1;
