@@ -27,6 +27,9 @@ export default function PosterPrompts() {
   const [error, setError] = useState('')
   const [posters, setPosters] = useState<Poster[] | null>(null)
 
+  const charCount = content.trim().length
+  const enough = charCount >= 30
+
   const generate = async () => {
     setError('')
     setBusy(true)
@@ -86,12 +89,17 @@ export default function PosterPrompts() {
           </div>
           <button
             onClick={generate}
-            disabled={busy || content.trim().length < 30}
+            disabled={busy || !enough}
+            title={enough ? '' : '内容至少 30 字'}
             className="btn-accent btn-xs disabled:opacity-40"
           >
-            <Wand2 size={13} /> {busy ? '生成中…（约 30 秒）' : '生成提示词'}
+            <Wand2 size={13} /> {busy ? '生成中…（约 30 秒）' : enough ? '生成提示词' : `生成提示词（还差 ${30 - charCount} 字）`}
           </button>
-          <span className="text-[11px] text-slate-400">出图：复制提示词 → 即梦 jimeng.jianying.com 或豆包（免费额度）→ 下载后上传公众号</span>
+          <span className="text-[11px] text-slate-400">
+            {enough
+              ? '出图：复制提示词 → 即梦 jimeng.jianying.com 或豆包（免费额度）→ 下载后上传公众号'
+              : `已 ${charCount}/30 字——内容够一段话后即可生成`}
+          </span>
         </div>
       </div>
 
