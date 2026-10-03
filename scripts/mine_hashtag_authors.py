@@ -1,4 +1,4 @@
-"""零 cookie 话题挖矿：拉话题下视频列表，按昵称对出目标作者的 sec_uid。"""
+"""免登录 话题挖矿：拉话题下视频列表，按昵称对出目标作者的 sec_uid。"""
 import json
 import sys
 from collections import OrderedDict

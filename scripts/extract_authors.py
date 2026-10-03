@@ -1,4 +1,4 @@
-"""从种子视频链接反查真实作者（只读，不改库）。零 cookie：拦截页面自身的 aweme detail 接口。"""
+"""从种子视频链接反查真实作者（只读，不改库）。免登录：拦截页面自身的 aweme detail 接口。"""
 import json
 import sys
 

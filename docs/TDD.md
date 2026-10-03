@@ -216,13 +216,13 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - `DELETE /api/watch/accounts/{id}` → `{deleted:id}`
 - `POST /api/watch/scan` → 202 `{job_id}`（全量扫描，仅 enabled 账号；每号新视频入队 ≤10 条）
 - `POST /api/watch/accounts/{id}/scan` → 202 `{job_id}`（单号扫描，不受 enabled 限制；不存在 404）
-- `POST /api/watch/resolve` `{url}` → 202 `{job_id}`（链接自动识别：视频链接零 cookie 反查昵称+主页，分享主页标题兜底；失败显式报错）
+- `POST /api/watch/resolve` `{url}` → 202 `{job_id}`（链接自动识别：视频链接免登录 反查昵称+主页，分享主页标题兜底；失败显式报错）
 - `GET /api/watch/scan/history?limit=` → `{items:[job...]}`（watch_scan 任务记录，`result.notes` 含每号路线/降级原因）
 - `POST /api/watch/accounts` / `PUT` 支持 `kind`：`competitor`（默认）| `self`（我的账号）；`watch_scan` 全量扫描仅处理 competitor
 
 ### 关键词发现对标账号（R3.6）
 - 路线：DDG `site:douyin.com/video 关键词`（≤3 组查询、攒够 8 条链接提前收手；html 202 即换 lite 端点、
-  都封立刻短路不补发——限流是 IP 级分钟惩罚窗且两前端共享，24h 缓存）挖真实视频链接 → 视频页 detail 零 cookie 反查
+  都封立刻短路不补发——限流是 IP 级分钟惩罚窗且两前端共享，24h 缓存）挖真实视频链接 → 视频页 detail 免登录 反查
   作者（昵称/sec_uid/签名/follower_count）与样本热度 → 按粉丝数排序取 Top 8 → `watch_candidates` 表持久化。
   全程无 LLM；风控样本重试一次后跳过（原因写 notes）；DDG 限流挖空或全部样本风控 → TransientError
   （RetryPolicy max_retries=2、base 600s，到期自动重试）
@@ -320,7 +320,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
   - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate/avatar_video）已全部迁移，执行器体内不再自带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
 - **执行器注册表**：`idea_research / benchmark_analyze / script_generate(含自动打磨一轮) / script_polish / script_finalize(定稿+标题候选) / article_generate / watch_scan(payload.account_id 单号扫描，全量仅 competitor) / watch_resolve(自动提取口令全文中的链接) / watch_discover(关键词发现对标账号，light 并发道) / self_scan / self_analyze / self_profile_update / topic_radar(话题雷达：话题下新增视频速度测热度，飙升发 macOS 通知) / avatar_video(蝉镜引擎：脚本文本→克隆形象+配套音色+自动字幕，超长自动分段)`。
-- **话题雷达**：`radar_topics` 表（ch_id 唯一/seen_ids 防重/recent 最近新视频）。数据源=m.douyin.com challenge/aweme 接口（零 cookie，无互动统计字段）→ 热度代理=话题下新增视频速度，单次巡检新增 ≥5 条判飙升并发 macOS 通知。`GET/POST/DELETE /api/radar`、`POST /{id}/check`（单话题即时巡检）、`POST /{id}/toggle`（启停）、
+- **话题雷达**：`radar_topics` 表（ch_id 唯一/seen_ids 防重/recent 最近新视频）。数据源=m.douyin.com challenge/aweme 接口（免登录，无互动统计字段）→ 热度代理=话题下新增视频速度，单次巡检新增 ≥5 条判飙升并发 macOS 通知。`GET/POST/DELETE /api/radar`、`POST /{id}/check`（单话题即时巡检）、`POST /{id}/toggle`（启停）、
 `POST /check-all`（走 topic_radar 任务）、`POST /extract-hashtags` `{url}`（贴视频链接提取话题）、
 `POST /mine`（从拆解库挖话题候选）；空表自动种入 3 个已知泛 AI 话题；每日随定时扫描巡检一次（X10 调度）。
 - **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，与 acceptance/quality.py 同表）；均只在命中时多花一次 LLM 调用。

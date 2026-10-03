@@ -46,7 +46,7 @@ cd frontend && npx tsc --noEmit && npm run build
 
 ## 抖音抓取事实（会过期，改前先实测）
 
-- 单视频页**零 cookie 可行**：Playwright 拦页面自身的 `aweme/v1/web/aweme/detail`（自带签名），`_ROUTER_DATA` 兜底。分享主页（`share/user/<sec_uid>`）移动端 UA 可渲染出简介+近期作品。
+- 单视频页**免登录 可行**：Playwright 拦页面自身的 `aweme/v1/web/aweme/detail`（自带签名），`_ROUTER_DATA` 兜底。分享主页（`share/user/<sec_uid>`）移动端 UA 可渲染出简介+近期作品。
 - 博主**主页作品列表被登录墙挡**（资料可见、网格空白、不发 aweme/post）→ 同行扫描用**锚点视频路线**：贴作者任意视频链接，从 detail 定作者 + `mix/aweme` 合集流反推近期作品。路线与降级原因写进任务 notes。
 - **搜索页/话题页/推荐流全部登录墙**（PC 搜索、`/hashtag/*`、m.douyin.com 搜索均不出数据）→ **按昵称反查 sec_uid 无解**，新对标号只能：用户在 App 里分享任一视频链接贴进来（锚点路线自动解析作者），或搜索引擎先挖到具体 `/video/` 链接（账号发现的 DDG 路线）。
 - **DDG 检索纪律（2026-09-28 更新）**：①**DDG 境内全断**——腾讯云直连 Errno 101，本机家宽直连也超时（此前"限流"后恶化）；唯一通路=**DDG 经住宅隧道出海**：home_proxy 已加 `--upstream 7890`（duckduckgo.com 目标经本机 7890 外网代理 HTTP CONNECT 出海，抖音流量仍直连家宽），search.py 的 DDG 请求走 douyin_proxy 隧道——实测 site:douyin.com/video 能挖到真实链接。②限流仍是 **IP 级惩罚窗**（走 7890 出口后惩罚算在出口 IP 上），纪律不变：每查询最多 2 发（html 202 即换 lite）+ 调用方长周期重试。③**GLM 搜索不吃 site:/inurl: 限定符且不索引抖音站内**（恒空/无关页）——带限定符的查询 search.py 已强制走 DDG；Bing 中国站（cn.bing.com）同样无视 site:，不可用作 site: 备胎。

@@ -1,6 +1,6 @@
 """同行监控：对标账号清单 → 扫描最新视频 → 自动排队拆解。
 
-账号视频列表走真浏览器路线（Playwright 零 cookie，拦截页面自身发出的
+账号视频列表走真浏览器路线（Playwright 免登录，拦截页面自身发出的
 aweme/post 请求，与单视频下载同款思路）；降级原因写进任务 notes（可见）。
 视频号无网页公开接口，不支持自动扫描
 （App 等外部渠道发现视频后本地上传拆解）。
@@ -64,7 +64,7 @@ def _walk_awemes(obj, out: list) -> None:
 def _list_author_videos_via_anchor(url: str) -> tuple[Optional[list], Optional[str], bool]:
     """锚点视频模式：贴作者任意一条视频链接，从视频页反推作者近期作品。
 
-    零 cookie：detail 给作者身份，mix/aweme（合集流）吐同作者视频（实测 6+ 条）。
+    免登录：detail 给作者身份，mix/aweme（合集流）吐同作者视频（实测 6+ 条）。
     返回 (entries, error, is_anchor)；is_anchor=False 表示链接不是视频链接。
     """
     try:
@@ -204,7 +204,7 @@ def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Option
 
 
 def _list_account_videos_playwright(url: str) -> tuple[Optional[list], Optional[str]]:
-    """真浏览器路线：打开博主主页，拦截页面自身的 aweme/post 列表（零 cookie）。"""
+    """真浏览器路线：打开博主主页，拦截页面自身的 aweme/post 列表（免登录）。"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -296,16 +296,16 @@ async def watch_scan(ctx, payload: dict) -> dict:
         ctx.set_progress(
             5 + int(85 * i / max(1, len(douyin_accounts))),
             f"扫描 {acc.name}（{i + 1}/{len(douyin_accounts)}）")
-        # 列表四链路：① 锚点视频（零 cookie）② 移动分享主页（零 cookie，需 sec_uid 链接）
+        # 列表四链路：① 锚点视频（免登录）② 移动分享主页（免登录，需 sec_uid 链接）
         # ③ PC 主页拦截。降级原因可见。
         entries, err, is_anchor = await asyncio.to_thread(_list_author_videos_via_anchor, acc.url)
         if entries is not None:
-            notes.append(f"{acc.name}：锚点视频路线（零 cookie）")
+            notes.append(f"{acc.name}：锚点视频路线（免登录）")
         else:
             share_entries, share_err, _ = await asyncio.to_thread(_list_author_videos_via_share_page, acc.url)
             if share_entries is not None:
                 entries, err = share_entries, None
-                notes.append(f"{acc.name}：移动分享主页路线（零 cookie）")
+                notes.append(f"{acc.name}：移动分享主页路线（免登录）")
             elif is_anchor is False:
                 pass  # 链接不是视频页也不是分享主页 → 交给主页拦截
             else:
@@ -376,7 +376,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
 # ---------- 账号自动识别（添加账号时贴链接反查昵称与主页） ----------
 
 def _resolve_author_via_video(url: str) -> tuple[Optional[dict], Optional[str]]:
-    """视频页路线：detail 接口自带作者昵称与 sec_uid，零 cookie 最稳。"""
+    """视频页路线：detail 接口自带作者昵称与 sec_uid，免登录 最稳。"""
     from ..benchmarks.downloader import resolve_aweme_id
 
     rid = resolve_aweme_id(url)
@@ -415,11 +415,11 @@ def _resolve_author_via_video(url: str) -> tuple[Optional[dict], Optional[str]]:
     if not sec_uid or not nickname:
         return None, "视频页未吐出作者信息（可能触发验证码，可重试）"
     return {"name": nickname, "url": f"https://www.iesdouyin.com/share/user/{sec_uid}",
-            "route": "视频链接反查（零 cookie）"}, None
+            "route": "视频链接反查（免登录）"}, None
 
 
 def _resolve_author_via_share_page(url: str) -> tuple[Optional[dict], Optional[str]]:
-    """分享主页路线：页面标题即「昵称的主页」，零 cookie。"""
+    """分享主页路线：页面标题即「昵称的主页」，免登录。"""
     from ..benchmarks.downloader import is_douyin_url
 
     if not is_douyin_url(url):
@@ -448,7 +448,7 @@ def _resolve_author_via_share_page(url: str) -> tuple[Optional[dict], Optional[s
     m = re.match(r"(.+?)的主页", title or "")
     if not m or not m.group(1).strip():
         return None, "主页标题未吐出昵称（链接可能无效）"
-    return {"name": m.group(1).strip(), "url": url, "route": "分享主页标题（零 cookie）"}, None
+    return {"name": m.group(1).strip(), "url": url, "route": "分享主页标题（免登录）"}, None
 
 
 register_concurrent("watch_resolve")
@@ -472,7 +472,7 @@ async def watch_resolve(ctx, payload: dict) -> dict:
     return info
 
 
-# ---------- 关键词发现对标账号（DDG 挖视频链接 → 零 cookie 反查作者与热度） ----------
+# ---------- 关键词发现对标账号（DDG 挖视频链接 → 免登录 反查作者与热度） ----------
 # 抖音搜索页是登录墙、按昵称反查 sec_uid 无解（AGENTS 抓取事实）；可行的公共入口是
 # 搜索引擎索引的视频页：DDG `site:douyin.com/video 关键词` 吐真实视频链接（2026-09 实测），
 # 视频页 detail 自带 follower_count/nickname/sec_uid——热门排序用真实粉丝数，零 LLM 成本。
@@ -507,7 +507,7 @@ def _discover_queries(keyword: str, direction: str) -> list[str]:
 
 
 def _probe_video_author(rid: str) -> tuple[Optional[dict], Optional[str]]:
-    """视频页 detail 零 cookie 反查作者与热度。返回 (info, None) 或 (None, 错误)。"""
+    """视频页 detail 免登录 反查作者与热度。返回 (info, None) 或 (None, 错误)。"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:

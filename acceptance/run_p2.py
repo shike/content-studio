@@ -186,7 +186,7 @@ if os.environ.get("CS_WATCH_SCAN") == "1":
     if check("发现任务受理（202）", status == 202 and bool(r2.get("job_id")),
              f"status={status}, {str(r2)[:100]}"):
         job = poll_job(r2["job_id"], timeout=420)
-        check("发现任务完成（DDG 挖链接+零 cookie 反查作者）",
+        check("发现任务完成（DDG 挖链接+免登录 反查作者）",
               job is not None and job.get("status") == "succeeded",
               (job or {}).get("error") or ("" if job else "420s 超时"))
         status, cl = request("GET", "/api/watch/discover/candidates")
@@ -265,7 +265,7 @@ if not test_url:
 elif not llm_ready:
     skip("在线拆解", "未配置 ZHIPU_API_KEY")
 else:
-    # 下载主路线为 Playwright 零 cookie 直连，不再要求下载容器（容器只是可选加速项）
+    # 下载主路线为 Playwright 免登录 直连，不再要求下载容器（容器只是可选加速项）
     status, r = request("POST", "/api/analyze/video", body={"url": test_url})
     ok = status == 202 and r.get("job_id")
     check("在线拆解任务受理", bool(ok), f"status={status}, {str(r)[:120]}")

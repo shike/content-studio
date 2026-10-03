@@ -1,6 +1,6 @@
 """话题雷达：监控泛 AI 类抖音话题，按日巡检话题下新视频测热度。
 
-数据源=m.douyin.com challenge/aweme 接口（零 cookie 直连，实测无互动统计字段），
+数据源=m.douyin.com challenge/aweme 接口（免登录 直连，实测无互动统计字段），
 热度代理=话题下新增视频速度；单次巡检新增 ≥5 条判为飙升，macOS 通知推送。
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ SEED_TOPICS: list[tuple[str, str]] = []  # 监控话题是运营资产不入库�
 
 
 def fetch_topic_videos(ch_id: str, count: int = 20) -> list[dict]:
-    """拉话题下最新视频（零 cookie 直连）。失败抛 TransientError 走任务重试。"""
+    """拉话题下最新视频（免登录 直连）。失败抛 TransientError 走任务重试。"""
     resp = httpx.get(
         "https://m.douyin.com/web/api/v2/challenge/aweme/",
         params={"ch_id": ch_id, "count": count},
@@ -63,7 +63,7 @@ def _notify(text: str) -> None:
 
 
 def _probe_video(vid: str) -> dict:
-    """零 cookie 探测单视频：点赞数 + 作者粉丝数（PC web detail 双字段齐备）。"""
+    """免登录 探测单视频：点赞数 + 作者粉丝数（PC web detail 双字段齐备）。"""
     from playwright.sync_api import sync_playwright
 
     from ..browser import launch, ua
@@ -115,7 +115,7 @@ def _merge_hits(existing: list, candidates: list[dict], cap: int = 20) -> tuple[
 
 
 def _extract_hashtags(vid: str) -> list[dict]:
-    """零 cookie：从视频 detail 的 text_extra 提取话题（ch_id + 名称）。
+    """免登录：从视频 detail 的 text_extra 提取话题（ch_id + 名称）。
 
     这是"添加监控话题免输 ch_id"的正解——贴一条带该话题的视频即可。"""
     from playwright.sync_api import sync_playwright

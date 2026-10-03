@@ -220,7 +220,7 @@ class BeanLedger(TimestampMixin, table=True):
 class RadarTopic(TenantScoped, TimestampMixin, table=True):
     """话题雷达：监控的抖音话题（泛 AI 类），按日巡检话题下新视频测热度。
 
-    热度代理=新增视频速度（话题接口零 cookie 但无互动数字）；单次巡检新增
+    热度代理=新增视频速度（话题接口免登录 但无互动数字）；单次巡检新增
     ≥5 条判为飙升，发 macOS 通知。seen_ids 记已见视频防重复计数。"""
     __tablename__ = "radar_topics"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -298,7 +298,7 @@ class WatchCandidate(TenantScoped, TimestampMixin, table=True):
     direction: str = ""
     name: str = ""
     sec_uid: str = Field(default="", index=True)
-    url: str = ""  # 分享主页链接（iesdouyin share/user，扫描链路零 cookie 可用）
+    url: str = ""  # 分享主页链接（iesdouyin share/user，扫描链路免登录 可用）
     signature: str = ""
     follower_count: int = 0
     sample_video_id: str = ""
