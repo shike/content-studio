@@ -981,8 +981,8 @@ function UserDetail({ user, isPlatform, selfId, act, manageableTenants, onOneTim
   }, [user.id])
   const isSelf = user.id === selfId
   const canTouch = !isSelf && !(isPlatform === false && user.role === 'platform_admin')
-  // 归属管理：平台管理员管任意租户；租户管理员管自己管辖租户（后端同闸）。平台管理员账号不可操作
-  const canManageMems = canTouch && user.role !== 'platform_admin'
+  // 归属管理：平台管理员可管理任何人（含自己）的归属；租户管理员限本租户且不能碰平台管理员账号
+  const canManageMems = isPlatform || (canTouch && user.role !== 'platform_admin')
   const mems = user.memberships ?? []
   const addable = manageableTenants.filter((t) => !mems.some((m) => m.tenant_id === t.id))
   const [addTenant, setAddTenant] = useState<number | ''>('')
