@@ -46,7 +46,7 @@ def _bootstrap_admin() -> None:
     初始密码随机生成并打印到日志一次，首登强制改密；
     验收隔离实例可用 CS_BOOTSTRAP_PASSWORD 指定确定性口令。"""
     from .auth import hash_password
-    from .models import Tenant, User
+    from .models import Tenant, TenantMembership, User
 
     # 安装参数（SaaS 产品化）：租户名/管理员可经 env 覆盖，默认给中性示例值
     bt_tenant = os.environ.get("CS_BOOTSTRAP_TENANT") or "示例工作室"
@@ -61,9 +61,12 @@ def _bootstrap_admin() -> None:
         s.commit()
         s.refresh(tenant)
         password = os.environ.get("CS_BOOTSTRAP_PASSWORD") or secrets.token_urlsafe(8)
-        s.add(User(tenant_id=tenant.id, username=bt_admin,
-                   password_hash=hash_password(password), role="platform_admin",
-                   display_name=bt_tenant, status="active", must_change_password=False))
+        u = User(tenant_id=tenant.id, username=bt_admin,
+                 password_hash=hash_password(password), role="platform_admin",
+                 display_name=bt_tenant, status="active", must_change_password=False)
+        s.add(u)
+        s.flush()  # 取用户 id：管理员同步建初始归属（无归属登录会被拒）
+        s.add(TenantMembership(user_id=u.id, tenant_id=tenant.id, role="member"))
         s.commit()
         if os.environ.get("CS_BOOTSTRAP_PASSWORD"):
             print(f"[bootstrap] 管理员已创建：用户名 {bt_admin} / 密码取 CS_BOOTSTRAP_PASSWORD（验收模式）")

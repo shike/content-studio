@@ -1,8 +1,11 @@
 """认证与租户上下文：口令哈希（scrypt）+ 服务端会话 + FastAPI 依赖。
 
 - 密码：hashlib.scrypt（标准库，n=2^14 r=8 p=1），存储格式 scrypt$salt$hash
-- 会话：随机 token 放 HttpOnly Cookie，库存 sha256(token) 与过期时间
+- 会话：随机 token 放 HttpOnly Cookie，库存 sha256(token) 与过期时间；
+  会话行的 tenant_id = 当前活跃租户（一人多租户切换的落点）
 - 依赖：require_user（任何活跃用户）/ require_admin（平台管理员）
+- 租户归属：TenantMembership 多对多；users.tenant_id 仅为默认租户，
+  users.role 仅承载 platform_admin 全局位——租户内角色看 membership
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import secrets
 import threading
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
@@ -20,7 +24,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlmodel import Session, select
 
 from .db import engine
-from .models import Tenant, User, UserSession
+from .models import Tenant, TenantMembership, User, UserSession
 from .settings import settings
 
 SESSION_COOKIE = "cs_session"
@@ -118,49 +122,144 @@ def client_ip(request: Request) -> str:
     return peer or "unknown"
 
 
-def create_session(user: User) -> tuple[str, datetime]:
-    """创建服务端会话，返回 (明文 token, 带 UTC 时区的过期时间)。token 只存哈希。"""
+def create_session(user: User, tenant_id: int = 0) -> tuple[str, datetime]:
+    """创建服务端会话，返回 (明文 token, 带 UTC 时区的过期时间)。token 只存哈希。
+
+    tenant_id=会话的活跃租户；0 取用户默认租户（改密重建等场景应显式传原活跃租户，
+    否则用户会被切回默认租户）。"""
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with Session(engine) as s:
         s.add(UserSession(token_hash=token_hash, user_id=user.id,
-                          tenant_id=user.tenant_id,
+                          tenant_id=tenant_id or user.tenant_id,
                           expires_at=expires.replace(tzinfo=None)))
         s.commit()
     return token, expires
 
 
-def _session_user(token: str) -> Optional[User]:
+@dataclass
+class CurrentUser:
+    """请求级用户上下文：User 实时字段 + 活跃租户 + 租户内有效角色。
+
+    tenant_id 是会话携带的活跃租户（≠默认租户）；role 在 platform_admin 时保持
+    全局位（跨租户豁免），否则等于活跃租户的 membership.role。端点按属性访问
+    user.tenant_id / user.role / user.id 等，与旧 User 形态兼容。"""
+    id: int
+    tenant_id: int
+    role: str
+    username: str = ""
+    display_name: str = ""
+    status: str = "active"
+    must_change_password: bool = False
+    password_hash: str = ""
+    memberships: list = field(default_factory=list)  # [{tenant_id, role}]
+
+
+def _memberships_of(s: Session, user_id: int) -> dict[int, str]:
+    rows = s.exec(select(TenantMembership).where(
+        TenantMembership.user_id == user_id)).all()  # type: ignore[attr-defined]
+    return {m.tenant_id: m.role for m in rows}
+
+
+def _tenant_active(s: Session, tenant_id: int) -> bool:
+    t = s.get(Tenant, tenant_id)
+    return t is not None and t.status == "active"
+
+
+def pick_active_tenant(user: User, mems: dict[int, str], s: Session) -> Optional[int]:
+    """登录落点：默认租户优先（active 且有归属），否则第一个 active 归属；全不可用返回 None。"""
+    if user.tenant_id in mems and _tenant_active(s, user.tenant_id):
+        return user.tenant_id
+    for tid in mems:
+        if _tenant_active(s, tid):
+            return tid
+    return None
+
+
+def _resolve_user(token: str) -> Optional[CurrentUser]:
+    """会话 → 用户上下文。活跃租户失效（归属被移除/租户停用）时自动回落到
+    可用归属并回写会话；无可回落抛 403（正常情况下停用/删除租户已清会话，
+    这里是数据被手工改动时的防御）。"""
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with Session(engine) as s:
         us = s.exec(select(UserSession).where(
             UserSession.token_hash == token_hash)).first()  # type: ignore[attr-defined]
         if us is None or us.expires_at < _now():
             return None
-        return s.get(User, us.user_id)
+        user = s.get(User, us.user_id)
+        if user is None or user.status != "active":
+            return None
+        mems = _memberships_of(s, user.id)
+        active = us.tenant_id
+        if active not in mems or not _tenant_active(s, active):
+            cand = pick_active_tenant(user, mems, s)
+            if cand is None:
+                raise HTTPException(status_code=403,
+                                    detail="归属租户均已停用或移除，请联系管理员")
+            active = cand
+            us.tenant_id = active
+            s.add(us)
+            s.commit()
+        role = "platform_admin" if user.role == "platform_admin" else mems[active]
+        return CurrentUser(id=user.id, tenant_id=active, role=role,
+                           username=user.username, display_name=user.display_name,
+                           status=user.status, must_change_password=user.must_change_password,
+                           password_hash=user.password_hash,
+                           memberships=[{"tenant_id": t, "role": r} for t, r in mems.items()])
 
 
-def get_current_user(request: Request) -> Optional[User]:
+def get_current_user(request: Request) -> Optional[CurrentUser]:
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
-    return _session_user(token)
+    return _resolve_user(token)
 
 
-async def require_user(request: Request) -> User:
-    user = get_current_user(request)
-    if user is None or user.status != "active":
+def session_tenant_of(request: Request) -> Optional[int]:
+    """按 cookie 找会话行当前活跃租户（切换租户时校验/回写用）。"""
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with Session(engine) as s:
+        us = s.exec(select(UserSession).where(
+            UserSession.token_hash == token_hash)).first()  # type: ignore[attr-defined]
+        return us.tenant_id if us else None
+
+
+def switch_session_tenant(request: Request, user: CurrentUser, tenant_id: int) -> None:
+    """切换会话活跃租户（校验归属 + 租户 active，改会话行，cookie 不变）。"""
+    if tenant_id not in {m["tenant_id"] for m in user.memberships}:
+        raise HTTPException(status_code=403, detail="未归属该租户")
+    if not _tenant_active_by_id(tenant_id):
+        raise HTTPException(status_code=403, detail="目标租户已停用")
+    token = request.cookies.get(SESSION_COOKIE) or ""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with Session(engine) as s:
+        us = s.exec(select(UserSession).where(
+            UserSession.token_hash == token_hash)).first()  # type: ignore[attr-defined]
+        if us is None:
+            raise HTTPException(status_code=401, detail="会话失效，请重新登录")
+        us.tenant_id = tenant_id
+        s.add(us)
+        s.commit()
+
+
+def _tenant_active_by_id(tenant_id: int) -> bool:
+    with Session(engine) as s:
+        return _tenant_active(s, tenant_id)
+
+
+async def require_user(request: Request) -> CurrentUser:
+    cu = get_current_user(request)
+    if cu is None:
         raise HTTPException(status_code=401, detail="未登录或会话失效")
-    with Session(engine) as s:  # 纵深防御：停用租户的残留会话一律失效
-        tenant = s.get(Tenant, user.tenant_id)
-    if tenant is None or tenant.status != "active":
-        raise HTTPException(status_code=403, detail="租户已停用，请联系管理员")
-    ACTOR.set((user.tenant_id, user.id, user.role))
-    return user
+    ACTOR.set((cu.tenant_id, cu.id, cu.role))
+    return cu
 
 
-async def require_ready_user(request: Request) -> User:
+async def require_ready_user(request: Request) -> CurrentUser:
     """业务路由依赖：在 require_user 之上强制完成首登改密。
 
     PRD R11.2「一次性密码首登强制改密」的服务端口径——否则直接调 API 可绕过前端拦截，
@@ -171,7 +270,7 @@ async def require_ready_user(request: Request) -> User:
     return user
 
 
-async def require_admin(request: Request) -> User:
+async def require_admin(request: Request) -> CurrentUser:
     user = await require_user(request)
     if user.role != "platform_admin":
         raise HTTPException(status_code=403, detail="需要平台管理员权限")
@@ -183,7 +282,8 @@ async def require_admin_dep(request: Request):
     return await require_admin(request)
 
 
-async def require_tenant_admin(request: Request) -> User:
+async def require_tenant_admin(request: Request) -> CurrentUser:
+    """要求平台管理员，或活跃租户内的租户管理员（membership.role）。"""
     user = await require_user(request)
     if user.role not in ("platform_admin", "tenant_admin"):
         raise HTTPException(status_code=403, detail="需要租户管理员权限")

@@ -521,6 +521,15 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
 
 - **上下文（auth.ACTOR）**：`ContextVar[(tenant_id, user_id, role)]`，`require_user`（async 依赖）在请求上下文设值；
   系统上下文 = `(0, 0, "")`；`role=platform_admin` 时豁免租户过滤。
+- **一人多租户归属（2026-10-03）**：`tenant_memberships(user_id, tenant_id, role)` 多对多，unique(user_id, tenant_id)；
+  `users.tenant_id`=默认租户（登录落点），`users.role` 仅承载 platform_admin 全局位（member/tenant_admin 语义在 membership）。
+  `require_user` 返回 `CurrentUser`（User 兼容形态）：`tenant_id`=会话活跃租户（UserSession.tenant_id 状态位，校验归属+租户
+  active，失效自动回落可用归属并回写会话，无可回落 403）；`role`=有效角色（platform_admin 全局位恒定，否则=活跃归属的
+  membership.role）。登录响应与 `/api/auth/me` 扩展 `tenant_name` + `tenants[]`；`POST /api/auth/switch-tenant` 切活跃租户
+  （校验归属+active，改会话行，cookie 不变）。管理后台：users 列表行内嵌 memberships 与 manageable_tenants；
+  `POST /admin/users/{id}/memberships`（upsert 改角色）/`DELETE .../memberships/{tenant_id}`（至少保留一个归属；默认租户
+  自动迁移）；全局角色端点只收 platform_admin/member；租户删除级联归属（唯一归属用户连删，多归属保留并迁移默认租户）。
+  存量迁移：membership 表空时按 users.tenant_id 全量回填（tenant_admin→tenant_admin，其余→member）。
 - **隔离三件套（`db.install_tenant_scope()`，进程级一次接入）**：
   ①`do_orm_execute` 事件——所有 ORM select 按语句实体自动追加 `tenant_id == 当前租户` 条件
   （用具体实体+具体条件构造，平台管理员/系统上下文跳过）；

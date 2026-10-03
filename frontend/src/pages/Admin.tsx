@@ -38,6 +38,7 @@ interface UserRow {
   display_name: string
   status: string
   must_change_password: boolean
+  memberships: { tenant_id: number; tenant_name: string; role: string }[]
   created_at: string | null
 }
 interface TenantUsage {
@@ -208,6 +209,7 @@ export default function Admin({ role, selfId, onNavigate }: {
   const [tab, setTab] = useState<'overview' | 'tenants' | 'members'>(isPlatform ? 'overview' : 'members')
   const [tenants, setTenants] = useState<TenantRow[]>([])
   const [users, setUsers] = useState<UserRow[]>([])
+  const [manageableTenants, setManageableTenants] = useState<{ id: number; name: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
@@ -225,8 +227,9 @@ export default function Admin({ role, selfId, onNavigate }: {
         const d = await api<{ tenants: TenantRow[] }>('/admin/tenants')
         setTenants(d.tenants)
       }
-      const u = await api<{ users: UserRow[] }>('/admin/users')
+      const u = await api<{ users: UserRow[]; manageable_tenants?: { id: number; name: string }[] }>('/admin/users')
       setUsers(u.users)
+      setManageableTenants(u.manageable_tenants ?? [])
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -360,6 +363,7 @@ export default function Admin({ role, selfId, onNavigate }: {
           users={users}
           isPlatform={isPlatform}
           selfId={selfId}
+          manageableTenants={manageableTenants}
           showNewUser={showNewUser}
           setShowNewUser={setShowNewUser}
           expandUser={expandUser}
@@ -851,11 +855,12 @@ function TenantDetailPage({ tenant, onBack, onNavigate, act, setErr, setMsg, err
 
 /* ---------- 成员 tab：搜索 + 筛选 + 表格 + 行展开 ---------- */
 
-function MembersTab({ users, isPlatform, selfId, showNewUser, setShowNewUser,
+function MembersTab({ users, isPlatform, selfId, manageableTenants, showNewUser, setShowNewUser,
                       expandUser, setExpandUser, act, onOneTime, onDone, setErr }: {
   users: UserRow[]
   isPlatform: boolean
   selfId: number
+  manageableTenants: { id: number; name: string }[]
   showNewUser: boolean
   setShowNewUser: (v: boolean) => void
   expandUser: number | null
@@ -869,8 +874,13 @@ function MembersTab({ users, isPlatform, selfId, showNewUser, setShowNewUser,
   const [roleF, setRoleF] = useState('all')
   const [statusF, setStatusF] = useState('all')
 
+  // 全局角色位只剩 platform_admin/member；「租户管理员」= 任一归属里有 tenant_admin
+  const matchRole = (u: UserRow, r: string) =>
+    r === 'tenant_admin'
+      ? u.role === 'tenant_admin' || (u.memberships ?? []).some((m) => m.role === 'tenant_admin')
+      : u.role === r
   const filtered = users.filter((u) =>
-    (roleF === 'all' || u.role === roleF) &&
+    (roleF === 'all' || matchRole(u, roleF)) &&
     (statusF === 'all' || u.status === statusF) &&
     (!q.trim() || u.username.includes(q.trim()) || (u.display_name || '').includes(q.trim())))
 
@@ -881,7 +891,7 @@ function MembersTab({ users, isPlatform, selfId, showNewUser, setShowNewUser,
       {label} {count}
     </button>
   )
-  const roleCount = (r: string) => users.filter((u) => u.role === r).length
+  const roleCount = (r: string) => users.filter((u) => matchRole(u, r)).length
   const statusCount = (s: string) => users.filter((u) => u.status === s).length
 
   return (
@@ -927,7 +937,12 @@ function MembersTab({ users, isPlatform, selfId, showNewUser, setShowNewUser,
               className={`grid w-full grid-cols-[1fr_1fr_0.9fr_0.9fr_0.7fr_1fr] items-center gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-slate-50 ${u.status === 'disabled' ? 'opacity-50' : ''}`}
               onClick={() => { setExpandUser(expandUser === u.id ? null : u.id) }}
             >
-              <div className="truncate font-medium text-slate-800">{u.username}</div>
+              <div className="truncate font-medium text-slate-800">
+                {u.username}
+                {(u.memberships?.length ?? 0) > 1 && (
+                  <span className="badge ml-1.5 bg-sky-50 text-sky-700">{u.memberships.length} 租户</span>
+                )}
+              </div>
               <div className="truncate text-slate-600">{u.display_name}</div>
               <div><span className="badge bg-slate-100 text-slate-600">{ROLE_LABEL[u.role] ?? u.role}</span></div>
               {isPlatform ? <div className="truncate text-slate-600">{u.tenant_name}</div> : <div />}
@@ -940,6 +955,7 @@ function MembersTab({ users, isPlatform, selfId, showNewUser, setShowNewUser,
             </button>
             {expandUser === u.id && (
               <UserDetail user={u} isPlatform={isPlatform} selfId={selfId} act={act}
+                manageableTenants={manageableTenants}
                 onOneTime={onOneTime} />
             )}
           </div>
@@ -951,11 +967,12 @@ function MembersTab({ users, isPlatform, selfId, showNewUser, setShowNewUser,
 
 /* ---------- 成员展开：角色 / 重置密码 / 启停 + 个人用量 ---------- */
 
-function UserDetail({ user, isPlatform, selfId, act, onOneTime }: {
+function UserDetail({ user, isPlatform, selfId, act, manageableTenants, onOneTime }: {
   user: UserRow
   isPlatform: boolean
   selfId: number
   act: (fn: () => Promise<void>, okMsg: string) => Promise<void>
+  manageableTenants: { id: number; name: string }[]
   onOneTime: (username: string, password: string) => void
 }) {
   const [usage, setUsage] = useState<UserUsage | null>(null)
@@ -964,22 +981,27 @@ function UserDetail({ user, isPlatform, selfId, act, onOneTime }: {
   }, [user.id])
   const isSelf = user.id === selfId
   const canTouch = !isSelf && !(isPlatform === false && user.role === 'platform_admin')
+  // 归属管理：平台管理员管任意租户；租户管理员管自己管辖租户（后端同闸）。平台管理员账号不可操作
+  const canManageMems = canTouch && user.role !== 'platform_admin'
+  const mems = user.memberships ?? []
+  const addable = manageableTenants.filter((t) => !mems.some((m) => m.tenant_id === t.id))
+  const [addTenant, setAddTenant] = useState<number | ''>('')
+  const [addRole, setAddRole] = useState('member')
   return (
     <div className="space-y-3 border-t border-slate-100 bg-slate-50/40 px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <div className="text-xs text-slate-500">
-          ID {user.id} · 租户「{user.tenant_name}」
+          ID {user.id} · 默认租户「{user.tenant_name}」
           {user.must_change_password && <span className="ml-2 badge bg-amber-50 text-amber-700">待改密</span>}
         </div>
         {isPlatform && (
           <label className="flex items-center gap-2 text-xs text-slate-500">
-            角色
+            全局角色
             <select className="select" value={user.role} disabled={isSelf}
               onChange={(e) => act(async () => {
                 await api(`/admin/users/${user.id}/role`, { method: 'POST', body: JSON.stringify({ role: e.target.value }) })
-              }, `已将 ${user.username} 角色改为${ROLE_LABEL[e.target.value]}`)}>
-              <option value="member">成员</option>
-              <option value="tenant_admin">租户管理员</option>
+              }, `已将 ${user.username} 全局角色改为${ROLE_LABEL[e.target.value]}`)}>
+              <option value="member">成员（全局）</option>
               <option value="platform_admin">平台管理员</option>
             </select>
           </label>
@@ -1009,6 +1031,66 @@ function UserDetail({ user, isPlatform, selfId, act, onOneTime }: {
           )
         )}
         {isSelf && <span className="text-[11px] text-slate-400">自己的账号：改角色/停用需其他管理员操作</span>}
+      </div>
+      {/* 租户归属（一人多租户）：列表 + 添加归属（upsert 语义，已归属即改角色） */}
+      <div className="rounded-lg bg-white px-3 py-2.5 text-xs">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="font-medium text-slate-500">租户归属</span>
+          <span className="text-[11px] text-slate-400">默认租户=登录初始落点，切换租户不改变归属</span>
+        </div>
+        <div className="space-y-1">
+          {mems.map((m) => (
+            <div key={m.tenant_id} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-slate-700">
+                {m.tenant_name || `租户 ${m.tenant_id}`}
+                {m.tenant_id === user.tenant_id && <span className="badge ml-1.5 bg-slate-100 text-slate-500">默认</span>}
+              </span>
+              <select className="select w-32 py-0.5 text-xs" disabled={!canManageMems} value={m.role}
+                onChange={(e) => act(async () => {
+                  await api(`/admin/users/${user.id}/memberships`, {
+                    method: 'POST',
+                    body: JSON.stringify({ tenant_id: m.tenant_id, role: e.target.value }),
+                  })
+                }, `已将 ${user.username} 在「${m.tenant_name}」的角色改为${ROLE_LABEL[e.target.value] ?? e.target.value}`)}>
+                <option value="member">成员</option>
+                <option value="tenant_admin">租户管理员</option>
+              </select>
+              <button className="btn-ghost btn-xs text-red-600 disabled:opacity-40"
+                disabled={!canManageMems || mems.length <= 1}
+                title={mems.length <= 1 ? '至少保留一个租户归属' : '移除该归属'}
+                onClick={() => act(async () => {
+                  await api(`/admin/users/${user.id}/memberships/${m.tenant_id}`, { method: 'DELETE' })
+                }, `已移除 ${user.username} 在「${m.tenant_name}」的归属`)}>
+                移除
+              </button>
+            </div>
+          ))}
+          {mems.length === 0 && <div className="text-slate-400">（无归属记录）</div>}
+        </div>
+        {canManageMems && addable.length > 0 && (
+          <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
+            <select className="select w-44 py-1 text-xs" value={addTenant}
+              onChange={(e) => setAddTenant(e.target.value === '' ? '' : Number(e.target.value))}>
+              <option value="">添加归属：选择租户…</option>
+              {addable.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <select className="select w-32 py-1 text-xs" value={addRole}
+              onChange={(e) => setAddRole(e.target.value)}>
+              <option value="member">成员</option>
+              <option value="tenant_admin">租户管理员</option>
+            </select>
+            <button className="btn-ghost btn-xs" disabled={addTenant === ''}
+              onClick={() => act(async () => {
+                await api(`/admin/users/${user.id}/memberships`, {
+                  method: 'POST',
+                  body: JSON.stringify({ tenant_id: addTenant, role: addRole }),
+                })
+                setAddTenant('')
+              }, `已为 ${user.username} 添加租户归属`)}>
+              添加归属
+            </button>
+          </div>
+        )}
       </div>
       {/* 个人用量（30 天） */}
       {usage && (

@@ -263,6 +263,16 @@ def _migrate(engine) -> None:
             if tcols:
                 conn.execute(sqlalchemy.text(
                     f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant ON {table}(tenant_id)"))
+        # 一人多租户：存量用户按默认租户回填成员关系（表空才跑，幂等）
+        mcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(tenant_memberships)"))]
+        if mcols:
+            n = conn.execute(sqlalchemy.text("SELECT COUNT(*) FROM tenant_memberships")).scalar() or 0
+            if n == 0:
+                conn.execute(sqlalchemy.text(
+                    "INSERT INTO tenant_memberships (user_id, tenant_id, role, created_at, updated_at)"
+                    " SELECT id, tenant_id,"
+                    " CASE WHEN role='tenant_admin' THEN 'tenant_admin' ELSE 'member' END,"
+                    " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM users"))
 
 
 def get_session():

@@ -1,9 +1,13 @@
-"""管理后台 API：租户管理 + 成员管理（产品化 P1）。
+"""管理后台 API：租户管理 + 成员管理（产品化 P1；一人多租户归属）。
 
 权限分层：
-- platform_admin：全部租户与全部用户（建租户/充值/启停/建账号/改角色）
-- tenant_admin：仅本租户成员（建账号/重置密码/启停；不可触碰 platform_admin）
+- platform_admin：全部租户与全部用户（建租户/充值/启停/建账号/全局角色/归属管理）
+- tenant_admin：其管辖租户（membership.role=tenant_admin 的租户）内可建账号/重置密码/
+  启停/管理成员归属（含授本租户管理员）；不可触碰 platform_admin
 - member：无入口（路由层 403）
+
+租户归属：TenantMembership 多对多（users.tenant_id 仅为默认租户，users.role 仅承载
+platform_admin 全局位，租户内角色在 membership）。
 
 一次性密码规则：新建账号与重置密码均生成随机口令、仅本次响应返回一次，
 明文不落库；首登强制改密（must_change_password）。停用/重置密码即清除该用户全部会话。
@@ -25,7 +29,8 @@ from ..credits import topup
 from ..db import engine
 from ..models import (BeanLedger, Article, AvatarConfig, AvatarVideo, BenchmarkVideo,
                       CreditTransaction, Dismissal, Job, LLMCall, RadarTopic, Topic,
-                      ResearchReport, Script, SelfVideo, StyleProfile, Tenant, User,
+                      ResearchReport, Script, SelfVideo, StyleProfile, Tenant,
+                      TenantMembership, User,
                       UserSession, WatchAccount, WatchCandidate)
 from ..settings import settings
 
@@ -53,11 +58,42 @@ def _gen_password() -> str:
     return secrets.token_urlsafe(8)
 
 
-def _user_view(u: User, tenant_name: str = "") -> dict:
+def _mems_of(s: Session, user_id: int) -> dict[int, str]:
+    """用户的租户归属映射 {tenant_id: role}。"""
+    rows = s.exec(select(TenantMembership).where(
+        TenantMembership.user_id == user_id)).all()  # type: ignore[attr-defined]
+    return {m.tenant_id: m.role for m in rows}
+
+
+def _can_manage_tenant(s: Session, me: User, tenant_id: int) -> bool:
+    """platform_admin 全局；tenant_admin 限自己有 tenant_admin 角色的租户。"""
+    if me.role == "platform_admin":
+        return True
+    return _mems_of(s, me.id).get(tenant_id) == "tenant_admin"
+
+
+def _touch_guard(s: Session, me: User, u: User) -> None:
+    """tenant_admin 操作目标用户的范围守卫：目标须在其管辖租户有归属，且不是平台管理员。"""
+    if me.role == "platform_admin":
+        return
+    if u.role == "platform_admin":
+        raise HTTPException(status_code=403, detail="不能操作平台管理员账号")
+    if not (set(_mems_of(s, u.id)) & _admin_tenant_ids(s, me)):
+        raise HTTPException(status_code=403, detail="只能管理本租户成员")
+
+
+def _admin_tenant_ids(s: Session, me: User) -> set[int]:
+    if me.role == "platform_admin":
+        return set()  # 空 = 不限制
+    return {tid for tid, r in _mems_of(s, me.id).items() if r == "tenant_admin"}
+
+
+def _user_view(u: User, tenant_name: str = "", memberships: list | None = None) -> dict:
     return {"id": u.id, "tenant_id": u.tenant_id, "tenant_name": tenant_name,
             "username": u.username, "role": u.role,
             "display_name": u.display_name or u.username,
             "status": u.status, "must_change_password": u.must_change_password,
+            "memberships": memberships or [],
             "created_at": u.created_at.isoformat() if u.created_at else None}
 
 
@@ -139,6 +175,9 @@ async def create_tenant(body: TenantIn, request: Request):
                        password_hash=hash_password(admin_pwd), role="tenant_admin",
                        display_name=body.admin_display_name.strip() or uname,
                        status="active", must_change_password=True))
+            s.flush()  # 取新用户 id 建归属
+            nu = s.exec(select(User).where(User.username == uname)).first()
+            s.add(TenantMembership(user_id=nu.id, tenant_id=t.id, role="tenant_admin"))
         s.commit()
         new_tenant_id = t.id
         one_time_password = admin_pwd
@@ -221,18 +260,21 @@ async def tenant_status(tenant_id: int, body: TenantStatusIn, request: Request):
         t.status = body.status
         s.add(t)
         s.commit()
-        if body.status == "disabled":  # 停用租户即清全部成员会话
-            for u in s.exec(select(User).where(User.tenant_id == tenant_id)):
-                _kill_sessions(u.id)
+        if body.status == "disabled":  # 停用租户即清该租户全部归属成员的会话
+            uids = [m.user_id for m in s.exec(select(TenantMembership).where(
+                TenantMembership.tenant_id == tenant_id)).all()]  # type: ignore[attr-defined]
+            for uid in set(uids):
+                for us in s.exec(select(UserSession).where(UserSession.user_id == uid)):
+                    s.delete(us)
     return {"ok": True, "status": body.status}
 
 
 @router.get("/tenants/{tenant_id}/transactions")
 async def tenant_transactions(tenant_id: int, request: Request):
     me = await _require_tenant_admin(request)
-    if me.role != "platform_admin" and me.tenant_id != tenant_id:
-        raise HTTPException(status_code=403, detail="只能查看本租户积分流水")
     with Session(engine) as s:
+        if not _can_manage_tenant(s, me, tenant_id):
+            raise HTTPException(status_code=403, detail="只能查看本租户积分流水")
         rows = s.exec(select(CreditTransaction).where(
             CreditTransaction.tenant_id == tenant_id).order_by(
             CreditTransaction.id.desc()).limit(50)).all()
@@ -249,12 +291,23 @@ async def tenant_transactions(tenant_id: int, request: Request):
 async def list_users(request: Request):
     me = await _require_tenant_admin(request)
     with Session(engine) as s:
-        q = select(User)
-        if me.role != "platform_admin":
-            q = q.where(User.tenant_id == me.tenant_id)  # type: ignore[attr-defined]
-        users = s.exec(q.order_by(User.id)).all()
+        all_users = s.exec(select(User).order_by(User.id)).all()
         tenants = {t.id: t.name for t in s.exec(select(Tenant)).all()}
-    return {"users": [_user_view(u, tenants.get(u.tenant_id, "")) for u in users]}
+        scope = None if me.role == "platform_admin" else _admin_tenant_ids(s, me)
+        manageable = [{"id": t.id, "name": t.name} for t in s.exec(select(Tenant)).all()
+                      if t.status == "active" and _can_manage_tenant(s, me, t.id)]
+        mems_by_user: dict[int, dict[int, str]] = {}
+        for m in s.exec(select(TenantMembership)).all():
+            mems_by_user.setdefault(m.user_id, {})[m.tenant_id] = m.role
+        out = []
+        for u in all_users:
+            mems = mems_by_user.get(u.id, {})
+            if scope is not None and not (set(mems) & scope):
+                continue  # tenant_admin 只看在自己管辖租户有归属的用户
+            out.append(_user_view(u, tenants.get(u.tenant_id, ""), memberships=[
+                {"tenant_id": tid, "tenant_name": tenants.get(tid, ""), "role": r}
+                for tid, r in sorted(mems.items())]))
+    return {"users": out, "manageable_tenants": manageable}
 
 
 class UserIn(BaseModel):
@@ -291,9 +344,17 @@ async def create_user(body: UserIn, request: Request):
                  display_name=body.display_name.strip() or uname,
                  status="active", must_change_password=True)
         s.add(u)
+        s.flush()  # 取 id 同步建初始归属（users.tenant_id = 默认租户）
+        s.add(TenantMembership(user_id=u.id, tenant_id=tenant_id,
+                               role="tenant_admin" if body.role == "tenant_admin" else "member"))
         s.commit()
         s.refresh(u)
-    return {"ok": True, "user": _user_view(u), "one_time_password": pwd}
+        tenants = {t.id: t.name for t in s.exec(select(Tenant)).all()}
+    return {"ok": True,
+            "user": _user_view(u, tenants.get(u.tenant_id, ""), memberships=[
+                {"tenant_id": tenant_id, "tenant_name": tenants.get(tenant_id, ""),
+                 "role": "tenant_admin" if body.role == "tenant_admin" else "member"}]),
+            "one_time_password": pwd}
 
 
 class RoleIn(BaseModel):
@@ -302,9 +363,14 @@ class RoleIn(BaseModel):
 
 @router.post("/users/{user_id}/role")
 async def change_role(user_id: int, body: RoleIn, request: Request):
+    """全局角色位管理（platform_admin 专属）：只升降 platform_admin 全局位。
+
+    租户内角色（tenant_admin/member）走归属管理端点 memberships——users.role
+    里的 tenant_admin 已废弃为 membership 语义。"""
     me = await _require_platform(request)
-    if body.role not in _ROLES:
-        raise HTTPException(status_code=400, detail="角色不合法")
+    if body.role not in ("platform_admin", "member"):
+        raise HTTPException(status_code=400,
+                            detail="全局角色仅支持 platform_admin/member；租户内管理员请在归属管理中设置")
     with Session(engine) as s:
         u = s.get(User, user_id)
         if u is None:
@@ -330,11 +396,7 @@ async def change_user_status(user_id: int, body: StatusIn, request: Request):
         u = s.get(User, user_id)
         if u is None:
             raise HTTPException(status_code=404, detail="用户不存在")
-        if me.role != "platform_admin":
-            if u.tenant_id != me.tenant_id:
-                raise HTTPException(status_code=403, detail="只能管理本租户成员")
-            if u.role == "platform_admin":
-                raise HTTPException(status_code=403, detail="不能操作平台管理员账号")
+        _touch_guard(s, me, u)
         if u.id == me.id:
             raise HTTPException(status_code=400, detail="不能停用自己的账号")
         u.status = body.status
@@ -352,11 +414,7 @@ async def reset_password(user_id: int, request: Request):
         u = s.get(User, user_id)
         if u is None:
             raise HTTPException(status_code=404, detail="用户不存在")
-        if me.role != "platform_admin":
-            if u.tenant_id != me.tenant_id:
-                raise HTTPException(status_code=403, detail="只能管理本租户成员")
-            if u.role == "platform_admin":
-                raise HTTPException(status_code=403, detail="不能操作平台管理员账号")
+        _touch_guard(s, me, u)
         pwd = _gen_password()
         u.password_hash = hash_password(pwd)
         u.must_change_password = True
@@ -364,6 +422,78 @@ async def reset_password(user_id: int, request: Request):
         s.commit()
     _kill_sessions(user_id)  # 重置密码即踢下线
     return {"ok": True, "one_time_password": pwd}
+
+
+# ---------- 成员归属管理（一人多租户） ----------
+
+class MembershipIn(BaseModel):
+    tenant_id: int
+    role: str = "member"  # tenant_admin | member
+
+
+@router.post("/users/{user_id}/memberships")
+async def upsert_membership(user_id: int, body: MembershipIn, request: Request):
+    """添加/更新租户归属（upsert：已归属则改租户内角色）。
+
+    platform_admin 可操作任意租户；tenant_admin 限自己有 tenant_admin 角色的租户
+    （可授本租户管理员）。tenant_admin 不能操作 platform_admin 用户的归属。"""
+    me = await _require_tenant_admin(request)
+    if body.role not in ("tenant_admin", "member"):
+        raise HTTPException(status_code=400, detail="租户内角色仅支持 tenant_admin/member")
+    with Session(engine) as s:
+        u = s.get(User, user_id)
+        if u is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if s.get(Tenant, body.tenant_id) is None:
+            raise HTTPException(status_code=404, detail="目标租户不存在")
+        if not _can_manage_tenant(s, me, body.tenant_id):
+            raise HTTPException(status_code=403, detail="只能管理自己管辖租户的成员归属")
+        if me.role != "platform_admin" and u.role == "platform_admin":
+            raise HTTPException(status_code=403, detail="不能操作平台管理员账号")
+        m = s.exec(select(TenantMembership).where(
+            TenantMembership.user_id == user_id,  # type: ignore[attr-defined]
+            TenantMembership.tenant_id == body.tenant_id)).first()  # type: ignore[attr-defined]
+        if m is not None:
+            m.role = body.role
+            s.add(m)
+        else:
+            s.add(TenantMembership(user_id=user_id, tenant_id=body.tenant_id, role=body.role))
+        s.commit()
+    return {"ok": True, "user_id": user_id, "tenant_id": body.tenant_id, "role": body.role}
+
+
+@router.delete("/users/{user_id}/memberships/{tenant_id}")
+async def remove_membership(user_id: int, tenant_id: int, request: Request):
+    """移除租户归属。至少保留一个归属；若移除的是默认租户，默认租户自动迁移到剩余最早归属。"""
+    me = await _require_tenant_admin(request)
+    with Session(engine) as s:
+        u = s.get(User, user_id)
+        if u is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if not _can_manage_tenant(s, me, tenant_id):
+            raise HTTPException(status_code=403, detail="只能管理自己管辖租户的成员归属")
+        if me.role != "platform_admin" and u.role == "platform_admin":
+            raise HTTPException(status_code=403, detail="不能操作平台管理员账号")
+        m = s.exec(select(TenantMembership).where(
+            TenantMembership.user_id == user_id,  # type: ignore[attr-defined]
+            TenantMembership.tenant_id == tenant_id)).first()  # type: ignore[attr-defined]
+        if m is None:
+            raise HTTPException(status_code=404, detail="该用户未归属此租户")
+        rest = [tid for tid in _mems_of(s, user_id) if tid != tenant_id]
+        if not rest:
+            raise HTTPException(status_code=400, detail="用户至少需要保留一个租户归属")
+        s.delete(m)
+        new_default = u.tenant_id
+        if u.tenant_id == tenant_id:
+            earliest = s.exec(select(TenantMembership).where(
+                TenantMembership.user_id == user_id,  # type: ignore[attr-defined]
+                TenantMembership.tenant_id.in_(rest))).order_by(  # type: ignore[attr-defined]
+                TenantMembership.id).first()  # type: ignore[attr-defined]
+            new_default = earliest.tenant_id if earliest else rest[0]
+            u.tenant_id = new_default
+            s.add(u)
+        s.commit()
+    return {"ok": True, "default_tenant_id": new_default}
 
 
 # ---------- 用量统计（用户使用情况看板） ----------
@@ -381,12 +511,12 @@ def _iso(dt) -> str | None:
 async def tenant_usage(tenant_id: int, request: Request, days: int = 30):
     """租户用量看板：LLM 真实台账 / 任务统计 / 蝉豆 / 积分 / 成员排行。"""
     me = await _require_tenant_admin(request)
-    if me.role != "platform_admin" and me.tenant_id != tenant_id:
-        raise HTTPException(status_code=403, detail="只能查看本租户用量")
     cutoff = _usage_cutoff(days)
     from ..credits import job_points
 
     with Session(engine) as s:
+        if not _can_manage_tenant(s, me, tenant_id):
+            raise HTTPException(status_code=403, detail="只能查看本租户用量")
         if s.get(Tenant, tenant_id) is None:
             raise HTTPException(status_code=404, detail="租户不存在")
         # LLM 真实消耗台账（按用途分账）
@@ -489,7 +619,7 @@ async def user_usage(user_id: int, request: Request, days: int = 30):
         u = s.get(User, user_id)
         if u is None:
             raise HTTPException(status_code=404, detail="用户不存在")
-        if me.role != "platform_admin" and me.tenant_id != u.tenant_id:
+        if me.role != "platform_admin" and not (set(_mems_of(s, u.id)) & _admin_tenant_ids(s, me)):
             raise HTTPException(status_code=403, detail="只能查看本租户成员用量")
         rows = s.exec(select(Job).where(
             Job.user_id == user_id,
@@ -669,10 +799,28 @@ async def tenant_delete(tenant_id: int, request: Request, confirm_name: str = ""
         removed["jobs"] = len(jobs)
         for j in jobs:
             s.delete(j)
-        for u in s.exec(select(User).where(User.tenant_id == tenant_id)).all():  # type: ignore[attr-defined]
-            for us in s.exec(select(UserSession).where(UserSession.user_id == u.id)):  # type: ignore[attr-defined]
-                s.delete(us)
-            s.delete(u)
+        # 归属该租户的成员：删归属；唯一归属的用户连账号一起删（原行为），多归属用户
+        # 保留账号（默认租户迁移到剩余最早归属），其指向本租户的会话一并清除
+        mems = s.exec(select(TenantMembership).where(
+            TenantMembership.tenant_id == tenant_id)).all()  # type: ignore[attr-defined]
+        removed["memberships"] = len(mems)
+        for m in mems:
+            u = s.get(User, m.user_id)
+            s.delete(m)
+            if u is None:
+                continue
+            rest = [tid for tid in _mems_of(s, u.id) if tid != tenant_id]
+            if not rest:
+                for us in s.exec(select(UserSession).where(UserSession.user_id == u.id)):  # type: ignore[attr-defined]
+                    s.delete(us)
+                s.delete(u)
+            elif u.tenant_id == tenant_id:
+                u.tenant_id = rest[0]
+                s.add(u)
+                for us in s.exec(select(UserSession).where(  # type: ignore[attr-defined]
+                        UserSession.user_id == u.id,  # type: ignore[attr-defined]
+                        UserSession.tenant_id == tenant_id)):  # type: ignore[attr-defined]
+                    s.delete(us)
         t = s.get(Tenant, tenant_id)
         if t is not None:
             s.delete(t)

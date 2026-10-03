@@ -137,6 +137,54 @@ def main() -> int:
     tenant_ids = {it.get("tenant_id") for it in d.get("items", [])}
     check("租户 2 任务列表只含本租户", tenant_ids <= {tenant_b}, str(tenant_ids))
 
+    section("P7 · 一人多租户归属与切换（专用用户，不扰动主 member）")
+    code, d, _ = call("POST", "/api/admin/users",
+                      {"username": f"p7_multi_{stamp}", "role": "member"}, cookie=admin, expect=200)
+    multi = ready_session(f"p7_multi_{stamp}", d["one_time_password"])
+    multi_id = d.get("user", {}).get("id") or d.get("user_id") or 0
+    code, d, _ = call("GET", "/api/admin/users", cookie=admin, expect=200)
+    mrow = next((u for u in d.get("users", []) if u["username"] == f"p7_multi_{stamp}"), None)
+    check("成员列表内嵌归属与可管理租户", mrow is not None
+          and any(m["tenant_id"] == 1 for m in mrow.get("memberships", []))
+          and isinstance(d.get("manageable_tenants"), list))
+    multi_id = mrow["id"] if mrow else multi_id
+    code, _, _ = call("POST", f"/api/admin/users/{multi_id}/memberships",
+                      {"tenant_id": tenant_b, "role": "member"}, cookie=admin, expect=200)
+    check("平台管理员给成员加租户B归属 200", code == 200)
+    code, d, _ = call("GET", "/api/auth/me", cookie=multi, expect=200)
+    check("me 的 tenants 含两个归属", {t["tenant_id"] for t in d.get("tenants", [])} == {1, tenant_b},
+          str(d.get("tenants")))
+    code, d, _ = call("POST", "/api/auth/switch-tenant",
+                      {"tenant_id": tenant_b}, cookie=multi, expect=200)
+    check("成员切换到租户B（活跃租户生效）", d.get("tenant_id") == tenant_b)
+    code, d, _ = call("POST", "/api/topics/quick",
+                      {"title": f"P7 切换归属验证选题{stamp}"}, cookie=multi, expect=201)
+    check("活跃租户B下建选题归属租户B", d.get("tenant_id") == tenant_b)
+    code, d, _ = call("POST", "/api/admin/tenants",
+                      {"name": f"P7第三租户{stamp}", "credits": 0}, cookie=admin, expect=200)
+    tenant_c = d.get("tenant_id")
+    code, d, _ = call("POST", "/api/auth/switch-tenant", {"tenant_id": tenant_c}, cookie=multi)
+    check("切到未归属租户 403", code == 403)
+    code, d, _ = call("GET", "/api/tenant/brand", cookie=multi, expect=200)
+    keep_brand = d.get("brand") or {}
+    code, d, _ = call("PUT", "/api/tenant/brand", {"audience_note": f"P7多租户{stamp}"}, cookie=multi)
+    check("成员在非 admin 活跃租户改品牌 403", code == 403)
+    code, _, _ = call("POST", f"/api/admin/users/{multi_id}/memberships",
+                      {"tenant_id": tenant_b, "role": "tenant_admin"}, cookie=admin, expect=200)
+    check("upsert 授租户B管理员 200", code == 200)
+    code, d, _ = call("PUT", "/api/tenant/brand",
+                      {"audience_note": f"P7多租户{stamp}"}, cookie=multi, expect=200)
+    check("授租户B管理员后改品牌 200", code == 200)
+    call("PUT", "/api/tenant/brand", {"audience_note": keep_brand.get("audience_note", "")},
+         cookie=multi)  # 测后还原租户B受众口径
+    code, d, _ = call("DELETE", f"/api/admin/users/{multi_id}/memberships/{tenant_b}",
+                      cookie=admin, expect=200)
+    check("移除活跃租户归属 → 默认租户保持/迁移", d.get("ok") is True, str(d))
+    code, d, _ = call("GET", "/api/auth/me", cookie=multi, expect=200)
+    check("me 回落到默认租户1", d.get("tenant_id") == 1)
+    code, d, _ = call("DELETE", f"/api/admin/users/{multi_id}/memberships/1", cookie=admin)
+    check("最后一个归属不可删 400", code == 400)
+
     section("P7 · 积分真扣减（提交计量任务即扣）")
     code, d, _ = call("POST", "/api/topics/ideas",
                       {"text": "P7 深研：企业 AI 落地的交付边界（租户2）"},

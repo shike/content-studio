@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -165,13 +165,29 @@ class User(TimestampMixin, table=True):
 
 
 class UserSession(TimestampMixin, table=True):
-    """服务端会话（HttpOnly Cookie 携带 token，库存哈希）。"""
+    """服务端会话（HttpOnly Cookie 携带 token，库存哈希）。
+
+    tenant_id = 会话的**当前活跃租户**（一人多租户切换的落点，服务端存储制：
+    切换租户=改本行，cookie 不变；登录时填默认租户 users.tenant_id）。"""
     __tablename__ = "user_sessions"
     id: Optional[int] = Field(default=None, primary_key=True)
     token_hash: str = Field(unique=True)
     user_id: int = Field(index=True)
     tenant_id: int = Field(index=True)
     expires_at: datetime = Field(index=True)
+
+
+class TenantMembership(TimestampMixin, table=True):
+    """成员关系：一个用户可归属多个租户（一人多租户），每租户一个角色。
+
+    users.tenant_id 保留为「默认租户」（登录初始落点）；users.role 只承载
+    platform_admin 全局位，本表的 role 才是租户内的实际角色。"""
+    __tablename__ = "tenant_memberships"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    tenant_id: int = Field(index=True)
+    role: str = Field(default="member")  # tenant_admin | member（platform_admin 不入此列）
+    __table_args__ = (UniqueConstraint("user_id", "tenant_id", name="uq_membership_user_tenant"),)
 
 
 class CreditTransaction(TimestampMixin, table=True):

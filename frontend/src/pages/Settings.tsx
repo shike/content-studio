@@ -54,10 +54,11 @@ const SEARCH_PROVIDERS: { key: string; label: string; desc: string }[] = [
 export default function Settings({ role = 'member' }: { role?: string }) {
   const isPlatform = role === 'platform_admin'
   const [ownBrand, setOwnBrand] = useState<Partial<BrandShape> | null>(null)
+  const [ownBrandTenant, setOwnBrandTenant] = useState('')
   useEffect(() => {
     if (role === 'member') return
-    api<{ brand: Partial<BrandShape> }>('/tenant/brand')
-      .then((d) => setOwnBrand(d.brand ?? {}))
+    api<{ brand?: Partial<BrandShape>; tenant_name?: string }>('/tenant/brand')
+      .then((d) => { setOwnBrand(d.brand ?? {}); setOwnBrandTenant(d.tenant_name ?? '') })
       .catch(() => setOwnBrand({}))
   }, [role])
   const saveOwnBrand = async (payload: BrandShape) => {
@@ -186,6 +187,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
         <div className="card mb-4 space-y-3 p-5">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-sm font-semibold text-slate-800">品牌与内容人设</div>
+            {ownBrandTenant && <span className="badge bg-slate-100 text-slate-600">当前租户：{ownBrandTenant}</span>}
             <span className="text-[11px] text-slate-400">角标栏目、头图署名/口号、内容人设、受众域、主色与 ASR 词表——保存后新出片/新文章按此渲染</span>
           </div>
           {/* 必须等配置取回再渲染表单：BrandForm 的 useState 只在首挂载取初值，
