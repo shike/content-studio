@@ -126,8 +126,23 @@ async def dispatch_due() -> list[str]:
             msg = await _execute(key)
             _set_result(key, f"ok：{msg}")
         except Exception as e:  # noqa: BLE001 单项失败不影响其他调度项
-            _set_result(key, f"失败：{type(e).__name__}: {str(e)[:140]}")
-            print(f"[scheduler] {key} 执行失败: {type(e).__name__}: {str(e)[:140]}")
+            # 失败不再静默等明天：首次失败 2 小时后补跑一次（给 job 层的 1h 退避重试让路），
+            # 连续失败才回落常规节奏——此前定时任务失败零重试，当天彻底丢失
+            retry_at: Optional[datetime] = None
+            with Session(engine) as s2:
+                st = s2.exec(select(ScheduleState).where(ScheduleState.key == key)).first()
+                if st is not None:
+                    prev_failed = (st.last_status or "").startswith("失败")
+                    if not prev_failed:
+                        retry_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
+                        st.next_run_at = retry_at
+                    else:
+                        st.next_run_at = _next_run(st, datetime.now(timezone.utc).replace(tzinfo=None))
+                    s2.add(st)
+                    s2.commit()
+            when = "2 小时后补跑一次" if retry_at else "按常规节奏重试"
+            _set_result(key, f"失败：{type(e).__name__}: {str(e)[:140]}（{when}）")
+            print(f"[scheduler] {key} 执行失败: {type(e).__name__}: {str(e)[:140]}（{when}）")
     return ran
 
 
@@ -180,8 +195,10 @@ async def _run_watch_discover() -> str:
     return f"job #{job.id}（今日关键词：{keyword}）"
 
 
+# 钟点 2 点与扫描错峰（不可 hour_from_settings：全局 watch_scan_hour 恒有值会把它永久
+# 覆盖成 1 点——2026-10-06 四项任务挤在 1 点、发现任务"每日 2 点"设计失效的根因）
 register_schedule(Schedule(key="watch_discover_daily", label="同行发现（每日清单外高赞同行）",
-                           daily_hour=2, hour_from_settings=True,
+                           daily_hour=2,
                            enabled_by="watch_scan_enabled", run=_run_watch_discover))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,

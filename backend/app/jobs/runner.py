@@ -170,7 +170,6 @@ class JobRunner:
         self._queues: dict[int, asyncio.Queue[int]] = {}  # 租户(0=系统)→FIFO，heavy 按租户轮转
         self._rr_pos = 0
         self._started = False
-        self._backup_day = ""
         self._inflight: dict[str, int] = {}
 
     def start(self) -> None:

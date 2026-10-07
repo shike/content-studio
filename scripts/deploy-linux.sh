@@ -60,6 +60,7 @@ Type=simple
 User=${RUN_USER}
 WorkingDirectory=${ROOT}
 EnvironmentFile=-${ROOT}/.env
+Environment=TZ=Asia/Shanghai
 ExecStart=${ROOT}/backend/.venv/bin/python -m uvicorn app.main:app \\
   --app-dir ${ROOT}/backend --host ${HOST_ARG} --port ${PORT_ARG} \\
   --proxy-headers --forwarded-allow-ips=127.0.0.1

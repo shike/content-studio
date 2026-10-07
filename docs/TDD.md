@@ -525,6 +525,18 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
 
 ## 15. 认证与多租户隔离（实现契约）
 
+- **定时调度审计修复（2026-10-07 第二轮）**：
+  ①**钟点覆盖 bug**——watch_discover_daily 注册 2 点但 hour_from_settings=True 使全局
+  watch_scan_hour(默认 1) 永久覆盖它，四项日任务全挤 1 点、"每日 2 点发现"设计失效
+  （10-06 01:00 双失败的根因）；修复=去掉该项的 settings 覆盖，2 点与扫描错峰；
+  ②**调度失败不再静默**——执行失败首次 2 小时后补跑一次（给 job 层 1h 退避让路），
+  连续失败才回落常规节奏（此前零重试零告警当天丢失）；
+  ③**时区显式化**——systemd unit 加 `Environment=TZ=Asia/Shanghai`（daily_hour 语义=
+  服务器本地钟点，此前依赖隐式行为）；④runner `_backup_day` 死遗迹清理。
+  已收编统一调度的 7 项：watch_scan(1 点随设置)/watch_discover_daily(2 点)/self_scan(1 点)/
+  topic_radar(1 点)/daily_backup(4 点)/media_cleanup(6h)/crawl_probe(15min)；reaper 内嵌的
+  owed 补队/归档/磁盘告警属基础设施双轨（非业务定时），保留。边界：进程崩在"记账后执行前"
+  该次丢失（罕见，dedup+次日兜底）。
 - **调度审计加固（2026-10-07，内存事故复盘）**：
   ①**心跳真实化**——`set_progress`/拾起时显式刷 `updated_at`（此前该列从不更新，reaper 的
   stuck 判定实为"出生满 2h"而非"无进展 2h"：活跃长任务被误杀、真挂死要等满 2h）；
