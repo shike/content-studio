@@ -17,6 +17,7 @@ interface AppSettings {
   asr_model: string
   watch_scan_enabled: boolean
   watch_scan_hour: number
+  watch_discover_keywords: string
   chanjing_configured: boolean
 }
 
@@ -87,6 +88,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
   const [search, setSearch] = useState('')
   const [scanEnabled, setScanEnabled] = useState(true)
   const [scanHour, setScanHour] = useState(1)
+  const [discoverKw, setDiscoverKw] = useState('')
   const [pingReply, setPingReply] = useState('')
   const [probe, setProbe] = useState<{
     query: string
@@ -125,6 +127,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     setSearch(c.search_provider)
     setScanEnabled(c.watch_scan_enabled)
     setScanHour(c.watch_scan_hour)
+    setDiscoverKw(c.watch_discover_keywords ?? '')
   }, [isPlatform])
 
   useEffect(() => {
@@ -166,7 +169,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     guard(async () => {
       if (!conf) return
       setBusy('保存中（运行时生效并写入 .env）…')
-      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour }
+      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
       setPingReply('')
@@ -521,6 +524,16 @@ export default function Settings({ role = 'member' }: { role?: string }) {
                 ))}
               </select>
               <span className="text-xs text-slate-400">失败后 1 小时自动重试，最多 3 次</span>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-sm text-slate-700">每日发现的关键词池</label>
+              <input
+                value={discoverKw}
+                onChange={(e) => setDiscoverKw(e.target.value)}
+                placeholder="逗号分隔，如：企业 AI 应用, 数字化转型, AI 提效（留空用平台默认）"
+                className="input w-full"
+              />
+              <span className="text-xs text-slate-400">每日 2 点的「同行发现」按天轮换其中一个去挖清单外高赞同行；改词即日生效（下次轮换用新池）</span>
             </div>
             <div className="text-xs leading-relaxed text-slate-400">
               扫描只入库新作品到拆解库「待定夺」，不会自动消耗拆解额度。

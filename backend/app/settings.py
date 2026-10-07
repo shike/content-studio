@@ -44,6 +44,7 @@ class Settings(BaseSettings):
 
     watch_scan_enabled: bool = True   # 定时同行扫描（PRD R3.4c）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
+    watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
 
     @property
