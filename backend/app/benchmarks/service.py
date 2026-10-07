@@ -25,6 +25,7 @@ from . import downloader
 import time as _time
 
 _CAPTCHA_FAILS: list[float] = []
+_LAST_DOWNLOAD_TS: float = 0.0
 _CAPTCHA_WINDOW = 1800.0
 _CAPTCHA_TRIP = 2
 
@@ -158,6 +159,17 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         if source != "douyin" or not url:
             raise RuntimeError("本地原文件已按「拆解完即删」策略清理，请重新上传后再拆解")
         _captcha_breaker()  # 下载熔断：风控窗中不再撞墙（快速失败进 30min 退避重试）
+        # 全局下载节流：两次下载最小间隔（默认 45s）——批量拆解连续高频下载会触发抖音
+        # IP 级验证码（家宽出口 IP 被 punishing）；夜间低密度批次全部成功证明低频可过
+        import os as _os
+        _min_gap = float(_os.environ.get("CS_DOWNLOAD_MIN_INTERVAL", "45"))
+        global _LAST_DOWNLOAD_TS
+        now_ts = _time.time()
+        if _LAST_DOWNLOAD_TS and now_ts - _LAST_DOWNLOAD_TS < _min_gap:
+            wait_s = _min_gap - (now_ts - _LAST_DOWNLOAD_TS)
+            ctx.set_progress(8, f"下载节流：等待 {int(wait_s)} 秒（防触发抖音风控）")
+            await asyncio.sleep(wait_s)
+        _LAST_DOWNLOAD_TS = _time.time()
         ctx.set_progress(10, "通过下载容器获取无水印视频")
         try:
             media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
