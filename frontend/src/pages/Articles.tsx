@@ -264,8 +264,14 @@ export default function Articles() {
         .filter((x) => x.source_type === 'trending' && x.status === 'draft'
           && !(x.articles ?? []).some((ar) => ar.status !== 'failed'))
         .slice(0, 3)
-      // 手动提炼/挑选会话优先，否则用持久召回
-      return prev && prev.length ? prev : (seeds.length ? seeds : null)
+      // 已产出的切角从卡上剔除（无论来自手动提炼还是持久召回）
+      const alive = (prev ?? []).filter((x) => x.status === 'draft'
+        && !(x.articles ?? []).some((ar) => ar.status !== 'failed'))
+      const merged = [...alive]
+      for (const sd of seeds) {
+        if (!merged.some((m) => m.id === sd.id)) merged.push(sd)
+      }
+      return merged.length ? merged : null
     })
     setDismissedIds((prev) => {
       const next = new Set(dis.items.filter((d) => d.scope === 'article').map((d) => d.asset_id))
@@ -642,13 +648,13 @@ export default function Articles() {
       <div className="segment mb-4">
         <button
           className={`segment-item ${feedTab === 'topic' ? 'segment-item-active' : ''}`}
-          onClick={() => setFeedTab('topic')}
+          onClick={() => { setFeedTab('topic'); setOffset(0) }}
         >
           选题长文
         </button>
         <button
           className={`segment-item ${feedTab === 'trending' ? 'segment-item-active' : ''}`}
-          onClick={() => setFeedTab('trending')}
+          onClick={() => { setFeedTab('trending'); setOffset(0) }}
         >
           热点长文
         </button>

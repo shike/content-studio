@@ -8,7 +8,7 @@ LABEL="com.content-studio"          # macOS LaunchAgent 标签
 SYSTEMD_UNIT="content-studio"      # Linux systemd 服务名
 HEALTH="http://127.0.0.1:${CS_PORT:-8100}/api/health"
 STATE="${TMPDIR:-/tmp}/cs-watchdog-fails"
-FAILS_BEFORE_ACT=2   # 连续 2 次（约 10 分钟）无响应才动作，避免重启窗口误报
+FAILS_BEFORE_ACT=2   # 连续 2 次失败起改变通知节奏；重启动作自身每轮都会尝试（有 running 任务时被任务保护暂缓）
 
 notify() {  # macOS 弹通知；Linux 记 journal（systemd timer 直接看 journalctl -u content-studio-watchdog）
   if [ "$(uname)" = "Darwin" ]; then

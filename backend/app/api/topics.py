@@ -33,7 +33,7 @@ async def trending_topics(user: User = Depends(require_user)) -> dict:
     points = job_points("trending_topics")
     require_points(user.tenant_id, points, "热点选题提炼")
     job = await runner.submit("trending_topics", {"tenant_id": user.tenant_id},
-                              dedup_key="trending_topics:daily",
+                              dedup_key=f"{user.tenant_id}:trending_topics:daily",
                               points=points)
     return {"job_id": job.id}
 

@@ -15,11 +15,8 @@ from ..llm import gateway
 from ..models import BenchmarkVideo, Topic
 from ..prompts import load, render
 from ..settings import settings
+from ..jobs.errors import CaptchaError
 from . import downloader
-
-
-class CaptchaError(RuntimeError):
-    """抖音风控验证码（IP 级惩罚窗，几十分钟级）。"""
 
 
 # 下载熔断（2026-10-07）：批量拆解连续下载会持续触发验证码（家宽出口 IP 高频抓取），
@@ -167,7 +164,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         except Exception as e:
             if "验证码" in str(e):
                 _captcha_record()
-                raise CaptchaError(str(e)) from e
+                raise CaptchaError(f"自动下载失败（抖音风控验证码）：{str(e)[:120]}") from e
             raise
         with Session(engine) as s:
             b = s.get(BenchmarkVideo, benchmark_id)

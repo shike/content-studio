@@ -80,6 +80,8 @@ _POLICIES: dict[str, RetryPolicy] = {
     "watch_discover": RetryPolicy(max_retries=2, base=3600, cap=3600,
                                   classes=("transient", "captcha"), task_timeout=3600),  # Q19：DDG/抖音风控统一 1 小时退避
     "avatar_video": RetryPolicy(max_retries=1, base=120, task_timeout=3600),
+    "radar_mine": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
+    "topic_radar": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
 }
 _DEFAULT_POLICY = RetryPolicy()
 
@@ -145,6 +147,7 @@ async def recover_interrupted_jobs() -> None:
     transient 排自动重试。须在 runner.start() 之后调用。parked 不动。
     """
     requeued: list[tuple[int, int]] = []
+    requeued_types: list[tuple[int, str, str]] = []
     with Session(engine) as s:
         rows = s.exec(
             select(Job).where(Job.status.in_(["queued", "running"]))  # type: ignore[attr-defined]
@@ -153,6 +156,7 @@ async def recover_interrupted_jobs() -> None:
             if job.status == "queued":
                 # 原行入内存队列即可：worker 只认内存队列，DB 行保持 queued 语义不变
                 requeued.append((job.id, job.tenant_id))
+                requeued_types.append((job.id, job.type, _lane_of(job.type)))
             else:
                 # 重启中断不是任务的错：按 transient 排 90 秒后自动重试
                 job.status = "failed"
@@ -163,7 +167,13 @@ async def recover_interrupted_jobs() -> None:
             s.add(job)
         s.commit()
     for job_id, tenant_id in requeued:
-        runner._put(tenant_id, job_id)
+        job_type = next((jt for jt in requeued_types if jt[0] == job_id), None)
+        # light 类型走并发池（与 _reenqueue 同分道；此前一律塞 heavy 串行队列，
+        # 扫描类重启恢复会堵住其他租户的 LLM 任务且绕过同类合并）
+        if job_type and job_type[1] == "light":
+            asyncio.create_task(runner._run_light(job_id, job_type[2]))
+        else:
+            runner._put(tenant_id, job_id)
 
 
 class JobRunner:

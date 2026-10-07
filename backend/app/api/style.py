@@ -1,11 +1,12 @@
 """自我风格研究 API（R9）。"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import SelfVideo, StyleProfile, WatchAccount
+from ..auth import require_user
+from ..models import SelfVideo, StyleProfile, WatchAccount, User
 
 router = APIRouter(prefix="/api/style")
 
@@ -26,7 +27,8 @@ class ResolveIn(BaseModel):
 
 
 @router.post("/videos/{video_id}/resolve", status_code=202)
-async def resolve_video(video_id: int, body: ResolveIn) -> dict:
+async def resolve_video(video_id: int, body: ResolveIn,
+                        user: User = Depends(require_user)) -> dict:
     """我的视频定夺：批准（排队风格拆解）或忽略。"""
     if body.action not in ("approve", "ignore"):
         raise HTTPException(status_code=400, detail="action 必须是 approve / ignore")
@@ -39,7 +41,7 @@ async def resolve_video(video_id: int, body: ResolveIn) -> dict:
         s.commit()
     if body.action == "approve":
         job = await runner.submit("self_analyze", {"video_id": video_id},
-                                  dedup_key=f"selfanalyze:{video_id}")
+                                  dedup_key=f"{user.tenant_id}:selfanalyze:{video_id}")
         return {"status": "approved", "job_id": job.id}
     return {"status": "ignored"}
 
@@ -101,25 +103,25 @@ def overview() -> dict:
 
 
 @router.post("/scan", status_code=202)
-async def scan() -> dict:
+async def scan(user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
         if _self_account(s) is None:
             raise HTTPException(status_code=400, detail="未添加我的账号：先在同行监测页添加并勾选「这是我的账号」")
     from datetime import datetime, timezone
     job = await runner.submit("self_scan", {"auto": True},
-                              dedup_key=f"selfscan:all:{datetime.now(timezone.utc):%Y%m%d}")
+                              dedup_key=f"{user.tenant_id}:selfscan:all:{datetime.now(timezone.utc):%Y%m%d}")
     return {"job_id": job.id}
 
 
 @router.post("/profile/update", status_code=202)
-async def update_profile() -> dict:
+async def update_profile(user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
         has = s.exec(
             select(SelfVideo).where(SelfVideo.analyzed_at != None)  # noqa: E712
         ).first()
     if has is None:
         raise HTTPException(status_code=400, detail="还没有已分析的视频，先扫描我的账号")
-    job = await runner.submit("self_profile_update", {}, dedup_key="profile:update")
+    job = await runner.submit("self_profile_update", {}, dedup_key=f"{user.tenant_id}:profile:update")
     return {"job_id": job.id}
 
 

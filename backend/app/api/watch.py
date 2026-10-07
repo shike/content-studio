@@ -195,21 +195,21 @@ def delete_account(account_id: int) -> dict:
 
 
 @router.post("/scan", status_code=202)
-async def scan() -> dict:
+async def scan(user: User = Depends(require_user)) -> dict:
     from datetime import datetime, timezone
     job = await runner.submit("watch_scan", {"auto": True},
-                              dedup_key=f"scan:all:{datetime.now(timezone.utc):%Y%m%d}")
+                              dedup_key=f"{user.tenant_id}:scan:all:{datetime.now(timezone.utc):%Y%m%d}")
     return {"job_id": job.id}
 
 
 @router.post("/accounts/{account_id}/scan", status_code=202)
-async def scan_account(account_id: int) -> dict:
+async def scan_account(account_id: int, user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
         if s.get(WatchAccount, account_id) is None:
             raise HTTPException(status_code=404, detail="account not found")
     from datetime import datetime, timezone
     job = await runner.submit("watch_scan", {"account_id": account_id},
-                              dedup_key=f"scan:{account_id}:{datetime.now(timezone.utc):%Y%m%d}")
+                              dedup_key=f"{user.tenant_id}:scan:{account_id}:{datetime.now(timezone.utc):%Y%m%d}")
     return {"job_id": job.id}
 
 
@@ -258,12 +258,12 @@ def _cand_dict(r: WatchCandidate) -> dict:
 
 
 @router.post("/discover", status_code=202)
-async def discover(body: DiscoverIn) -> dict:
+async def discover(body: DiscoverIn, user: User = Depends(require_user)) -> dict:
     kw, direction = body.keyword.strip(), body.direction.strip()
     if not kw:
         raise HTTPException(status_code=400, detail="关键词不能为空")
     job = await runner.submit("watch_discover", {"keyword": kw, "direction": direction},
-                              dedup_key=f"discover:{kw}:{direction}")
+                              dedup_key=f"{user.tenant_id}:discover:{kw}:{direction}")
     return {"job_id": job.id}
 
 

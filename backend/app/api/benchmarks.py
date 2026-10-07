@@ -99,7 +99,7 @@ async def analyze_local(file: UploadFile,
 
 
 @router.get("/api/benchmarks/authors")
-def benchmark_authors() -> dict:
+def benchmark_authors(user: User = Depends(require_user)) -> dict:
     """拆解库作者清单（全库 distinct，供筛选下拉——此前取自当前页 20 条，新作者选不到）。"""
     with Session(engine) as s:
         authors = sorted({a for a in s.exec(
@@ -110,7 +110,8 @@ def benchmark_authors() -> dict:
 
 @router.get("/api/benchmarks")
 def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
-                    analyzed: str = "", source: str = "", scan_status: str = "") -> dict:
+                    analyzed: str = "", source: str = "", scan_status: str = "",
+                    user: User = Depends(require_user)) -> dict:
     """分页 + 服务端筛选（analyzed: done|todo；source: douyin|local；
     scan_status: pending|approved|ignored；默认返回 approved+done 的已定夺内容）。
 

@@ -304,9 +304,12 @@ async def list_users(request: Request):
             mems = mems_by_user.get(u.id, {})
             if scope is not None and not (set(mems) & scope):
                 continue  # tenant_admin 只看在自己管辖租户有归属的用户
+            # 回显裁剪：tenant_admin 只见管辖租户内的归属（跨租户归属不泄露）
+            visible_mems = {tid: r for tid, r in mems.items()
+                            if scope is None or tid in scope}
             out.append(_user_view(u, tenants.get(u.tenant_id, ""), memberships=[
                 {"tenant_id": tid, "tenant_name": tenants.get(tid, ""), "role": r}
-                for tid, r in sorted(mems.items())]))
+                for tid, r in sorted(visible_mems.items())]))
     return {"users": out, "manageable_tenants": manageable}
 
 
@@ -444,8 +447,11 @@ async def upsert_membership(user_id: int, body: MembershipIn, request: Request):
         u = s.get(User, user_id)
         if u is None:
             raise HTTPException(status_code=404, detail="用户不存在")
-        if s.get(Tenant, body.tenant_id) is None:
+        t_target = s.get(Tenant, body.tenant_id)
+        if t_target is None:
             raise HTTPException(status_code=404, detail="目标租户不存在")
+        if t_target.status != "active":
+            raise HTTPException(status_code=400, detail="目标租户已停用，不能添加归属")
         if not _can_manage_tenant(s, me, body.tenant_id):
             raise HTTPException(status_code=403, detail="只能管理自己管辖租户的成员归属")
         if me.role != "platform_admin" and u.role == "platform_admin":
@@ -815,7 +821,12 @@ async def tenant_delete(tenant_id: int, request: Request, confirm_name: str = ""
                     s.delete(us)
                 s.delete(u)
             elif u.tenant_id == tenant_id:
-                u.tenant_id = rest[0]
+                earliest = min(
+                    (m for m in s.exec(select(TenantMembership).where(
+                        TenantMembership.user_id == u.id)).all()  # type: ignore[attr-defined]
+                    if m.tenant_id != tenant_id),
+                    key=lambda m: m.id)
+                u.tenant_id = earliest.tenant_id
                 s.add(u)
                 for us in s.exec(select(UserSession).where(  # type: ignore[attr-defined]
                         UserSession.user_id == u.id,  # type: ignore[attr-defined]

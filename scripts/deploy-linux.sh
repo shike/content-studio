@@ -85,6 +85,7 @@ Description=Content Studio 看门狗（健康检查 + 自动拉起）
 Type=oneshot
 User=root
 Environment=CS_PORT=${PORT_ARG}
+Environment=CS_DATA_DIR=${ROOT}/data
 ExecStart=/bin/bash ${WDSCRIPT}
 EOF
   cat > "$WDTIMER" <<EOF

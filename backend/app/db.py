@@ -247,8 +247,10 @@ def _migrate(engine) -> None:
         # 按业务表同款约定归租户 1；功能上线（2026-09-26）后 tenant_id=0 才专指系统任务
         conn.execute(sqlalchemy.text(
             "UPDATE jobs SET tenant_id=1 WHERE tenant_id=0 AND created_at < '2026-09-26'"))
+        # 唯一索引带 tenant_id（多租户：不同租户的同 dedup_key 互不冲突；旧索引迁移替换）
+        conn.execute(sqlalchemy.text("DROP INDEX IF EXISTS ix_jobs_active_dedup"))
         conn.execute(sqlalchemy.text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_active_dedup ON jobs(type, dedup_key)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_active_dedup ON jobs(tenant_id, type, dedup_key)"
             " WHERE dedup_key <> '' AND status IN ('queued','running','parked')"))
         # 多租户：业务表补 tenant_id（历史数据归租户 1）
         for table in ("articles", "avatar_configs", "avatar_videos", "benchmark_videos",

@@ -151,21 +151,21 @@ async def dispatch_due() -> list[str]:
 async def _run_watch_scan() -> str:
     from .runner import runner
     job = await runner.submit("watch_scan", {"auto": True},
-                              dedup_key=f"scan:all:{datetime.now():%Y%m%d}")
+                              dedup_key=f"1:scan:all:{datetime.now():%Y%m%d}")
     return f"job #{job.id}"
 
 
 async def _run_self_scan() -> str:
     from .runner import runner
     job = await runner.submit("self_scan", {"auto": True},
-                              dedup_key=f"selfscan:all:{datetime.now():%Y%m%d}")
+                              dedup_key=f"1:selfscan:all:{datetime.now():%Y%m%d}")
     return f"job #{job.id}"
 
 
 async def _run_topic_radar() -> str:
     from .runner import runner
     job = await runner.submit("topic_radar", {"auto": True},
-                              dedup_key=f"radar:{datetime.now():%Y%m%d}")
+                              dedup_key=f"1:radar:{datetime.now():%Y%m%d}")
     return f"job #{job.id}"
 
 
@@ -195,7 +195,7 @@ async def _run_watch_discover() -> str:
     keywords = configured or ["行业 AI 应用", "企业 数字化转型", "AI 提效", "人工智能 落地"]
     keyword = keywords[day_idx % len(keywords)]  # 关键词按天轮换，省 DDG 配额扩覆盖
     job = await runner.submit("watch_discover", {"keyword": keyword, "auto": True},
-                              dedup_key=f"discover:{datetime.now():%Y%m%d}",
+                              dedup_key=f"1:discover:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
     return f"job #{job.id}（今日关键词：{keyword}）"
 

@@ -36,7 +36,8 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
         pending_articles = s.execute(text(
             "SELECT COUNT(*) FROM scripts WHERE status='final' AND tenant_id=:tid"
             " AND id NOT IN (SELECT script_id FROM articles WHERE script_id IS NOT NULL)"
-            " AND id NOT IN (SELECT asset_id FROM dismissals WHERE scope='article')"
+            " AND id NOT IN (SELECT asset_id FROM dismissals WHERE scope='article'"
+            "   AND asset_id IN (SELECT id FROM scripts WHERE tenant_id=:tid))"
         ), {"tid": tid}).scalar() or 0
     return {"draftTopics": draft_topics, "pendingScripts": pending_scripts,
             "unwrittenTopics": unwritten, "pendingArticles": pending_articles,
