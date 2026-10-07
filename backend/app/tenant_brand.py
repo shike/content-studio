@@ -69,8 +69,6 @@ FOUNDER_BRAND: dict = {
 BRAND_KEYS = ("label_line1", "label_line2", "signature", "asr_vocab", "accent", "primary",
               "persona", "cover_slogan", "audience_note")
 
-_DEFAULT_ASR_VOCAB = "以下是企业经营与行业分享类的中文口播内容。"
-
 _FONT_SRC = Path(__file__).resolve().parent / "assets" / "fonts" / "NotoSansSC-Bold.otf"
 _SUBSET_DIR = settings.data_dir / "label_fonts"
 

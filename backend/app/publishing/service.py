@@ -15,7 +15,7 @@ from ..prompts import load
 from ..settings import settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_FALLBACK_TAGS = ["AI落地", "企业数字化转型", "人工智能"]
+_FALLBACK_TAGS = ["内容创作", "行业分享", "干货分享"]
 
 
 async def build_package(asset_type: str, asset_id: int) -> dict:

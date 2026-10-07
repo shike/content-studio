@@ -267,7 +267,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: SectionKey) 
                 value={quickTitle}
                 onChange={(e) => setQuickTitle(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && quickTitle.trim() && saveQuick()}
-                placeholder="一句话记下选题，如：中小厂上 AI 先从质检切入"
+                placeholder="一句话记下选题，如：中小企业上 AI，第一步先做什么"
                 className="input min-w-64 flex-1"
               />
               <select

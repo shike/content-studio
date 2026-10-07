@@ -17,7 +17,7 @@ DEFAULT_STRUCTURE = [
     {"step": "pain", "requirement": "把痛点讲透，让观众对号入座"},
     {"step": "solution", "requirement": "抛出你的解法或观点，先给结论"},
     {"step": "proof", "requirement": "用具体案例、数字或交付物证明（真实、可验收）"},
-    {"step": "cta", "requirement": "明确行动指令：关注 / 评论关键词 / 私信"},
+    {"step": "cta", "requirement": "给观众一个业务上的下一步动作或判断（不出现关注/评论/私信等转化话术）"},
 ]
 DEFAULT_TEMPLATE_NAME = "默认口播结构"
 

@@ -431,7 +431,7 @@ export default function Topics() {
               value={idea}
               onChange={(e) => setIdea(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submitIdea()}
-              placeholder="一句话 idea，回车开始深研（例：给制造业企业主讲 AI 质检怎么落地）"
+              placeholder="一句话 idea，回车开始深研（例：中小企业上 AI 质检，第一步该做什么）"
               className="input border-sky-200 pl-9"
             />
           </div>

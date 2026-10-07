@@ -362,14 +362,15 @@ async def watch_scan(ctx, payload: dict) -> dict:
                 row.last_scan_at = datetime.now(timezone.utc)
                 s.add(row)
                 s.commit()
-        notes.append(f"{acc.name}：本次排队 {created} 条新视频" + (f"，回填互动数 {backfilled} 条" if backfilled else ""))
+        notes.append(f"{acc.name}：新入库 {created} 条（待定夺，批准后进拆解队列）"
+                     + (f"，回填互动数 {backfilled} 条" if backfilled else ""))
 
     channels_count = sum(1 for a in accounts if a.platform == "channels")
     if channels_count:
         notes.append("视频号无公开网页接口，不支持自动扫描：请在 App 等外部渠道发现视频后"
                      "「本地视频拆解」上传")
 
-    ctx.set_progress(100, f"完成：排队 {queued} 条")
+    ctx.set_progress(100, f"完成：新发现 {queued} 条（已入待定夺清单）")
     return {"queued": queued, "backfilled": backfilled, "notes": notes}
 
 
@@ -480,7 +481,7 @@ async def watch_resolve(ctx, payload: dict) -> dict:
 _DISCOVER_SAMPLE_CAP = 10  # 最多反查的视频页数（控任务时长 ~2min）
 _DISCOVER_QUALITY_FANS = 10000  # 「清单外高赞同行」质量线：候选粉丝 ≥1 万才进周报（2026-10-03）
 # 每日发现的关键词轮换：一天一个词，省 DDG 配额也保证覆盖面按天展开
-DISCOVER_DAILY_KEYWORDS = ["企业AI落地", "AI落地 培训", "企业AI 数字化转型", "AI 提效 获客"]
+DISCOVER_DAILY_KEYWORDS = ["行业 AI 应用", "企业 数字化转型", "AI 提效", "人工智能 落地"]  # 兜底池；定时调度读 settings.watch_discover_keywords
 _DISCOVER_TOP_N = 8        # 最终保留的候选账号数（按粉丝数）
 
 

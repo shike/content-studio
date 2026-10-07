@@ -117,12 +117,12 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
         "words": "300~450",
         "title": (
             "- 微信公众号标题，≤32 字（展示上限）\n"
-            "- 本篇发公众号推荐流：标题要在信息流里 0.5 秒内让目标读者（中小企业老板/业务负责人）"
+            "- 本篇发公众号推荐流：标题要在信息流里 0.5 秒内让目标读者（{{WHO}}）"
             "判断「这说的就是我」\n"
-            "- 公式（至少占两条）：人群定位（老板/中小企业/传统行业）+ 具体数字或金额 + "
+            "- 公式（至少占两条）：人群定位（点明 {{WHO}} 里的具体人群）+ 具体数字或金额 + "
             "冲突/反常识 + 可带走的判断\n"
-            "- 用目标读者的痛感词：他被服务商忽悠过、怕项目烂尾、想找人把关——"
-            "「项目烂尾」「被忽悠」「钱花了没效果」「先别急着上」这类词可用；"
+            "- 用目标读者的痛感词（从受众域口径提炼：踩过什么坑、怕什么损失、想要什么保障）——"
+            "「被坑过」「怕没效果」「钱花了没效果」「先别急着上」这类具体痛感词可用；"
             "「验收」「归因」「机制」「链路」「边界」这类项目管理词不许出现在标题里\n"
             "- 主标题 1 个 + 备选 2 个（备选换角度，不改事实；其中 1 个可以是更克制专业式的陈述句）\n"
             "- 禁止（出现即返工）：论文标题腔——「X 的 Y：从 A 到 B 的 Z 拆解」「XX 的机制/归因/边界」"
@@ -134,13 +134,13 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
             "- 开头即答案：第一节第一句=全文最重的结论或最反直觉的数字（从素材里挑最狠的），"
             "再用 2~3 句交代背景与冲突；禁止铺垫式开头（「随着……」「近年来……」「在……的大背景下」"
             "出现即报废）\n"
-            "- 小节标题=判断句或利益句（例：「80% 的 AI 项目死在验收标准没写进合同」），"
+            "- 小节标题=判断句或利益句（句式示范：「80% 的行业投入，死在标准没写进约定里」，内容按受众域替换），"
             "禁止名词术语式标题（例：「XX 的机制拆解」）\n"
             "- 3~4 节里至少 1 节是完整机制/方法拆解（步骤+反例，读者能直接套用）；"
             "边界条件并进对应小节，不单开一节\n"
             "- 每节至少带 1 个素材里的具体数字\n"
             "- 结尾节先用一句可转发的金句收束（替目标读者说出他想说而不敢说的话），"
-            "再给读者业务上的下一步动作（例：「签约前把验收标准写进合同」）；"
+            "再给读者业务上的下一步动作（句式示范：「动手之前，先把验收标准写进约定」，按受众域替换）；"
             "严禁任何读者与作者互动的转化话术（评论区/私信/关注/扣字/领资料——出现即报废）"
         ),
         "section": (
@@ -155,8 +155,7 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
             "- 微信公众号标题，≤32 字（展示上限）\n"
             "- 专业严谨的书面对象文体：主标题直接陈述文章的核心判断、机制或方法，"
             "像行业研究报告的章节题，不像口播钩子\n"
-            "- 推荐句式：「X 的真实形态/机制/归因：基于 Y 的拆解」「为什么 X 决定了 Y：机制与边界」"
-            "「X 验收/落地中的 Z：链路拆解与判断」\n"
+            "- 推荐句式：「X 的真实形态/机制/归因：基于 Y 的拆解」「为什么 X 决定了 Y：机制与边界」\n"
             "- 具体压倒抽象：带数字、行业词、机制词，让目标读者一眼看出分析对象与深度\n"
             "- 主标题 1 个 + 备选 2 个（备选换角度，不改事实）\n"
             "- 禁止（出现即返工）：悬念钩子腔「只问一句」「终于有人讲清了」「你以为…其实」；"
@@ -178,6 +177,25 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
     },
 }
 DEFAULT_LENGTH = "feed"
+
+
+def _audience_short(audience_note: str) -> str:
+    """受众域口径 → 标题/大纲里的"目标读者"短语（去提示前缀，取核心人群）。"""
+    t = (audience_note or "").strip()
+    for pre in ("目标读者：", "目标读者", "面向", "受众：", "受众"):
+        if t.startswith(pre):
+            t = t[len(pre):]
+    return t[:40] or "目标读者"
+
+
+def length_specs(length: str, audience_note: str) -> dict[str, str]:
+    """按租户受众域实例化档位规格：行业锚点随画像注入，模板只留中性框架与句式示范。
+
+    此前"中小企业老板/项目烂尾"等 FDE 行业话术写死在所有租户的默认规格里
+    （换行业部署即错默认）。"""
+    base = ARTICLE_LENGTHS.get(length) or ARTICLE_LENGTHS[DEFAULT_LENGTH]
+    who = _audience_short(audience_note)
+    return {k: v.replace("{{WHO}}", who) if isinstance(v, str) else v for k, v in base.items()}
 
 # 刻意转化话术（自然收尾红线；与 acceptance/quality.py 的 CTA_PATTERNS 同表，改一处必须同步另一处）
 _CTA_PATTERNS = [
@@ -222,7 +240,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         if article is None:
             raise RuntimeError(f"article {article_id} 不存在")
         tenant_id = article.tenant_id
-        from ..tenant_brand import brand_of
+        from ..tenant_brand import audience_note_of, brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
         topic = s.get(Topic, article.topic_id) if article.topic_id else None
@@ -249,7 +267,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
 
     style = payload.get("style") or DEFAULT_STYLE
     length = payload.get("length") or DEFAULT_LENGTH
-    length_spec = ARTICLE_LENGTHS.get(length) or ARTICLE_LENGTHS[DEFAULT_LENGTH]
+    length_spec = length_specs(length, audience_note_of(tenant_id))
 
     # 自动透镜（style=auto）：读选题素材挑最合适的分析透镜，无效回落默认
     if style == "auto":

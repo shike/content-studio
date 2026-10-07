@@ -367,7 +367,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                 <input
                   value={form.note}
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  placeholder="备注（定位/获客方式，可留空）"
+                  placeholder="备注（账号定位，可留空）"
                   className="input min-w-64 flex-1"
                 />
                 <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
@@ -396,14 +396,14 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                   value={dform.keyword}
                   onChange={(e) => setDform({ ...dform, keyword: e.target.value })}
                   onKeyDown={(e) => e.key === 'Enter' && discover()}
-                  placeholder="关键词，如：AI 获客"
+                  placeholder="关键词，如：企业数字化转型"
                   className="input min-w-48 flex-1"
                 />
                 <input
                   value={dform.direction}
                   onChange={(e) => setDform({ ...dform, direction: e.target.value })}
                   onKeyDown={(e) => e.key === 'Enter' && discover()}
-                  placeholder="方向补充（选填），如：企业服务 口播"
+                  placeholder="方向补充（选填），如：企业管理 口播"
                   className="input min-w-56 flex-1"
                 />
                 <button onClick={discover} disabled={!dform.keyword.trim() || discoverBusy !== ''} className="btn-accent btn-xs disabled:opacity-40">

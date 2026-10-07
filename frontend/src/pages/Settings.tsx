@@ -530,7 +530,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
               <input
                 value={discoverKw}
                 onChange={(e) => setDiscoverKw(e.target.value)}
-                placeholder="逗号分隔，如：企业 AI 应用, 数字化转型, AI 提效（留空用平台默认）"
+                placeholder="逗号分隔，如：行业动态, 商业观察, 技术应用（按你的行业填）（留空用平台默认）"
                 className="input w-full"
               />
               <span className="text-xs text-slate-400">每日 2 点的「同行发现」按天轮换其中一个去挖清单外高赞同行；改词即日生效（下次轮换用新池）</span>

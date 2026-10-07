@@ -192,7 +192,7 @@ export default function Radar() {
             <input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="话题名，如：AI 获客"
+              placeholder="话题名，如：企业数字化转型"
               className="input max-w-40"
             />
             <input

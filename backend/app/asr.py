@@ -11,7 +11,7 @@ from typing import Optional
 from .settings import settings
 
 # 口播领域词表默认值（平台创始租户配置）；租户可在品牌配置 asr_vocab 覆盖
-_DEFAULT_INITIAL_PROMPT = "以下是企业经营与行业分享类的中文口播内容。"
+_DEFAULT_INITIAL_PROMPT = "以下是中文口播内容，请准确转写为简体中文。"
 
 
 def initial_prompt_for(vocab: str = "") -> str:
