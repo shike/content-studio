@@ -135,7 +135,11 @@ export default function App() {
         {raw !== null && (
           <span
             className={`min-w-5 rounded-full px-1.5 py-px text-center text-[10px] font-semibold tabular-nums ${
-              count > 0 ? 'bg-[rgba(232,201,127,0.16)] text-[#e8c97f]' : 'text-[#7fa695]/70'
+              count > 0
+                ? s.key === 'tasks' && (badges.tasks_alert ?? 0) > 0
+                  ? 'bg-red-500/25 text-red-300'  // 任务徽章红色 = 有待处置失败（带病运行）
+                  : 'bg-[rgba(232,201,127,0.16)] text-[#e8c97f]'
+                : 'text-[#7fa695]/70'
             }`}
           >
             {count}

@@ -80,8 +80,9 @@ export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
     articles: s.pendingArticles,                    // 待写长文
     benchmarks: s.benchmarksPending + s.benchmarksTodo, // 待定夺 + 待拆
     style: s.style,                                 // 风格视频待定夺
-    // 任务徽章（2026-10-07 调整）：有待处置显示待处置（带病运行必须可见），
-    // 否则显示在途数（运行中+排队）——转写/生成高峰期「一堆在处理却显示 0」的修正
-    tasks: s.disposal > 0 ? s.disposal : s.tasks - s.disposal,
+    // 任务徽章（2026-10-07 二次调整）：恒显在途数（运行中+排队）——待处置优先会把它顶掉，
+    // 用户永远看不到"还有多少活在跑"；待处置>0 由 tasks_alert 让徽章变红警示
+    tasks: s.tasks - s.disposal,
+    tasks_alert: s.disposal > 0 ? 1 : 0,
   }
 }
