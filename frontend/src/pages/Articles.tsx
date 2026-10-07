@@ -255,6 +255,15 @@ export default function Articles() {
     if (a.counts) setCounts(a.counts)
     setScripts(s.items)
     setTopics(t.items)
+    // 热点切角持久召回：最近提炼的、还没产出文章的切角一直显示在卡上（产出后自动消失）
+    setTrendTopics((prev) => {
+      const seeds = t.items
+        .filter((x) => x.source_type === 'trending' && x.status === 'draft'
+          && !(x.articles ?? []).some((ar) => ar.status !== 'failed'))
+        .slice(0, 3)
+      // 手动提炼/挑选会话优先，否则用持久召回
+      return prev && prev.length ? prev : (seeds.length ? seeds : null)
+    })
     setDismissedIds((prev) => {
       const next = new Set(dis.items.filter((d) => d.scope === 'article').map((d) => d.asset_id))
       return next.size === prev.size && [...next].every((x) => prev.has(x)) ? prev : next
