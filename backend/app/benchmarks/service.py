@@ -17,6 +17,36 @@ from ..prompts import load, render
 from ..settings import settings
 from . import downloader
 
+
+class CaptchaError(RuntimeError):
+    """抖音风控验证码（IP 级惩罚窗，几十分钟级）。"""
+
+
+# 下载熔断（2026-10-07）：批量拆解连续下载会持续触发验证码（家宽出口 IP 高频抓取），
+# 队列里后来的任务会继续一头撞墙。30 分钟内 ≥2 次 captcha 失败 → 后续下载直接快速失败
+# 进 30min 退避重试，让 IP 惩罚窗自然冷却。
+import time as _time
+
+_CAPTCHA_FAILS: list[float] = []
+_CAPTCHA_WINDOW = 1800.0
+_CAPTCHA_TRIP = 2
+
+
+def _captcha_record() -> None:
+    now = _time.time()
+    _CAPTCHA_FAILS[:] = [t for t in _CAPTCHA_FAILS if now - t < _CAPTCHA_WINDOW]
+    _CAPTCHA_FAILS.append(now)
+
+
+def _captcha_breaker() -> None:
+    now = _time.time()
+    _CAPTCHA_FAILS[:] = [t for t in _CAPTCHA_FAILS if now - t < _CAPTCHA_WINDOW]
+    if len(_CAPTCHA_FAILS) >= _CAPTCHA_TRIP:
+        wait_min = max(1, int((max(_CAPTCHA_FAILS) + _CAPTCHA_WINDOW - now) // 60))
+        raise CaptchaError(
+            f"下载熔断：抖音风控窗中（近期 {len(_CAPTCHA_FAILS)} 次验证码失败），"
+            f"约 {wait_min} 分钟后自动重试")
+
 _BENCHMARK_DIR = settings.data_dir / "benchmarks"
 
 
@@ -130,8 +160,15 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     if not media_path:
         if source != "douyin" or not url:
             raise RuntimeError("本地原文件已按「拆解完即删」策略清理，请重新上传后再拆解")
+        _captcha_breaker()  # 下载熔断：风控窗中不再撞墙（快速失败进 30min 退避重试）
         ctx.set_progress(10, "通过下载容器获取无水印视频")
-        media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
+        try:
+            media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
+        except Exception as e:
+            if "验证码" in str(e):
+                _captcha_record()
+                raise CaptchaError(str(e)) from e
+            raise
         with Session(engine) as s:
             b = s.get(BenchmarkVideo, benchmark_id)
             b.media_path = media_path
