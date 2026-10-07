@@ -206,6 +206,8 @@ export default function Articles() {
   const [trendTopics, setTrendTopics] = useState<Topic[] | null>(null)
   const [trendBusy, setTrendBusy] = useState('')
   const [view, setView] = useState<'queue' | 'table'>('table')
+  // 公众号双视角：选题长文（脚本/选题链路）与热点长文（今日热点提炼）分开浏览
+  const [feedTab, setFeedTab] = useState<'topic' | 'trending'>('topic')
   // 整篇配图提示词包（一次 LLM 抽取全部配图位的即梦提示词）
   const [pack, setPack] = useState<{ items: { slot: number; caption: string; kw: string; title: string; layout: string; prompt: string }[]; mode: string } | null>(null)
   const [packBusy, setPackBusy] = useState(false)
@@ -297,7 +299,11 @@ export default function Articles() {
   const totalAtStart = session.done + session.skipped + queue.length
   const doneCount = session.done + session.skipped
 
-  const filtered = articles // 服务端已筛选分页
+  // 双视角数据源：热点长文 tab 只看 trending 选题产出的文章
+  const trendTopicIds = new Set(topics.filter((t) => t.source_type === 'trending').map((t) => t.id))
+  const filtered = feedTab === 'trending'
+    ? articles.filter((a) => a.topic_id != null && trendTopicIds.has(a.topic_id))
+    : articles // 服务端已筛选分页
   const statusCount = (k: string) => (k ? counts[k] || 0 : Object.values(counts).reduce((a, b) => a + b, 0))
   const writableTopics = topics.filter((t) => t.status === 'approved' || t.status === 'produced')
 
@@ -614,7 +620,7 @@ export default function Articles() {
         desc="定稿脚本 → 深度长文 → 改稿 → 内联样式渲染 → 一键复制（发布人工）"
         actions={
           <div className="flex items-center gap-2">
-            {pendingScripts.length > 0 && (
+            {feedTab === 'topic' && pendingScripts.length > 0 && (
               <button
                 onClick={() => {
                   setView('queue')
@@ -628,13 +634,31 @@ export default function Articles() {
                 写作 {pendingScripts.length} 篇长文
               </button>
             )}
-            <span className="text-xs text-slate-400">共 {articles.length} 篇</span>
+            <span className="text-xs text-slate-400">
+              {feedTab === 'trending' ? `热点来源 ${filtered.length} 篇` : `共 ${articles.length} 篇`}
+            </span>
           </div>
         }
       />
 
+      {/* 双视角切换 */}
+      <div className="segment mb-4">
+        <button
+          className={`segment-item ${feedTab === 'topic' ? 'segment-item-active' : ''}`}
+          onClick={() => setFeedTab('topic')}
+        >
+          选题长文
+        </button>
+        <button
+          className={`segment-item ${feedTab === 'trending' ? 'segment-item-active' : ''}`}
+          onClick={() => setFeedTab('trending')}
+        >
+          热点长文
+        </button>
+      </div>
+
       {/* 今日热点选题（R1.4）：站内对标议题+联网热点 × 租户画像 → 切角卡 → 挑选生成长文 */}
-      <div className="card border-violet-200/70 bg-gradient-to-br from-violet-50/70 to-white p-4">
+      <div className={`${feedTab === 'trending' ? '' : 'hidden '}card mb-4 border-violet-200/70 bg-gradient-to-br from-violet-50/70 to-white p-4`}>
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold text-slate-800">今日热点选题</div>
           <span className="text-[11px] text-slate-400">对标圈近 2 天议题 + 联网今日行业热点，结合你的画像提炼 3 个切角——挑一个直接写</span>
@@ -668,8 +692,8 @@ export default function Articles() {
         )}
       </div>
 
-      {/* 从选题直接生成（脚本队列之外的入口） */}
-      <div className="card border-sky-200/70 bg-gradient-to-br from-sky-50/80 to-white p-4">
+      {/* 从选题直接生成（脚本队列之外的入口）——仅选题视角 */}
+      <div className={`${feedTab === 'topic' ? '' : 'hidden '}card border-sky-200/70 bg-gradient-to-br from-sky-50/80 to-white p-4`}>
         <div className="flex flex-col gap-2 sm:flex-row">
           <select
             value={topicId ?? ''}
@@ -730,8 +754,10 @@ export default function Articles() {
           <div className="p-6">
             <EmptyState
               icon={Inbox}
-              title="还没有文章"
-              desc="定稿脚本会自动排队等写；也可以直接从一个选题生成长文。生成后在此改稿、渲染、一键复制到公众号后台。"
+              title={feedTab === 'trending' ? '还没有热点来源的文章' : '还没有文章'}
+              desc={feedTab === 'trending'
+                ? '在上方「提炼今日热点」挑选切角生成；或先把选题库的热点切角生成为长文。'
+                : '定稿脚本会自动排队等写；也可以直接从一个选题生成长文。生成后在此改稿、渲染、一键复制到公众号后台。'}
             />
           </div>
         ) : (
