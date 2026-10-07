@@ -16,6 +16,27 @@ if server_down():
 _, health = request("GET", "/api/health")
 llm_ready = (health.get("llm") or {}).get("configured") is True
 
+section("P8 · 今日热点选题提炼（R1.4）")
+if llm_ready:
+    code, d = request("POST", "/api/topics/trending", body={})
+    check("热点提炼受理 202", code == 202 and bool(d.get("job_id")), f"code={code}, {str(d)[:80]}")
+    from runner import poll_job as _pj2
+    done = _pj2(d["job_id"], timeout=420)
+    check("热点提炼任务完成", (done or {}).get("status") == "succeeded",
+          f"status={(done or {}).get('status')} err={(done or {}).get('error')}")
+    ids = ((done or {}).get("result") or {}).get("topic_ids") or []
+    check("切角落库（1~3 条 trending 选题）", 1 <= len(ids) <= 3, f"ids={ids}")
+    if ids:
+        code, t = request("GET", f"/api/topics/{ids[0]}", timeout=30)
+        check("切角选题结构（trending + hotspot 切角证据）",
+              code == 200 and t.get("source_type") == "trending"
+              and (t.get("evidence") or {}).get("hotspot"),
+              f"source_type={t.get('source_type')}")
+else:
+    code, d = request("POST", "/api/topics/trending", body={})
+    check("热点提炼受理 202（无 key 只验契约，不轮询产出）",
+          code == 202 and bool(d.get("job_id")), f"code={code}")
+
 section("P8 · 话题雷达（R1.8）")
 code, d = request("GET", "/api/radar")
 items = d.get("items") if isinstance(d, dict) else []

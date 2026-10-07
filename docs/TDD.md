@@ -196,6 +196,12 @@ article:    draft ──► edited ──► rendered ──► published（由 
 ### 选题中心
 - `POST /api/topics/ideas` `{text}` → 202 `{topic_id, job_id}`（深研任务）
 - `POST /api/topics/quick` `{title, audience?}` → 201（快速记选题，不触发 LLM；R1.1b）
+- `POST /api/topics/trending` → 202 `{job_id}`（今日热点选题提炼，R1.4；10 积分）。executor
+  `trending_topics`：站内对标议题（近 2 天非 ignored 视频标题+互动）+ 联网检索（单查询纪律）×
+  租户画像 → `complete_json(purpose="trending_topics", max_tokens=4000)` → 1~3 条
+  `Topic(source_type="trending", evidence={hotspot, why_now, material})` draft 落库；
+  原料收集失败不阻塞（对标空窗/联网关闭均降级并在 evidence.material 留痕）；
+  prompt 占位符 PERSONA/AUDIENCE_NOTE/MATERIAL（render 强制校验）。
 - 入库时相似选题检测（R1.1c）：与既有 draft 选题标题相似 → 标记 evidence.similar_to
 - `GET /api/topics?status=&source=&audience=&min_score=&limit=` → `{items:[...]}`
 - `GET /api/topics/{id}` → 详情含 `research_report`

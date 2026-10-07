@@ -24,6 +24,20 @@ class QuickIn(BaseModel):
     audience: str = "both"  # boss | fde | both
 
 
+@router.post("/trending", status_code=202)
+async def trending_topics(user: User = Depends(require_user)) -> dict:
+    """今日热点选题提炼（R1.4）：站内对标议题+联网今日热点 × 租户画像 → 3 个切角落选题库。
+
+    轻活走队列（LLM 一次调用），产出 source_type=trending 的 draft 选题，前端轮询展示。"""
+    from ..credits import job_points, require_points
+    points = job_points("trending_topics")
+    require_points(user.tenant_id, points, "热点选题提炼")
+    job = await runner.submit("trending_topics", {"tenant_id": user.tenant_id},
+                              dedup_key="trending_topics:daily",
+                              points=points)
+    return {"job_id": job.id}
+
+
 @router.post("/quick", status_code=201)
 def quick_topic(body: QuickIn) -> dict:
     """快速记选题（R1.1b）：不触发 LLM，直接入库待审。"""

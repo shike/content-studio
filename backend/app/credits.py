@@ -16,6 +16,7 @@ from .models import CreditTransaction, Tenant
 
 JOB_POINTS: dict[str, int] = {
     "idea_research": 30,
+    "trending_topics": 10,
     "benchmark_analyze": 15,
     "script_generate": 30,
     "script_polish": 10,

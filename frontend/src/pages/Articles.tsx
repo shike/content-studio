@@ -202,6 +202,9 @@ export default function Articles() {
   const [scripts, setScripts] = useState<Script[]>([])
   const [topics, setTopics] = useState<Topic[]>([])
   const [topicId, setTopicId] = useState<number | null>(null)
+  // 今日热点选题（R1.4）：提炼出的切角卡（evidence 带 hotspot/why_now），供挑选直接生成长文
+  const [trendTopics, setTrendTopics] = useState<Topic[] | null>(null)
+  const [trendBusy, setTrendBusy] = useState('')
   const [view, setView] = useState<'queue' | 'table'>('table')
   // 整篇配图提示词包（一次 LLM 抽取全部配图位的即梦提示词）
   const [pack, setPack] = useState<{ items: { slot: number; caption: string; kw: string; title: string; layout: string; prompt: string }[]; mode: string } | null>(null)
@@ -298,6 +301,30 @@ export default function Articles() {
     } finally {
       setBusy('')
     }
+  }
+
+  // 今日热点选题（R1.4）：提炼 → 切角卡，点卡直接以 feed 公众号版生成长文
+  const runTrending = () =>
+    guard(async () => {
+      setTrendBusy('热点提炼：提交任务')
+      try {
+        const { job_id } = await api<{ job_id: number }>('/topics/trending', { method: 'POST' })
+        const job = await waitJob(job_id, (j) => setTrendBusy(`热点提炼：${j.progress}% ${j.message}`))
+        const ids: number[] = (job.result?.topic_ids ?? []) as number[]
+        if (ids.length === 0) throw new Error('提炼完成但没有产出切角（看任务详情）')
+        const cards = await Promise.all(ids.map((id) => api<Topic>(`/topics/${id}`)))
+        setTrendTopics(cards)
+        await reload()
+      } finally {
+        setTrendBusy('')
+      }
+    })
+
+  const genFromTrend = (t: Topic) => {
+    setTopicId(t.id)
+    setArtLength('feed')
+    setArtStyle('auto')
+    generateFromTopic()
   }
 
   const generateFromScript = (scriptId: number) =>
@@ -596,6 +623,41 @@ export default function Articles() {
           </div>
         }
       />
+
+      {/* 今日热点选题（R1.4）：站内对标议题+联网热点 × 租户画像 → 切角卡 → 挑选生成长文 */}
+      <div className="card border-violet-200/70 bg-gradient-to-br from-violet-50/70 to-white p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold text-slate-800">今日热点选题</div>
+          <span className="text-[11px] text-slate-400">对标圈近 2 天议题 + 联网今日行业热点，结合你的画像提炼 3 个切角——挑一个直接写</span>
+          <button onClick={runTrending} disabled={!!trendBusy} className="btn-accent btn-xs ml-auto disabled:opacity-40">
+            {trendBusy ? '提炼中…' : '🔥 提炼今日热点'}
+          </button>
+        </div>
+        {trendBusy && <div className="mt-2"><Busy text={trendBusy} /></div>}
+        {trendTopics && trendTopics.length > 0 && (
+          <div className="mt-3 grid gap-2 lg:grid-cols-3">
+            {trendTopics.map((t) => (
+              <div key={t.id} className="rounded-xl border border-violet-100 bg-white p-3">
+                <div className="text-[13px] font-semibold leading-snug text-slate-900">{t.title}</div>
+                <div className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                  <b className="text-violet-700">热点：</b>{t.evidence?.hotspot || '—'}
+                </div>
+                <div className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  <b className="text-slate-700">切角：</b>{t.angle || '—'}
+                </div>
+                {t.evidence?.why_now && (
+                  <div className="mt-1 text-[11px] text-slate-400">为什么现在写：{t.evidence.why_now}</div>
+                )}
+                <button onClick={() => genFromTrend(t)}
+                  disabled={!!trendBusy || !!busy}
+                  className="btn-accent btn-xs mt-2 w-full justify-center disabled:opacity-40">
+                  就写这篇（公众号版）
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* 从选题直接生成（脚本队列之外的入口） */}
       <div className="card border-sky-200/70 bg-gradient-to-br from-sky-50/80 to-white p-4">
