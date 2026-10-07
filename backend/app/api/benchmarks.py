@@ -102,7 +102,7 @@ async def analyze_local(file: UploadFile,
 def benchmark_authors() -> dict:
     """拆解库作者清单（全库 distinct，供筛选下拉——此前取自当前页 20 条，新作者选不到）。"""
     with Session(engine) as s:
-        authors = sorted({a for (a,) in s.exec(
+        authors = sorted({a for a in s.exec(
             select(BenchmarkVideo.author).distinct()  # type: ignore[attr-defined]
         ).all() if a})
     return {"authors": authors}

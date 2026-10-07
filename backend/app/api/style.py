@@ -72,12 +72,12 @@ def overview() -> dict:
         ).all()
         # 全库统计口径（此前在最新 100 条窗口上统计，self 视频>100 后 total/pending 失真）
         from sqlmodel import func as _f
-        total = s.exec(select(_f.count(SelfVideo.id))).scalar() or 0
+        total = s.exec(select(_f.count(SelfVideo.id))).one() or 0
         analyzed = s.exec(select(_f.count(SelfVideo.id)).where(
-            SelfVideo.analyzed_at is not None)).scalar() or 0  # type: ignore[attr-defined]
+            SelfVideo.analyzed_at is not None)).one() or 0  # type: ignore[attr-defined]
         awaiting = s.exec(select(_f.count(SelfVideo.id)).where(
             SelfVideo.scan_status == "pending",  # type: ignore[attr-defined]
-            SelfVideo.analyzed_at is None)).scalar() or 0  # type: ignore[attr-defined]
+            SelfVideo.analyzed_at is None)).one() or 0  # type: ignore[attr-defined]
         profile = s.exec(
             select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
         ).first()
