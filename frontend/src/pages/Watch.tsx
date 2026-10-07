@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   CircleAlert, ExternalLink, Pencil, Play, Plus, Power, Radar, Scissors, Search, Trash2, Wand2,
 } from 'lucide-react'
@@ -133,9 +133,12 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
     })
 
   const [scanOneId, setScanOneId] = useState<number | null>(null)
+  const scanOneRef = useRef<number | null>(null)
   const scanOne = (acc: WatchAccount) =>
     guard(async () => {
+      if (scanOneRef.current !== null) return  // 防双击窗口重入
       setScanSummary(null)
+      scanOneRef.current = acc.id
       setScanOneId(acc.id)
       try {
         const r = await api<{ job_id: number }>(`/watch/accounts/${acc.id}/scan`, { method: 'POST' })
@@ -144,6 +147,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         setScanSummary({ queued: job.result?.queued ?? 0, notes: job.result?.notes ?? [] })
         await reload()
       } finally {
+        scanOneRef.current = null
         setScanOneId(null)
       }
     })
@@ -257,7 +261,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
     setEditId(null)
     if (next != null) {
       setAccVideos([])
-      api<{ items: any[] }>(`/benchmarks?limit=6&author=${encodeURIComponent(acc.name)}`)
+      api<{ items: any[] }>(`/benchmarks?limit=6&scan_status=all&author=${encodeURIComponent(acc.name)}`)
         .then((r) =>
           setAccVideos(
             r.items
@@ -306,7 +310,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       <PageHeader
         icon={Radar}
         title="同行监测"
-        desc="对标账号管理与扫描监测：扫描自动把新视频排队进拆解流水线"
+        desc="对标账号管理与扫描监测：扫描自动把新视频入库「待定夺」，批准后进拆解流水线"
         actions={
           <div className="flex gap-2">
             <button onClick={() => setShowAdd((v) => !v)} className="btn-ghost">
@@ -423,7 +427,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       {scanBusy && <div className="mt-3"><Busy text={scanBusy} /></div>}
       {scanSummary && !scanBusy && (
         <div className="card mt-3 border-emerald-200 bg-emerald-50/50 px-4 py-2.5 text-[13px] text-emerald-800">
-          本次扫描排队 <b>{scanSummary.queued}</b> 条新视频进拆解
+          本次新入库 <b>{scanSummary.queued}</b> 条（待定夺，批准后进拆解队列）
           {scanSummary.notes.length > 0 && (
             <details className="mt-1">
               <summary className="cursor-pointer text-xs text-emerald-700">各账号路线/结果（展开）</summary>

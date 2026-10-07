@@ -338,7 +338,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
 
           {/* 用量台账 */}
           <div className="card space-y-4 p-5">
-            <div className="text-sm font-semibold text-slate-800">LLM 用量台账（全库累计）</div>
+            <div className="text-sm font-semibold text-slate-800">LLM 用量台账（本租户累计）</div>
             {usage && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[

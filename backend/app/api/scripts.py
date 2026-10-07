@@ -65,7 +65,7 @@ def list_scripts(status: str = "", limit: int = 50, offset: int = 0) -> dict:
         if status:
             q = q.where(Script.status == status)
         total = len(s.exec(q).all())
-        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()  # type: ignore[attr-defined]
+        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         from sqlmodel import func
         counts = {st: n for st, n in s.exec(
             select(Script.status, func.count(Script.id)).group_by(Script.status)  # type: ignore[arg-type]

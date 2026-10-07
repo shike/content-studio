@@ -98,6 +98,16 @@ async def analyze_local(file: UploadFile,
     return out
 
 
+@router.get("/api/benchmarks/authors")
+def benchmark_authors() -> dict:
+    """拆解库作者清单（全库 distinct，供筛选下拉——此前取自当前页 20 条，新作者选不到）。"""
+    with Session(engine) as s:
+        authors = sorted({a for (a,) in s.exec(
+            select(BenchmarkVideo.author).distinct()  # type: ignore[attr-defined]
+        ).all() if a})
+    return {"authors": authors}
+
+
 @router.get("/api/benchmarks")
 def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
                     analyzed: str = "", source: str = "", scan_status: str = "") -> dict:
@@ -112,22 +122,27 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
         return bool(a.get("hook") or a.get("structure") or a.get("score") is not None)
 
     with Session(engine) as s:
+        all_rows = s.exec(select(BenchmarkVideo).order_by(
+            BenchmarkVideo.id.desc())).all()  # type: ignore[attr-defined]
+        # counts 必须全库口径（chips 数字不随作者/来源筛选漂移——此前在过滤后统计）
+        counts = {
+            "all": len(all_rows),
+            "pending": sum(1 for b in all_rows if b.scan_status == "pending"),
+            "todo": sum(1 for b in all_rows if b.scan_status == "approved" and not _analyzed(b)),
+            "done": sum(1 for b in all_rows if _analyzed(b)),
+            "ignored": sum(1 for b in all_rows if b.scan_status == "ignored"),
+            "online": sum(1 for b in all_rows if b.source != "local" and b.scan_status != "pending"),
+            "local": sum(1 for b in all_rows if b.source == "local"),
+        }
         q = select(BenchmarkVideo)
         if author:
             q = q.where(BenchmarkVideo.author == author)
         if source:
             q = q.where(BenchmarkVideo.source == source)
         rows = s.exec(q.order_by(BenchmarkVideo.id.desc())).all()  # type: ignore[attr-defined]
-        counts = {
-            "all": len(rows),
-            "pending": sum(1 for b in rows if b.scan_status == "pending"),
-            "todo": sum(1 for b in rows if b.scan_status == "approved" and not _analyzed(b)),
-            "done": sum(1 for b in rows if _analyzed(b)),
-            "ignored": sum(1 for b in rows if b.scan_status == "ignored"),
-            "online": sum(1 for b in rows if b.source != "local" and b.scan_status != "pending"),
-            "local": sum(1 for b in rows if b.source == "local"),
-        }
-        if scan_status in ("pending", "approved", "ignored"):
+        if scan_status == "all":
+            pass  # 显式看全部状态（Watch 展开卡：该号最近作品含待定夺）
+        elif scan_status in ("pending", "approved", "ignored"):
             rows = [b for b in rows if b.scan_status == scan_status]
         elif not scan_status:
             # 默认视图 = 已定夺内容（批准中 + 已拆解），待定夺与已忽略单独看

@@ -116,8 +116,11 @@ export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey
   }
 
   const [rowBusy, setRowBusy] = useState<number | null>(null)
+  const rowBusyRef = useRef<number | null>(null)
   const resolve = (id: number, action: 'approve' | 'ignore' | 'pending') =>
     guard(async () => {
+      if (rowBusyRef.current !== null) return  // 防重入：已有行级操作在途（含提交窗口）
+      rowBusyRef.current = id
       setRowBusy(id)
       try {
         await api(`/benchmarks/${id}/resolve`, {
@@ -127,6 +130,7 @@ export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey
         if (action === 'approve') setBusy('已批准，排队拆解中')
         await reload()
       } finally {
+        rowBusyRef.current = null
         setRowBusy(null)
       }
     })
@@ -171,7 +175,13 @@ export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey
       await reload()
     })
 
-  const authorOptions = Array.from(new Set(items.map((b) => b.author).filter(Boolean)))
+  // 作者清单走全库 distinct 端点（此前取自当前页，筛选后选项塌缩、新作者永远选不到）
+  const [authorOptions, setAuthorOptions] = useState<string[]>([])
+  useEffect(() => {
+    api<{ authors: string[] }>('/benchmarks/authors')
+      .then((d) => setAuthorOptions(d.authors ?? []))
+      .catch(() => {})
+  }, [])
   const filtered = items
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const changeFilter = (k: string) => {
@@ -334,7 +344,7 @@ export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey
                     {b.scan_status === 'pending' && (
                       <button
                         onClick={(e) => { e.stopPropagation(); resolve(b.id, 'approve') }}
-                        disabled={rowBusy === b.id}
+                        disabled={rowBusy !== null}
                         className="btn-accent btn-xs shrink-0 disabled:opacity-40"
                       >
                         {rowBusy === b.id ? '排队中…' : '拆解'}

@@ -171,7 +171,7 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                 row.last_scan_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 s.add(row)
                 s.commit()
-        notes.append(f"{acc.name}：新增 {created} 条，已排队风格拆解")
+        notes.append(f"{acc.name}：新增 {created} 条（待定夺，批准后进风格分析）")
 
     ctx.set_progress(100, f"完成：新增 {queued} 条")
     return {"queued": queued, "notes": notes}

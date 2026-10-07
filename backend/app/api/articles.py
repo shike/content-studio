@@ -85,7 +85,7 @@ def list_articles(status: str = "", limit: int = 50, offset: int = 0,
         if status:
             q = q.where(Article.status == status)
         total = len(s.exec(q).all())
-        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()  # type: ignore[attr-defined]
+        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         cq = select(Article.status, func.count(Article.id)).group_by(Article.status)  # type: ignore[arg-type]
         if source == "trending":
             cq = cq.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]

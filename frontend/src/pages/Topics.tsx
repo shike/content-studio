@@ -144,7 +144,7 @@ export default function Topics() {
     let stop = false
     const tick = async () => {
       try {
-        const d = await api<{ items: { type: string; status: string; progress: number; message: string; payload: Record<string, any> }[] }>('/jobs?limit=50')
+        const d = await api<{ items: { type: string; status: string; progress: number; message: string; payload: Record<string, any> }[] }>('/jobs?limit=50&type=idea_research')
         const map: Record<number, { p: number; m: string }> = {}
         for (const j of d.items || []) {
           if (j.type !== 'idea_research' || (j.status !== 'running' && j.status !== 'queued')) continue

@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (admin, articles, auth_api as auth_routes, avatar, benchmarks, credits_api, crawl, health, jobs, llm, poster, tenant_api,
+from .api import (admin, articles, auth_api as auth_routes, avatar, benchmarks, credits_api, stats, crawl, health, jobs, llm, poster, tenant_api,
                   public_media, publishing, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
@@ -113,6 +113,7 @@ async def _security_headers(request, call_next):
 
 app.include_router(health.router)
 app.include_router(credits_api.router, dependencies=[Depends(require_ready_user)])
+app.include_router(stats.router, dependencies=[Depends(require_ready_user)])
 app.include_router(crawl.router, dependencies=[Depends(require_ready_user)])
 app.include_router(tenant_api.router, dependencies=[Depends(require_ready_user)])
 app.include_router(poster.router, dependencies=[Depends(require_ready_user)])

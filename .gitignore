@@ -17,3 +17,6 @@ scripts/.deploy.env
 
 # ZCode 本地工具产物
 .zcode/
+
+# 数据核对副本（含生产数据，绝不入库）
+data-integrity/

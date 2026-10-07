@@ -70,15 +70,21 @@ def overview() -> dict:
         videos = s.exec(
             select(SelfVideo).order_by(SelfVideo.id.desc()).limit(100)  # type: ignore[attr-defined]
         ).all()
+        # 全库统计口径（此前在最新 100 条窗口上统计，self 视频>100 后 total/pending 失真）
+        from sqlmodel import func as _f
+        total = s.exec(select(_f.count(SelfVideo.id))).scalar() or 0
+        analyzed = s.exec(select(_f.count(SelfVideo.id)).where(
+            SelfVideo.analyzed_at is not None)).scalar() or 0  # type: ignore[attr-defined]
+        awaiting = s.exec(select(_f.count(SelfVideo.id)).where(
+            SelfVideo.scan_status == "pending",  # type: ignore[attr-defined]
+            SelfVideo.analyzed_at is None)).scalar() or 0  # type: ignore[attr-defined]
         profile = s.exec(
             select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
         ).first()
         history = s.exec(
             select(StyleProfile).order_by(StyleProfile.version.desc()).limit(20)  # type: ignore[attr-defined]
         ).all()
-        total = len(videos)
-        analyzed = sum(1 for v in videos if v.analyzed_at is not None)
-        awaiting = sum(1 for v in videos if v.scan_status == "pending" and v.analyzed_at is None)
+
         return {
             "account": acc.model_dump() if acc else None,
             "profile": _profile_dict(profile) if profile else None,

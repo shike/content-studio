@@ -53,16 +53,19 @@ def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 5
         if status in _WEIGHT:
             q = q.where(Job.status == status)  # type: ignore[attr-defined]
         if type:
-            q = q.where(Job.type == type)  # type: ignore[attr-defined]
+            names = [t.strip() for t in type.split(",") if t.strip()]
+            q = q.where(Job.type.in_(names))  # type: ignore[attr-defined]
         if tenant_id:
             if user.role != "platform_admin":
                 raise HTTPException(status_code=403, detail="需要平台管理员权限")
             q = q.where(Job.tenant_id == tenant_id)  # type: ignore[attr-defined]
+        # 真 COUNT（不受 500 窗口封顶——任务页"共 N 条"与分页可达性口径一致）
+        from sqlmodel import func as _f
+        total = s.exec(select(_f.count()).select_from(q.subquery())).one() or 0
         rows = s.exec(q.order_by(Job.id.desc()).limit(500)).all()  # type: ignore[attr-defined]
         rows = sorted(rows, key=lambda j: (_WEIGHT.get(j.status, 9),
                                            j.id if j.status == "queued" else -j.id))
         queued_ahead = sorted(j.id for j in rows if j.status == "queued")
-        total = len(rows)
         page = rows[max(0, offset): max(0, offset) + max(1, min(limit, 200))]
         cov = _coverage(s) if any(j.status == "failed" for j in page) else {}
         items = []

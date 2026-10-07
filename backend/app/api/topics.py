@@ -132,7 +132,7 @@ def list_topics(status: Optional[str] = None, source: Optional[str] = None,
         if min_score is not None:
             q = q.where(Topic.score >= min_score)  # type: ignore[attr-defined]
         total = len(s.exec(q).all())
-        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()  # type: ignore[attr-defined]
+        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         from sqlmodel import func
         counts = {st: n for st, n in s.exec(
             select(Topic.status, func.count(Topic.id)).group_by(Topic.status)  # type: ignore[arg-type]

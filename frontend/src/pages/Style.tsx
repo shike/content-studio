@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CircleAlert, Fingerprint, History, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
@@ -45,6 +45,7 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [done, setDone] = useState('')
   // 行级即时回显：拆解按钮点击后按钮自身变化+进度，不依赖页面顶部横幅（2026-10-03 用户反馈）
   const [rowBusy, setRowBusy] = useState<{ id: number; msg: string } | null>(null)
+  const rowBusyRef = useRef<number | null>(null)
   const [rowErr, setRowErr] = useState<{ id: number; msg: string } | null>(null)
   const [error, setError] = useState('')
 
@@ -81,25 +82,29 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       const r = await api<{ job_id: number }>('/style/scan', { method: 'POST' })
       const job = await waitJob(r.job_id, (j) => setBusy(`扫描我的账号：${j.progress}% ${j.message}`))
       setBusy('')
-      setDone(`扫描完成：新增 ${job.result?.queued ?? 0} 条，已排队风格拆解`)
+      setDone(`扫描完成：新增 ${job.result?.queued ?? 0} 条（待定夺，批准后进风格分析）`)
       await reload()
     })
 
   const resolveVideo = (id: number, action: 'approve' | 'ignore') =>
     (async () => {
+      if (rowBusyRef.current !== null) return  // 防重入：已有行级任务在途（提交窗口/进行中均锁）
       setRowErr(null)
+      rowBusyRef.current = id
+      setRowBusy({ id, msg: '提交中…' })  // 点击立即锁定（不等 POST 往返）
       try {
         const r = await api<{ job_id?: number }>(`/style/videos/${id}/resolve`, {
           method: 'POST',
           body: JSON.stringify({ action }),
         })
         if (r.job_id) {
-          setRowBusy({ id, msg: '排队中…' })
           await waitJob(r.job_id, (j) => setRowBusy({ id, msg: `拆解中 ${j.progress}%` }))
-          setRowBusy(null)
         }
+        rowBusyRef.current = null
+        setRowBusy(null)
         await reload()
       } catch (e) {
+        rowBusyRef.current = null
         setRowBusy(null)
         setRowErr({ id, msg: String(e) })
       }

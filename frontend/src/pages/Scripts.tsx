@@ -143,7 +143,7 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
     let stop = false
     const tick = async () => {
       try {
-        const d = await api<{ items: { type: string; status: string; progress: number; message: string; payload: Record<string, any> }[] }>('/jobs?limit=50')
+        const d = await api<{ items: { type: string; status: string; progress: number; message: string; payload: Record<string, any> }[] }>('/jobs?limit=50&type=script_generate,script_polish,script_finalize')
         const map: Record<number, { p: number; m: string }> = {}
         for (const j of d.items || []) {
           if (j.status !== 'running' && j.status !== 'queued') continue

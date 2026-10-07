@@ -11,25 +11,9 @@ export interface TodoStats {
 }
 
 export async function fetchTodoStats(): Promise<TodoStats> {
-  const [t, s, a, dis] = await Promise.all([
-    api<{ items: Topic[] }>('/topics?limit=200'),
-    // 500 与脚本工场 allScripts 同上限：started 集合要靠全量脚本算，少拉会把「待写脚本」多算
-    api<{ items: Script[] }>('/scripts?limit=500'),
-    api<{ items: Article[] }>('/articles?limit=100'),
-    api<{ items: { scope: string; asset_id: number }[] }>('/publishing/dismissals'),
-  ])
-  const draftTopics = t.items.filter((x) => x.status === 'draft').length
-  const pendingScripts = s.items.filter((x) => x.status === 'generated').length
-  // 与脚本工场「待写选题」同口径：approved 且还没有任何脚本——已有脚本的选题走「重新生成」，不算待写
-  const startedTopics = new Set(s.items.filter((x) => x.topic_id != null).map((x) => x.topic_id))
-  const unwrittenTopics = t.items.filter((x) => x.status === 'approved' && !startedTopics.has(x.id)).length
-  const noArticle = new Set(dis.items.filter((d) => d.scope === 'article').map((d) => d.asset_id))
-  const written = new Set(a.items.map((x) => x.script_id))
-  const pendingArticles = s.items.filter(
-    (x) => x.status === 'final' && !written.has(x.id) && !noArticle.has(x.id),
-  ).length
-  const finalScripts = s.items.filter((x) => x.status === 'final').length
-  return { draftTopics, pendingScripts, unwrittenTopics, pendingArticles, finalScripts }
+  // 服务端真值口径（/api/stats/todos，全库·本租户）——此前前端拉 4 个大列表自行派生，
+  // 窗口口径不一致（scripts 被后端截断 200/ articles 只拉 100）且随数据量增长失真
+  return api<TodoStats>('/stats/todos')
 }
 
 /** 菜单徽章统计：每个可积压页面的"待处理数"，App 层 60s 刷新。 */
@@ -52,7 +36,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     api<{ items: { enabled: boolean }[] }>('/watch/accounts'),
     api<{ stats: { pending: number } }>('/style/overview'),
     api<{ counts: { running: number; queued: number; parked?: number } }>('/jobs?limit=1'),
-    api<{ items: { status: string }[] }>('/avatar/videos'),
+    api<{ items: { status: string }[]; counts?: Record<string, number> }>('/avatar/videos'),
     api<{ disposal: number }>('/jobs/failures'),
   ])
   const av = avres
@@ -67,7 +51,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     disposal: failures.disposal || 0,
     // 在途任务 = 运行中 + 排队 + 挂起（额度/风控等待自动重试，也是活任务）+ 待处置
     tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.parked || 0) + (failures.disposal || 0),
-    digital: av.items.filter((x) => x.status === 'generating').length,
+    digital: av.counts?.generating ?? av.items.filter((x) => x.status === 'generating').length,
   }
 }
 
