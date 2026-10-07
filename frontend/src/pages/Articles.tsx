@@ -246,7 +246,7 @@ export default function Articles() {
   const reload = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
     if (filter) params.set('status', filter)
-    if (feedTab === 'trending') params.set('source', 'trending')
+    params.set('source', feedTab === 'trending' ? 'trending' : 'topic')
     const [a, s, t, dis] = await Promise.all([
       api<{ items: Article[]; total: number; counts?: Record<string, number> }>(`/articles?${params}`),
       api<{ items: Script[] }>('/scripts?limit=200'),
