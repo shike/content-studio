@@ -142,6 +142,8 @@ async def _polish_core(versions: list[dict], use_style: bool = True) -> list[dic
             note = v.get("notes", "")
             if i < len(critiques):
                 note = f"{critiques[i]}｜改进：{note}" if note else critiques[i]
+            elif note:  # 模型偶发漏 critiques：notes 有内容也保留改进标记（P1 契约不因抽签翻车）
+                note = f"｜改进：{note}"
             merged[i] = {**merged[i], "hook": v["hook"], "body": v["body"],
                          "notes": note}
     return merged

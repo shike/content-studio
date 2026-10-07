@@ -22,4 +22,6 @@ version: 4
 只输出 JSON（无解释无代码块）：
 {"critiques": ["版本1的问题：…", …], "versions": [{"label": "…", "hook": "…", "body": "…", "notes": "改了什么，一句话"}]}
 
+硬要求：critiques 必须与 versions **等长**、每版一条问题诊断——缺任何一条即输出不合格。
+
 脚本（JSON）：
