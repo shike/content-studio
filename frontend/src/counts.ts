@@ -51,7 +51,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1'),
     api<{ items: { enabled: boolean }[] }>('/watch/accounts'),
     api<{ stats: { pending: number } }>('/style/overview'),
-    api<{ counts: { running: number; queued: number } }>('/jobs?limit=1'),
+    api<{ counts: { running: number; queued: number; parked?: number } }>('/jobs?limit=1'),
     api<{ items: { status: string }[] }>('/avatar/videos'),
     api<{ disposal: number }>('/jobs/failures'),
   ])
@@ -65,7 +65,8 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     watch: acc.items.filter((a) => a.enabled).length,
     style: styleOv.stats.pending,
     disposal: failures.disposal || 0,
-    tasks: jobs.counts.running + jobs.counts.queued + (failures.disposal || 0),
+    // 在途任务 = 运行中 + 排队 + 挂起（额度/风控等待自动重试，也是活任务）+ 待处置
+    tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.parked || 0) + (failures.disposal || 0),
     digital: av.items.filter((x) => x.status === 'generating').length,
   }
 }
@@ -80,8 +81,8 @@ export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
     articles: s.pendingArticles,                    // 待写长文
     benchmarks: s.benchmarksPending + s.benchmarksTodo, // 待定夺 + 待拆
     style: s.style,                                 // 风格视频待定夺
-    // 任务徽章（2026-10-07 二次调整）：恒显在途数（运行中+排队）——待处置优先会把它顶掉，
-    // 用户永远看不到"还有多少活在跑"；待处置>0 由 tasks_alert 让徽章变红警示
+    // 任务徽章（2026-10-07 三次调整）：恒显在途数（运行中+排队+挂起）——待处置优先会把它
+    // 顶掉、漏掉 parked 会少算风控窗等待的活任务；待处置>0 由 tasks_alert 让徽章变红警示
     tasks: s.tasks - s.disposal,
     tasks_alert: s.disposal > 0 ? 1 : 0,
   }
