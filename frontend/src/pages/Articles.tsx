@@ -246,6 +246,7 @@ export default function Articles() {
   const reload = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
     if (filter) params.set('status', filter)
+    if (feedTab === 'trending') params.set('source', 'trending')
     const [a, s, t, dis] = await Promise.all([
       api<{ items: Article[]; total: number; counts?: Record<string, number> }>(`/articles?${params}`),
       api<{ items: Script[] }>('/scripts?limit=200'),
@@ -271,7 +272,7 @@ export default function Articles() {
       return next.size === prev.size && [...next].every((x) => prev.has(x)) ? prev : next
     })
     return { articles: a.items, scripts: s.items }
-  }, [offset, filter, dismissedIds])
+  }, [offset, filter, feedTab, dismissedIds])
 
   const autoEntered = useRef(false)
   useEffect(() => {
@@ -299,11 +300,7 @@ export default function Articles() {
   const totalAtStart = session.done + session.skipped + queue.length
   const doneCount = session.done + session.skipped
 
-  // 双视角数据源：热点长文 tab 只看 trending 选题产出的文章
-  const trendTopicIds = new Set(topics.filter((t) => t.source_type === 'trending').map((t) => t.id))
-  const filtered = feedTab === 'trending'
-    ? articles.filter((a) => a.topic_id != null && trendTopicIds.has(a.topic_id))
-    : articles // 服务端已筛选分页
+  const filtered = articles // 服务端已筛选分页（trending tab 由 source 参数服务端过滤）
   const statusCount = (k: string) => (k ? counts[k] || 0 : Object.values(counts).reduce((a, b) => a + b, 0))
   const writableTopics = topics.filter((t) => t.status === 'approved' || t.status === 'produced')
 

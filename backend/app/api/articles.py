@@ -71,17 +71,26 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
 
 
 @router.get("")
-def list_articles(status: str = "", limit: int = 50, offset: int = 0) -> dict:
+def list_articles(status: str = "", limit: int = 50, offset: int = 0,
+                  source: str = "") -> dict:
+    """source='trending'：只看热点切角来源的文章（按选题来源 join 过滤，服务端计数）。"""
+    from ..models import Topic as _Topic
+    from sqlmodel import func
+
     with Session(engine) as s:
         q = select(Article).order_by(Article.id.desc())  # type: ignore[arg-type]
+        if source == "trending":
+            q = q.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
+                _Topic.source_type == "trending")  # type: ignore[attr-defined]
         if status:
             q = q.where(Article.status == status)
         total = len(s.exec(q).all())
         rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()  # type: ignore[attr-defined]
-        from sqlmodel import func
-        counts = {st: n for st, n in s.exec(
-            select(Article.status, func.count(Article.id)).group_by(Article.status)  # type: ignore[arg-type]
-        ).all()}
+        cq = select(Article.status, func.count(Article.id)).group_by(Article.status)  # type: ignore[arg-type]
+        if source == "trending":
+            cq = cq.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
+                _Topic.source_type == "trending")  # type: ignore[attr-defined]
+        counts = {st: n for st, n in s.exec(cq).all()}
         return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
 
 
