@@ -222,22 +222,26 @@ async def clone_video(config_id: int, file: UploadFile, name: str = "",
         if c is None:
             raise HTTPException(status_code=404, detail="config not found")
         config_name = c.name
-    # 分块读取 + 体积上限（原 file.read() 无上限：超大上传可打爆内存/磁盘）
+    # 流式落盘 + 体积上限：直接边读边写临时文件（原实现 chunks 累积到内存再 join——
+    # 500MB 素材 = 请求期间 500MB+ RAM，几个并发就把 3.6G 服务器打爆）
     max_bytes = 500 * 1024 * 1024  # 克隆素材 500MB 上限（出镜视频几十 MB 足够）
-    chunks: list[bytes] = []
-    total = 0
-    while chunk := await file.read(1024 * 1024):
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(status_code=413, detail="视频超过 500MB 上限，请压缩后再传")
-        chunks.append(chunk)
-    data = b"".join(chunks)
-    if not data:
-        raise HTTPException(status_code=400, detail="视频文件为空")
     src = Path(_DIR) / f"clone_src_{config_id}_{uuid.uuid4().hex[:6]}{Path(file.filename or 'v.mp4').suffix or '.mp4'}"
     src.parent.mkdir(parents=True, exist_ok=True)
-    src.write_bytes(data)
-    file_id = await chanjing.upload_video(src.name, data)
+    total = 0
+    try:
+        with src.open("wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(status_code=413, detail="视频超过 500MB 上限，请压缩后再传")
+                f.write(chunk)
+    except HTTPException:
+        src.unlink(missing_ok=True)
+        raise
+    if total == 0:
+        src.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="视频文件为空")
+    file_id = await chanjing.upload_video(src.name, src.read_bytes())
     person_name = (name or f"{config_name}-克隆").strip()
     person_id = await chanjing.create_person(person_name, file_id)
     from ..credits import deduct

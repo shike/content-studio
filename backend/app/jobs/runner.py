@@ -50,28 +50,32 @@ class RetryPolicy:
     park_backoff: int = 1800  # quota 挂起的重查间隔（秒）
     max_parks: int = 16  # quota 挂起次数上限（16×30min=8h，超过转失败）
     stuck_after: int = 7200  # running 超过此秒数无更新 → 看门狗判定卡死（transient，自动重试）
+    task_timeout: Optional[int] = None  # 任务级硬超时（秒）：超时即失败重试，防单任务卡死唯一 heavy worker
 
 
 # 策略注册表：LLM 类失败多为通道抖动/额度窗口，允许 1 次跨任务重试 + 挂起；
 # 扫描类按原补丁语义（1h 后重试 ≤3 次）；确定性失败默认零重试。
+# task_timeout：hard 单 worker，任何任务卡死=全队列停摆——按类型给硬上限（超时线程不中断，
+# 会以僵尸形态跑完，但完成回调有状态护栏不再覆写结果）。
 _POLICIES: dict[str, RetryPolicy] = {
-    "benchmark_analyze": RetryPolicy(max_retries=2, base=300, cap=1800),
-    "script_generate": RetryPolicy(max_retries=1, base=300),
-    "script_polish": RetryPolicy(max_retries=1, base=300),
-    "script_finalize": RetryPolicy(max_retries=1, base=300),
-    "article_generate": RetryPolicy(max_retries=1, base=300),
-    "idea_research": RetryPolicy(max_retries=1, base=300),
-    "self_analyze": RetryPolicy(max_retries=1, base=300),
-    "self_profile_update": RetryPolicy(max_retries=1, base=300),
+    "benchmark_analyze": RetryPolicy(max_retries=2, base=300, cap=1800, task_timeout=2700),
+    "script_generate": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
+    "script_polish": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
+    "script_finalize": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
+    "article_generate": RetryPolicy(max_retries=1, base=300, task_timeout=3600),
+    "idea_research": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
+    "trending_topics": RetryPolicy(max_retries=1, base=300, task_timeout=900),
+    "self_analyze": RetryPolicy(max_retries=1, base=300, task_timeout=2700),
+    "self_profile_update": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
     "watch_scan": RetryPolicy(max_retries=3, base=3600, cap=3600,
-                              classes=("transient", "captcha")),
-    "self_scan": RetryPolicy(max_retries=3, base=3600, cap=3600),
+                              classes=("transient", "captcha"), task_timeout=3600),
+    "self_scan": RetryPolicy(max_retries=3, base=3600, cap=3600, task_timeout=2700),
     "watch_resolve": RetryPolicy(max_retries=1, base=3600, cap=3600,
-                                 classes=("transient", "captcha")),  # Q19：风控退避拉长到 1 小时
-    "radar_extract": RetryPolicy(max_retries=1, base=120),  # 话题提取风控瞬时失败
+                                 classes=("transient", "captcha"), task_timeout=1800),  # Q19：风控退避拉长到 1 小时
+    "radar_extract": RetryPolicy(max_retries=1, base=120, task_timeout=900),  # 话题提取风控瞬时失败
     "watch_discover": RetryPolicy(max_retries=2, base=3600, cap=3600,
-                                  classes=("transient", "captcha")),  # Q19：DDG/抖音风控统一 1 小时退避
-    "avatar_video": RetryPolicy(max_retries=1, base=120),
+                                  classes=("transient", "captcha"), task_timeout=3600),  # Q19：DDG/抖音风控统一 1 小时退避
+    "avatar_video": RetryPolicy(max_retries=1, base=120, task_timeout=3600),
 }
 _DEFAULT_POLICY = RetryPolicy()
 
@@ -121,6 +125,9 @@ class JobContext:
             job.progress = max(0, min(100, int(progress)))
             if message:
                 job.message = message
+            # 心跳真实化（2026-10-07）：updated_at 必须随进度刷新——reaper 的 stuck 判定
+            # 量的是"无更新时长"，updated_at 不动等于量"任务总寿命"，活跃长任务会被误杀
+            job.updated_at = _now_naive()
             history = list(job.history or [])
             history.append({"p": job.progress, "m": message or job.message, "t": datetime.now(timezone.utc).isoformat(timespec="seconds")})
             job.history = history[-80:]  # 防膨胀：只留最近 80 个阶段点
@@ -129,20 +136,19 @@ class JobContext:
 
 
 async def recover_interrupted_jobs() -> None:
-    """启动自愈：queued 重新入队（幂等），running 标失败并按 transient 排自动重试。
-
-    须在 runner.start() 之后调用。parked 不动：next_retry_at 已持久化，重试循环到点照常放行。
+    """启动自愈：queued **原行**直接回内存队列（不新建任务行——旧行为"改 superseded 再 submit"
+    因 dedup 必 miss 导致每次重启每任务膨胀一行、且新行断租户归属）；running 标失败并按
+    transient 排自动重试。须在 runner.start() 之后调用。parked 不动。
     """
-    requeued: list[int] = []
+    requeued: list[tuple[int, int]] = []
     with Session(engine) as s:
         rows = s.exec(
             select(Job).where(Job.status.in_(["queued", "running"]))  # type: ignore[attr-defined]
         ).all()
         for job in rows:
             if job.status == "queued":
-                job.status = "superseded"
-                job.message = "服务重启，已自动重新入队（续跑标记，非错误）"
-                requeued.append(job.id)
+                # 原行入内存队列即可：worker 只认内存队列，DB 行保持 queued 语义不变
+                requeued.append((job.id, job.tenant_id))
             else:
                 # 重启中断不是任务的错：按 transient 排 90 秒后自动重试
                 job.status = "failed"
@@ -152,12 +158,8 @@ async def recover_interrupted_jobs() -> None:
                 job.error = "服务重启中断，90 秒后自动重试"
             s.add(job)
         s.commit()
-    for job_id in requeued:
-        with Session(engine) as s:
-            job = s.get(Job, job_id)
-            if job is None:
-                continue
-            await runner.submit(job.type, dict(job.payload), dedup_key=job.dedup_key or "")
+    for job_id, tenant_id in requeued:
+        runner._put(tenant_id, job_id)
 
 
 class JobRunner:
@@ -334,9 +336,14 @@ class JobRunner:
                         job.fail_class = "transient"
                         job.error_fp = "infra:watchdog"
                         job.retry_count = (job.retry_count or 0) + 1
-                        delay = min(policy.cap, policy.base) if policy.max_retries else 0
-                        job.next_retry_at = now + timedelta(seconds=delay) if policy.max_retries else None
-                        job.error = f"运行超时（超过 {stuck_after // 60} 分钟无更新），看门狗判定卡死"
+                        # 重试次数上限（2026-10-07）：此前不查上限会无限 2h 轮重试
+                        if policy.max_retries and job.retry_count <= policy.max_retries:
+                            delay = min(policy.cap, policy.base) if policy.max_retries else 0
+                            job.next_retry_at = now + timedelta(seconds=delay)
+                            job.error = f"运行超时（超过 {stuck_after // 60} 分钟无更新），看门狗判定卡死，自动重试 {job.retry_count}/{policy.max_retries}"
+                        else:
+                            job.next_retry_at = None
+                            job.error = f"运行超时（超过 {stuck_after // 60} 分钟无更新），已达重试上限，转终态失败（可人工重试）"
                         s.add(job)
                         s.commit()
                 if stuck_ids:
@@ -387,25 +394,28 @@ class JobRunner:
             job = s.get(Job, job_id)
             if job is None or job.status not in ("failed", "parked"):
                 return
+            job_type = job.type
+            # light 同类在跑：保持 failed+到期时间不动（下轮到点再查），先行置 queued 会让
+            # 该行永远滞留（light 不进内存队列无人消费）且污染 dedup
+            if job_type in _CONCURRENT_TYPES and self._inflight.get(job_type):
+                return
             job.status = "queued"
             job.message = f"自动重试第 {job.retry_count + 1} 次"
             job.next_retry_at = None
             s.add(job)
             s.commit()
-            job_type = job.type
             payload = dict(job.payload or {})
+            tenant_id = job.tenant_id
         from .revive import revive_entity
         try:
             revive_entity(job_type, payload)  # 重试放行前实体先回在途态（failed 不跨重试周期）
         except Exception as e:  # noqa: BLE001
             print(f"[job-retry] revive_entity({job_type}) 异常: {type(e).__name__}: {str(e)[:120]}")
         if job_type in _CONCURRENT_TYPES:
-            if self._inflight.get(job_type):
-                return  # 同类在跑：此次放行放弃，等它完成后由下次失败重查接手
             self._inflight[job_type] = job_id
             asyncio.create_task(self._run_light(job_id, job_type))
         else:
-            self._put(job.tenant_id, job_id)
+            self._put(tenant_id, job_id)
 
     async def _run_light(self, job_id: int, job_type: str) -> None:
         """light 分道：并发池上限内执行（P3 正式化，替代无界并发）。"""
@@ -451,6 +461,7 @@ class JobRunner:
             if job is None:
                 return
             job.status = "running"
+            job.updated_at = _now_naive()  # 拾起即心跳：stuck 从拾起时刻起算
             s.add(job)
             s.commit()
             executor = _EXECUTORS.get(job.type)
@@ -463,23 +474,37 @@ class JobRunner:
                 raise RuntimeError(f"未注册的任务类型: {job_type}")
             ctx = JobContext(job_id)
             if asyncio.iscoroutinefunction(executor):
-                out = await executor(ctx, _payload_of(job_id))
+                run_coro = executor(ctx, _payload_of(job_id))
             else:
                 # 必须走 to_thread（拷贝 contextvars）：run_in_executor 会丢 ACTOR，
                 # 同步执行器将退化成系统身份——租户查询不过滤、新实体/LLM 台账不归属
-                out = await asyncio.to_thread(executor, ctx, _payload_of(job_id))
+                run_coro = asyncio.to_thread(executor, ctx, _payload_of(job_id))
+            # 任务级硬超时：唯一 heavy worker 被单任务卡死=全队列停摆（to_thread 线程
+            # 不可取消，超时后线程以僵尸形态跑完，但完成回调有状态护栏不覆写结果）
+            timeout = policy_of(job_type).task_timeout
+            out = await asyncio.wait_for(run_coro, timeout=timeout)
             result = out if isinstance(out, dict) else {"value": out}
             with Session(engine) as s:
                 job = s.get(Job, job_id)
                 if job is None:
+                    return
+                if job.status != "running":
+                    # 状态护栏：看门狗已把本任务判死重试（本执行是超时僵尸线程的迟到完成），
+                    # 结果丢弃不覆写——否则重试行与僵尸行互相踩状态
+                    print(f"[job-run] #{job_id} 迟到完成（状态已被改写为 {job.status}），结果丢弃")
                     return
                 job.status = "succeeded"
                 job.progress = 100
                 job.result = result
                 job.error = None
                 job.next_retry_at = None
+                job.updated_at = _now_naive()
                 s.add(job)
                 s.commit()
+        except asyncio.TimeoutError:
+            await self._handle_failure(
+                job_id, job_type,
+                TimeoutError(f"任务执行超过 {policy_of(job_type).task_timeout} 秒硬上限，强制失败重试"))
         except Exception as e:  # noqa: BLE001
             await self._handle_failure(job_id, job_type, e)
         finally:
@@ -495,6 +520,12 @@ class JobRunner:
             job = s.get(Job, job_id)
             if job is None:
                 return
+            if job.status != "running":
+                # 状态护栏：僵尸执行（超时后仍在跑的线程/协程）迟到失败，或看门狗已接手——
+                # 不覆写现状态，否则与重试行互相踩踏
+                print(f"[job-run] #{job_id} 迟到失败（状态已为 {job.status}），丢弃: {type(e).__name__}")
+                return
+            job.updated_at = now
             job.fail_class = fc
             job.error_fp = fp
             count = (job.retry_count or 0) + 1

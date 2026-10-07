@@ -66,6 +66,19 @@ def _record(purpose: str, model: str, tokens_in: int, tokens_out: int,
         s.commit()
 
 
+# 全局 LLM 并发闸（2026-10-07）：直调端点（知识图解/海报/物料包标签/ping）不入任务队列，
+# 也没有任何并发限制——信号量统一收编全部 LLM 调用（队列任务同样过闸，heavy 本就串行无感）
+_LLM_SEM: Optional[asyncio.Semaphore] = None
+_LLM_CONCURRENCY = 2
+
+
+def _llm_sem() -> asyncio.Semaphore:
+    global _LLM_SEM
+    if _LLM_SEM is None:
+        _LLM_SEM = asyncio.Semaphore(_LLM_CONCURRENCY)
+    return _LLM_SEM
+
+
 async def complete(messages: list[dict], *, purpose: str = "chat",
                    temperature: float = 0.7, max_tokens: int = 4096,
                    thinking: Optional[str] = None) -> str:
@@ -86,6 +99,17 @@ async def complete(messages: list[dict], *, purpose: str = "chat",
     ok = False
     last_err: Optional[Exception] = None
     content: Optional[str] = None
+    async with _llm_sem():
+        return await _complete_locked(
+            messages, body=body, cfg=cfg, purpose=purpose,
+            started=started, tokens_in=tokens_in, tokens_out=tokens_out,
+            ok=ok, last_err=last_err, content=content)
+
+
+async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict, purpose: str,
+                           started: float, tokens_in: int, tokens_out: int,
+                           ok: bool, last_err: Optional[Exception],
+                           content: Optional[str]) -> str:
     for attempt in range(3):
         try:
             async with httpx.AsyncClient(timeout=300) as client:

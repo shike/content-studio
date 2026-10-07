@@ -314,7 +314,7 @@ async def render_long(person_id: str, audio_man: str, text: str, run_dir: Path,
         proc = await asyncio.to_thread(subprocess.run, [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lf),
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(final)],
-            capture_output=True)
+            capture_output=True, timeout=1800)  # 硬超时：拼接挂死不能占死任务
         if proc.returncode != 0:
             tail = (proc.stderr or b"")[-300:].decode("utf-8", "ignore").strip()
             raise RuntimeError("分段拼接失败（ffmpeg）：" + tail.splitlines()[-1])

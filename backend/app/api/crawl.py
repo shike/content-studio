@@ -1,7 +1,9 @@
 """采集探针 API：GET 状态（状态文件+被动失败计数）、POST 手动立即探测。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import crawler_probe
 from ..auth import require_user
@@ -23,8 +25,16 @@ def status(user: User = Depends(require_user)) -> dict:
     }
 
 
+_PROBE_LOCK = asyncio.Lock()
+
+
 @router.post("/probe")
 async def probe_now(user: User = Depends(require_user)) -> dict:
-    """手动立即探测（约 10~15 秒）：同时刷新状态文件，供「立即检测」按钮用。"""
-    r = await crawler_probe.probe()
+    """手动立即探测（约 10~15 秒）：同时刷新状态文件，供「立即检测」按钮用。
+
+    全局单飞：每个 chromium 探针实例数百 MB 内存，连点/并发=内存炸弹（3.6G 服务器实测教训）。"""
+    if _PROBE_LOCK.locked():
+        raise HTTPException(status_code=429, detail="探测正在进行中，请等当前探测完成（约 15 秒）")
+    async with _PROBE_LOCK:
+        r = await crawler_probe.probe()
     return {"result": r, "label": crawler_probe.CN_LABEL.get(r["status"], r["status"])}

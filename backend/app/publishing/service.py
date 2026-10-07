@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FALLBACK_TAGS = ["AI落地", "企业数字化转型", "人工智能"]
 
 
-def build_package(asset_type: str, asset_id: int) -> dict:
+async def build_package(asset_type: str, asset_id: int) -> dict:
     script, topic, article = _load_assets(asset_type, asset_id)
 
     titles = script.title_candidates if script else []
@@ -31,7 +31,7 @@ def build_package(asset_type: str, asset_id: int) -> dict:
         "标题候选": titles,
         "口播稿": (script.final_text if script else "") or (article.md[:300] if article else ""),
     }
-    tags, llm_cover, extra = _gen_tags(material)
+    tags, llm_cover, extra = await _gen_tags(material)
     return {
         "asset_type": asset_type,
         "asset_id": asset_id,
@@ -70,11 +70,11 @@ def _load_assets(asset_type: str, asset_id: int):
     return script, topic, article
 
 
-def _gen_tags(material: dict) -> tuple[list, str]:
+async def _gen_tags(material: dict) -> tuple[list, str]:
     if not gateway.is_configured():
         return list(_FALLBACK_TAGS), ""
     try:
-        data = gateway.complete_json(
+        data = await gateway.complete_json(
             [{"role": "system", "content": load("publish_tags")},
              {"role": "user", "content": json.dumps(material, ensure_ascii=False)[:4000]}],
             purpose="publish_tags", max_tokens=1024)

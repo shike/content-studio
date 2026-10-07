@@ -23,10 +23,10 @@ class DismissIn(BaseModel):
 
 
 @router.post("/packages")
-def packages(body: PackageIn) -> dict:
+async def packages(body: PackageIn) -> dict:
     if body.asset_type not in ("script", "article"):
         raise HTTPException(400, detail="asset_type 仅支持 script/article")
-    return pub_service.build_package(body.asset_type, body.asset_id)
+    return await pub_service.build_package(body.asset_type, body.asset_id)
 
 
 @router.get("/dismissals")

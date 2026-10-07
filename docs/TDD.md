@@ -525,6 +525,22 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
 
 ## 15. 认证与多租户隔离（实现契约）
 
+- **调度审计加固（2026-10-07，内存事故复盘）**：
+  ①**心跳真实化**——`set_progress`/拾起时显式刷 `updated_at`（此前该列从不更新，reaper 的
+  stuck 判定实为"出生满 2h"而非"无进展 2h"：活跃长任务被误杀、真挂死要等满 2h）；
+  ②**任务级硬超时**——RetryPolicy.task_timeout 按类型配（拆解/自析 45min、长文 60min、脚本
+  40min、热点 15min 等），heavy 执行包 `asyncio.wait_for`：超时转 transient 重试，唯一 heavy
+  worker 不再被单任务无限占死（to_thread 线程不可取消，超时后以僵尸形态跑完，完成回调有
+  状态护栏不覆写重试行；`_handle_failure` 同护栏）；
+  ③**reaper stuck 尊重 max_retries**——达上限转终态 failed（此前无限 2h 轮重试）；
+  ④**重启恢复 queued 原行入内存队列**（旧行为"改 superseded 再 submit"因 dedup 必 miss，
+  每次重启每任务膨胀一行且租户归属丢成 0——id 膨胀到 750+ 的事故来源）；
+  ⑤`_reenqueue` light 分道先查同类 inflight 再置 queued（顺序颠倒会让行永久滞留 queued）；
+  ⑥**gateway 全局 LLM 信号量（并发 2）**——直调 LLM 的端点（知识图解/海报三端点/ping）不入队
+  也被统一限流；⑦clone_video 流式落盘（原 500MB 全量读内存）；⑧search-probe 两路探测
+  to_thread（原同步 httpx 90s 卡死整个事件循环）；⑨crawl/probe 全局单飞（429）；⑩发布台
+  `_gen_tags` 未 await 协程修复（标签 LLM 生成此前从未生效，一直走兜底）；⑪ffmpeg concat
+  硬超时 30min。
 - **上下文（auth.ACTOR）**：`ContextVar[(tenant_id, user_id, role)]`，`require_user`（async 依赖）在请求上下文设值；
   系统上下文 = `(0, 0, "")`；`role=platform_admin` 时豁免租户过滤。
 - **一人多租户归属（2026-10-03）**：`tenant_memberships(user_id, tenant_id, role)` 多对多，unique(user_id, tenant_id)；
