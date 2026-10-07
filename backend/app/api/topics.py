@@ -49,8 +49,7 @@ def quick_topic(body: QuickIn) -> dict:
     with Session(engine) as s:
         topic = Topic(title=title, source_type="manual", audience=body.audience)
         s.add(topic)
-        s.commit()
-        s.refresh(topic)
+        s.flush()  # flush 拿 id（同 benchmarks：消灭 commit+refresh 的偶发失败面）
         topic_service.mark_similar(title, topic.id, s)
         s.commit()
         s.refresh(topic)

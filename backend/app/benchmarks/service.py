@@ -248,12 +248,10 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             if (topic.score or 0) < 7.0:
                 topic.status = "rejected"  # 自动拒：低于 7.0 不进待审队列
             s.add(topic)
-            s.commit()
-            s.refresh(topic)
+            s.flush()  # 拿 id 即可（commit+refresh 在 WAL 并发下偶发 refresh 找不到行——错误类消灭）
             from ..topics.service import mark_similar
             mark_similar(topic.title, topic.id, s)
             s.commit()
-            s.refresh(topic)
             topic_id = topic.id
         else:
             s.commit()
