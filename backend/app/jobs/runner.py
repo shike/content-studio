@@ -58,14 +58,18 @@ class RetryPolicy:
 # task_timeout：hard 单 worker，任何任务卡死=全队列停摆——按类型给硬上限（超时线程不中断，
 # 会以僵尸形态跑完，但完成回调有状态护栏不再覆写结果）。
 _POLICIES: dict[str, RetryPolicy] = {
-    "benchmark_analyze": RetryPolicy(max_retries=2, base=300, cap=1800, task_timeout=2700),
+    # 拆解含 captcha 自动重试（2026-10-07）：验证码是 IP 级惩罚窗（几十分钟），
+    # 30min 指数退避 ≤2 次正好覆盖窗体——此前 classes 只有 transient，验证码失败直接终态纯靠人工
+    "benchmark_analyze": RetryPolicy(max_retries=2, base=300, cap=1800,
+                                     classes=("transient", "captcha"), task_timeout=2700),
     "script_generate": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
     "script_polish": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
     "script_finalize": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
     "article_generate": RetryPolicy(max_retries=1, base=300, task_timeout=3600),
     "idea_research": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
     "trending_topics": RetryPolicy(max_retries=1, base=300, task_timeout=900),
-    "self_analyze": RetryPolicy(max_retries=1, base=300, task_timeout=2700),
+    "self_analyze": RetryPolicy(max_retries=1, base=300, cap=1800,
+                                classes=("transient", "captcha"), task_timeout=2700),
     "self_profile_update": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
     "watch_scan": RetryPolicy(max_retries=3, base=3600, cap=3600,
                               classes=("transient", "captcha"), task_timeout=3600),

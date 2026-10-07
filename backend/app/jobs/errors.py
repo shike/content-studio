@@ -36,6 +36,8 @@ _TRANSIENT_MARKS = (
     "空正文", "推理耗尽",  # 思考型模型偶发空正文（间歇性，重试可解）
 )
 _QUOTA_MARKS = ("1113", "余额不足", "quota", "Quota", "额度")
+# 平台风控验证码：IP 级惩罚窗（几十分钟级），等待后重试可解——既非网络抖动也非确定性错误
+_CAPTCHA_MARKS = ("验证码", "captcha", "Captcha")
 
 
 def classify(exc: BaseException) -> str:
@@ -45,6 +47,8 @@ def classify(exc: BaseException) -> str:
     msg = str(exc)
     if any(k in msg for k in _QUOTA_MARKS):
         return "quota"
+    if any(k in msg for k in _CAPTCHA_MARKS):
+        return "captcha"
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return "transient"
     if any(k in msg for k in _TRANSIENT_MARKS):
