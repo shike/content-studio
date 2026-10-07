@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import or_, Session, select
 
 from ..articles.images import sign_image, valid_image_name
 from ..articles.renderer import render_wechat_html, sanitize_html
@@ -79,13 +79,14 @@ def list_articles(status: str = "", limit: int = 50, offset: int = 0,
 
     with Session(engine) as s:
         q = select(Article).order_by(Article.id.desc())  # type: ignore[arg-type]
-        # 双视角互斥：trending=仅热点切角来源；topic=仅选题来源（排除热点）——空=全部
+        # 双视角互斥：trending=仅热点切角来源；topic=非热点来源（含无选题关联的文章）——空=全部
         if source == "trending":
             q = q.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
                 _Topic.source_type == "trending")  # type: ignore[attr-defined]
         elif source == "topic":
-            q = q.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
-                _Topic.source_type != "trending")  # type: ignore[attr-defined]
+            q = q.outerjoin(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
+                or_(_Topic.id.is_(None),  # type: ignore[attr-defined]
+                    _Topic.source_type != "trending"))  # type: ignore[attr-defined]
         if status:
             q = q.where(Article.status == status)
         total = len(s.exec(q).all())
@@ -95,8 +96,9 @@ def list_articles(status: str = "", limit: int = 50, offset: int = 0,
             cq = cq.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
                 _Topic.source_type == "trending")  # type: ignore[attr-defined]
         elif source == "topic":
-            cq = cq.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
-                _Topic.source_type != "trending")  # type: ignore[attr-defined]
+            cq = cq.outerjoin(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
+                or_(_Topic.id.is_(None),  # type: ignore[attr-defined]
+                    _Topic.source_type != "trending"))  # type: ignore[attr-defined]
         counts = {st: n for st, n in s.exec(cq).all()}
         return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
 

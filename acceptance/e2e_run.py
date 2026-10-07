@@ -178,7 +178,9 @@ def main() -> int:
         # 值级断言：列表接口必须带 brand（曾漏传导致品牌卡全空——用户报"我自己的租户什么内容都没有"）
         l1 = page.locator('label', has_text='角标栏目 · 第一行').locator('input').input_value()
         check("品牌卡回显租户已配置内容（栏目第一行=示例种子值）", l1 == "跃迁", f"label_line1={l1!r}")
-        page.locator('label', has_text='头图口号').locator('input').fill(f"E2E口号 {stamp}")
+        kw_input = page.locator('label', has_text='头图口号').locator('input')
+        kw_input.wait_for(state='visible', timeout=8000)
+        kw_input.fill('E2E口号 ' + stamp)
         page.evaluate(
             """() => {
                 const b = [...document.querySelectorAll('button')]
