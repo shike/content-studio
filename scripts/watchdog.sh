@@ -37,6 +37,29 @@ fi
 
 n=$(($(cat "$STATE" 2>/dev/null || echo 0) + 1))
 echo "$n" > "$STATE"
+
+# 任务保护（2026-10-07 内存事故复盘）：有 running 任务时，health 失败/变慢多半是资源高峰
+# （ASR 转写/批量下载），重启会打断任务并可能进入"重启→拾起任务→再爆"的循环。
+# 策略：running>0 时连续 6 次（约 30 分钟）失败才强拉（任务自身硬超时最长 60min 会先自愈）；
+# running=0 或探测失败（sqlite 不可用）按原逻辑立即拉起。
+run_guard() {
+  for DB in "${CS_DATA_DIR:-}/studio.db" "/srv/content-studio/data/studio.db" \
+            "$HOME/Desktop/code/content-studio/data/studio.db"; do
+    [ -f "$DB" ] || continue
+    v=$(sqlite3 "$DB" "SELECT COUNT(*) FROM jobs WHERE status='running'" 2>/dev/null) || return 1
+    echo "$v"
+    return 0
+  done
+  return 1
+}
+if v=$(run_guard); then
+  if [ "${v:-0}" -gt 0 ] && [ "$n" -lt 6 ]; then
+    if [ "$n" -eq 1 ] || [ $((n % 12)) -eq 0 ]; then
+      notify "健康检查失败 ${n} 次，但仍有 ${v} 个任务运行中——暂缓重启（资源高峰保护），继续观察"
+    fi
+    exit 0
+  fi
+fi
 restart_service
 # 首次达到动作线告警一次，之后每 12 轮（约 1 小时）提醒一次，避免轰炸
 if [ "$n" -eq "$FAILS_BEFORE_ACT" ] || [ $((n % 12)) -eq 0 ]; then

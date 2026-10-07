@@ -176,6 +176,15 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             s.commit()
 
     ctx.set_progress(45, f"ASR 转写中（{settings.asr_model}，首次运行含模型下载）")
+    try:  # 内存防线：available 低于水位时显式告警（3.6G 机器 large-v3 转写曾把系统拖入 swap 颠簸）
+        import shutil as _sh
+        with open("/proc/meminfo") as _mi:
+            avail_mb = next(int(l.split()[1]) // 1024 for l in _mi if l.startswith("MemAvailable"))
+        if avail_mb < 800:
+            ctx.set_progress(46, f"⚠️ 可用内存仅 {avail_mb}MB，转写将变慢——建议 ASR 切 medium 或升级内存")
+            print(f"[asr] ⚠️ 转写前可用内存仅 {avail_mb}MB（水位 800MB），存在 swap 颠簸风险")
+    except Exception:  # noqa: BLE001 非 Linux/读取失败则跳过，只防线不阻断
+        pass
     from ..tenant_brand import asr_vocab_of
 
     # tenant_id 必须用首会话捕获的变量：下载分支里 b 被第二会话重取并 commit（expire_on_commit

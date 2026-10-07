@@ -167,7 +167,9 @@ async def recover_interrupted_jobs() -> None:
 
 
 class JobRunner:
-    # light 分道并发上限：扫描/识别类任务同时最多 3 个，防止几十个并发把抖音打出风控
+    # light 分道并发上限：扫描/识别类任务同时最多 N 个——每个 chromium 实例数百 MB，
+    # 3.6G 内存机器上 3 并发 + 1×ASR 就是复合内存天花板（2026-10-06 事故因子之一）。
+    # 默认 2；可用 CS_LIGHT_CONCURRENCY 调整。
     _LIGHT_SEM: Optional[asyncio.Semaphore] = None
 
     def __init__(self) -> None:
@@ -181,7 +183,8 @@ class JobRunner:
             return
         self._started = True
         self._queues.setdefault(0, asyncio.Queue())
-        self._LIGHT_SEM = asyncio.Semaphore(3)
+        import os as _os
+        self._LIGHT_SEM = asyncio.Semaphore(max(1, int(_os.environ.get("CS_LIGHT_CONCURRENCY", "2"))))
         self._spawn("worker", self._consume)
         self._spawn("retry", self._retry_loop)
         self._spawn("reaper", self._reaper_loop)

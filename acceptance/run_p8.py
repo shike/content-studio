@@ -16,6 +16,46 @@ if server_down():
 _, health = request("GET", "/api/health")
 llm_ready = (health.get("llm") or {}).get("configured") is True
 
+section("P8 · 可靠性契约（调度/重试/熔断/画像，2026-10-07 加固锁定）")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
+from app.jobs.errors import classify as _classify  # noqa: E402
+from app.jobs.runner import policy_of as _policy_of  # noqa: E402
+from app.jobs import schedules as _sched  # noqa: E402
+from app.benchmarks import service as _bms  # noqa: E402
+from app.articles.service import length_specs as _ls  # noqa: E402
+
+class _FakeRow:  # effective_hour 只读 key/hour
+    key = "watch_discover_daily"
+    hour = None
+
+check("发现任务生效钟点=2（不被全局扫描钟点覆盖）", _sched.effective_hour(_FakeRow()) == 2)
+check("验证码失败分类为 captcha（可挂起重试）",
+      _classify(Exception("页面未吐出视频数据（可能触发验证码）")) == "captcha")
+_p = _policy_of("benchmark_analyze")
+check("拆解策略含 captcha 自动处置 + 挂起上限 16",
+      "captcha" in _p.classes and _p.max_parks == 16 and _p.task_timeout == 2700,
+      f"classes={_p.classes}, max_parks={_p.max_parks}, timeout={_p.task_timeout}")
+_bms._CAPTCHA_FAILS.clear()
+try:
+    _bms._captcha_breaker()
+    check("下载熔断未触发（无失败记录）", True)
+except _bms.CaptchaError:
+    check("下载熔断未触发（无失败记录）", False)
+_bms._captcha_record(); _bms._captcha_record()
+try:
+    _bms._captcha_breaker()
+    check("下载熔断 2 次失败后触发", False)
+except _bms.CaptchaError:
+    check("下载熔断 2 次失败后触发", True)
+finally:
+    _bms._CAPTCHA_FAILS.clear()
+spec = _ls("feed", "目标读者：制造业中小企业老板与决策者。")
+check("长文规格画像注入（受众锚点随租户）",
+      "制造业中小企业老板与决策者" in spec["title"] and "项目烂尾" not in spec["title"])
+spec_b = _ls("feed", "面向健身爱好者和想减脂的上班族。")
+check("长文规格换画像换锚点（无上一租户残留）",
+      "健身爱好者" in spec_b["title"] and "制造业" not in spec_b["title"])
+
 section("P8 · 今日热点选题提炼（R1.4）")
 if llm_ready:
     code, d = request("POST", "/api/topics/trending", body={})
