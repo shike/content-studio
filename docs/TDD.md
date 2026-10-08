@@ -394,6 +394,8 @@ article:    draft ──► edited ──► rendered ──► published（由 
     信息流标题公式（人群+数字+冲突+可带走判断，禁论文对仗腔与悬念钩子腔）、金句收尾，
     完读率优先——依据：公众号推荐流赛马制下完读率权重 35% 居首、完读率 <30% 推荐终止）；
     `deep`=深度版（3000~5000 字、5~7 节、铺垫式开头、机制拆解/方法框架/边界条件三件套，
+    判决句式标题（禁论文对仗腔）、全文至少一个可转述的原创判断框架（2026-10-08 卡兹克拆解四条，
+    另含术语类比纪律/数字体感锚/人物年代一句话叙事锚——不破去故事化裁定），
     风格 `style=auto` 时生成开头先经 style_pick 小调用按素材挑透镜（在精选五透镜 deep_dive/practice/inquiry/anatomy/comparison 里挑，无效回落 deep_dive），
     专业书面向文体，适合搜一搜长尾与发客户）。规格文本存 `articles/service.py` 的
     `ARTICLE_LENGTHS`，分别注入三个 prompt 的 `{{TITLE_SPEC}}/{{LENGTH_SPEC}}/{{SECTION_SPEC}}`；
