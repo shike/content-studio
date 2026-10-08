@@ -116,7 +116,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     from ..models import Article as _A, BenchmarkVideo, Script as _S
     from ..tenant_brand import audience_note_of, brand_of
-    from .hotlist import fetch_baidu_hot
+    from .hotlist import fetch_baidu_hot, fetch_tech_news
 
     tenant_id = payload.get("tenant_id") or 1
     with Session(engine) as s:
@@ -152,8 +152,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 prev_hotspots.append(h[:110])
                 prev_norms.append(_norm(h))
 
-    ctx.set_progress(24, "抓国内热点榜（百度热搜·今日）")
+    ctx.set_progress(24, "抓国内热点榜与科技资讯（百度热搜+爱范儿/IT之家）")
     hot_items, hot_meta = await asyncio.to_thread(fetch_baidu_hot, 15)
+    news_items, news_meta = await asyncio.to_thread(fetch_tech_news)
 
     ctx.set_progress(36, "按画像生成今日检索词")
     queries: list[str] = []
@@ -164,6 +165,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 [{"role": "user", "content": render(
                     "trending_queries", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                     TODAY=datetime.now().strftime("%Y-%m-%d %A"),
+                    NEWS_TITLES=json.dumps([x["title"] for x in news_items[:10]],
+                                           ensure_ascii=False),
                     HOT_WORDS=json.dumps([x["word"] for x in hot_items[:12]], ensure_ascii=False),
                     WATCH_TITLES=json.dumps([x["title"] for x in watch_items[:8]],
                                             ensure_ascii=False))}],
@@ -192,9 +195,14 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(62, "结合创作者画像提炼切角")
     material_parts = []
-    material_parts.append("【百度热搜·今日实时榜】\n" + ("\n".join(
-        f"- {x['word']}" + (f"｜{x['desc']}" if x.get("desc") else "") for x in hot_items)
-        if hot_items else f"（未生效：{hot_meta.get('status')}）"))
+    material_parts.append("【国内科技/AI 资讯（爱范儿·IT之家，近 48 小时）——创作者领域的主力原料】\n"
+                          + ("\n".join(f"- {x['title']}（{x['source']}{('/' + x['date']) if x['date'] else ''}）"
+                                       for x in news_items)
+                             if news_items else f"（未生效：{news_meta.get('status')}）"))
+    material_parts.append("【百度热搜·今日实时榜（泛热点——只有能与创作者领域强结合的才可选）】\n"
+                          + ("\n".join(f"- {x['word']}" + (f"｜{x['desc']}" if x.get("desc") else "")
+                                       for x in hot_items)
+                             if hot_items else f"（未生效：{hot_meta.get('status')}）"))
     material_parts.append("【联网检索·按画像生成的检索词】\n" + ("\n".join(
         f"- {x}" for x in web_lines) if web_lines else f"（未生效：{q_status}）"))
     if watch_items:
@@ -269,8 +277,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 evidence={
                     "hotspot": x.get("hotspot", ""),
                     "why_now": x.get("why_now", ""),
-                    "material": {"watch_count": len(watch_items), "hot": hot_meta,
-                                 "queries": q_status, "web": search_metas},
+                    "material": {"watch_count": len(watch_items), "news": news_meta,
+                                 "hot": hot_meta, "queries": q_status, "web": search_metas},
                 },
                 status="draft",
             )
@@ -282,8 +290,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(100, f"完成：{len(created)} 个切角已入选题库"
                           f"（替代 {len(superseded)} 条当日旧批次）")
     return {"topic_ids": created, "superseded": superseded,
-            "material": {"watch": len(watch_items), "hot": hot_meta,
-                         "queries": queries, "web": search_metas}}
+            "material": {"watch": len(watch_items), "news": news_meta,
+                         "hot": hot_meta, "queries": queries, "web": search_metas}}
 
 
 def mark_similar(title: str, topic_id: int, session: Session) -> None:
