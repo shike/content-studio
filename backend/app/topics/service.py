@@ -105,15 +105,28 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
 
 @register_executor("trending_topics")
 async def trending_topics(ctx: JobContext, payload: dict) -> dict:
-    """今日热点选题提炼（R1.4）：站内对标议题 + 联网今日热点 × 租户画像 → 3 个切角落选题库。
+    """今日热点选题提炼（R1.4，2026-10-08 质量重构）：四路原料 × 租户画像 → ≤3 个切角。
 
-    原料收集失败不阻塞（对标清单可空、联网可关），LLM 输入里如实标注缺料。"""
+    四路原料：百度热搜今日榜（主力）/ 联网检索（按画像生成的查询词，逐条 1 发）/ 对标圈
+    近 2 天（议题参考，禁止当热点）/ 近 7 天已出题热点（禁写清单）。切角过三层硬校验
+    （对标圈拦截、7 天热点去重、批内去重）才落库，宁缺毋滥；批次替代：当日无下游的旧
+    draft 让位新批次。原料收集失败不阻塞，LLM 输入里如实标注缺料。"""
+    import re as _re
     from datetime import datetime, timedelta
 
-    from ..models import BenchmarkVideo
+    from ..models import Article as _A, BenchmarkVideo, Script as _S
     from ..tenant_brand import audience_note_of, brand_of
+    from .hotlist import fetch_baidu_hot
 
-    ctx.set_progress(10, "收集站内热点原料（对标圈近 2 天议题）")
+    tenant_id = payload.get("tenant_id") or 1
+    with Session(engine) as s:
+        persona_text = brand_of(tenant_id)["persona"]
+        audience_note = audience_note_of(tenant_id)
+
+    def _norm(t: str) -> str:
+        return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-]+", "", str(t)).lower()
+
+    ctx.set_progress(8, "收集站内原料（对标圈近 2 天议题）")
     cutoff = datetime.now() - timedelta(days=2)
     with Session(engine) as s:
         rows = s.exec(select(BenchmarkVideo).where(
@@ -125,52 +138,128 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             for b in rows if b.title
         ][:40]
 
-    ctx.set_progress(30, "联网搜今日行业热点（国内源优先）")
-    web_lines: list[str] = []
-    web_meta = {"refs": 0, "status": "skipped"}
-    if search_enabled():
-        try:
-            # 单查询纪律（搜索通道限流）：中文时效查询，国内热点源优先
-            refs, meta = await asyncio.to_thread(
-                batch_search, ["AI 大模型 企业应用 最新消息 今天"])
-            web_meta = meta
-            web_lines = [r for r in (refs or "").split("\n\n") if r.strip()][:12]
-        except Exception as e:  # noqa: BLE001 联网失败降级为纯站内，留痕
-            web_meta = {"refs": 0, "status": f"error: {str(e)[:60]}"}
-
-    ctx.set_progress(55, "结合创作者画像提炼切角")
+    # 近 7 天已出题热点（旧闻连出两天=质量事故：最高法 9-07 旧闻曾连续两天被当"今日"出题）
+    ctx.set_progress(16, "整理近 7 天已出题热点（禁写清单）")
+    prev_hotspots: list[str] = []
+    prev_norms: list[str] = []
+    pcutoff = datetime.now() - timedelta(days=7)
     with Session(engine) as s:
-        tenant_id = payload.get("tenant_id") or 1
-        persona_text = brand_of(tenant_id)["persona"]
-        audience_note = audience_note_of(tenant_id)
+        for t in s.exec(select(Topic).where(
+                Topic.source_type == "trending",  # type: ignore[attr-defined]
+                Topic.created_at >= pcutoff)).all():  # type: ignore[attr-defined]
+            h = str((t.evidence or {}).get("hotspot") or t.source_ref or "").strip()
+            if h:
+                prev_hotspots.append(h[:110])
+                prev_norms.append(_norm(h))
 
+    ctx.set_progress(24, "抓国内热点榜（百度热搜·今日）")
+    hot_items, hot_meta = await asyncio.to_thread(fetch_baidu_hot, 15)
+
+    ctx.set_progress(36, "按画像生成今日检索词")
+    queries: list[str] = []
+    q_status = "skipped"
+    if search_enabled() and gateway.is_configured():
+        try:
+            pick = await gateway.complete_json(
+                [{"role": "user", "content": render(
+                    "trending_queries", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
+                    TODAY=datetime.now().strftime("%Y-%m-%d %A"),
+                    HOT_WORDS=json.dumps([x["word"] for x in hot_items[:12]], ensure_ascii=False),
+                    WATCH_TITLES=json.dumps([x["title"] for x in watch_items[:8]],
+                                            ensure_ascii=False))}],
+                purpose="trending_queries", max_tokens=1024, thinking="disabled")
+            queries = [str(q).strip() for q in (pick.get("queries") or [])
+                       if str(q).strip()][:4]
+            q_status = "ok" if queries else "empty"
+        except Exception as e:  # noqa: BLE001 降级默认词，留痕
+            q_status = f"error: {type(e).__name__}: {str(e)[:60]}"
+    if not queries:
+        queries = ["AI 大模型 企业应用 最新消息 今天"]
+
+    ctx.set_progress(50, f"联网检索（{len(queries)} 条查询·国内源优先）")
+    web_lines: list[str] = []
+    search_metas: list[dict] = []
+    for q in queries:  # 每查询 1 发（限流纪律；重复词命中缓存不计新检索）
+        try:
+            refs, meta = await asyncio.to_thread(batch_search, [q])
+            search_metas.append({"query": q, **meta})
+            for ln in (refs or "").split("\n"):
+                if ln.strip():
+                    web_lines.append(f"（检索词：{q}）{ln}")
+        except Exception as e:  # noqa: BLE001 单查询失败不拖垮整批
+            search_metas.append({"query": q, "status": f"error: {str(e)[:60]}"})
+    web_lines = web_lines[:15]
+
+    ctx.set_progress(62, "结合创作者画像提炼切角")
     material_parts = []
+    material_parts.append("【百度热搜·今日实时榜】\n" + ("\n".join(
+        f"- {x['word']}" + (f"｜{x['desc']}" if x.get("desc") else "") for x in hot_items)
+        if hot_items else f"（未生效：{hot_meta.get('status')}）"))
+    material_parts.append("【联网检索·按画像生成的检索词】\n" + ("\n".join(
+        f"- {x}" for x in web_lines) if web_lines else f"（未生效：{q_status}）"))
     if watch_items:
-        material_parts.append("【对标圈近 2 天新视频（作者｜标题｜互动）】\n" + "\n".join(
-            f"- {x['author']}｜{x['title']}｜{x['likes']}" for x in watch_items))
+        material_parts.append("【对标圈近 2 天新视频（同行在写什么——议题参考，不是热点事实）】\n"
+                              + "\n".join(f"- {x['author']}｜{x['title']}｜{x['likes']}"
+                                          for x in watch_items))
     else:
         material_parts.append("【对标圈近 2 天新视频】（无——站内采集空窗）")
-    if web_lines:
-        material_parts.append("【联网检索·今日行业热点】\n" + "\n".join(f"- {x}" for x in web_lines))
-    else:
-        material_parts.append(f"【联网检索·今日行业热点】（未生效：{web_meta.get('status')}）")
     material = "\n\n".join(material_parts)
 
     data = await gateway.complete_json(
         [{"role": "system", "content": render("trending_topics",
                                               PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
-                                              MATERIAL=material)},
+                                              TODAY=datetime.now().strftime("%Y-%m-%d"),
+                                              MATERIAL=material,
+                                              BAN_LIST="\n".join(f"- {h}" for h in prev_hotspots)
+                                              or "（近 7 天无出题记录）")},
          {"role": "user", "content": "提炼今天可写的 3 个选题切角。"}],
         purpose="trending_topics", max_tokens=8000, thinking="disabled")
 
     items = [x for x in (data.get("topics") or []) if isinstance(x, dict) and x.get("title")]
-    if not items:
-        raise RuntimeError("热点提炼无有效产出（LLM 返回为空或结构不符），请重试")
 
-    ctx.set_progress(85, "切角落库（选题库 draft）")
+    # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
+    watch_norms = [_norm(x["title"]) for x in watch_items if len(_norm(x["title"])) >= 10]
+    batch: list[dict] = []
+    seen_norms: list[str] = []
+    for x in items:
+        hotspot = str(x.get("hotspot") or "").strip()
+        if not hotspot or "对标圈" in hotspot:
+            continue
+        hn = _norm(hotspot)
+        if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
+               for p in prev_norms):
+            continue
+        if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
+            continue
+        if any(hn in w or SequenceMatcher(None, hn, w).ratio() >= 0.5 for w in watch_norms):
+            continue  # hotspot 实为对标视频标题的变体
+        seen_norms.append(hn)
+        batch.append(x)
+        if len(batch) >= 3:
+            break
+    if not batch:
+        raise RuntimeError("热点提炼无有效切角（原料不足或全部未过新鲜度校验），请重试")
+
+    ctx.set_progress(85, f"切角落库（{len(batch)} 条过校验，选题库 draft）")
     created: list[int] = []
+    superseded: list[int] = []
     with Session(engine) as s:
-        for x in items[:3]:
+        # 批次替代：当日更早批次且无下游产物的 draft 让位（今日热点=今日最新一批）
+        day_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        for t in s.exec(select(Topic).where(
+                Topic.source_type == "trending",  # type: ignore[attr-defined]
+                Topic.status == "draft",  # type: ignore[attr-defined]
+                Topic.created_at >= day_start)).all():  # type: ignore[attr-defined]
+            has_down = s.exec(select(_S).where(_S.topic_id == t.id)).first() is not None \
+                or s.exec(select(_A).where(_A.topic_id == t.id)).first() is not None
+            if not has_down:
+                ev = dict(t.evidence or {})
+                ev["superseded"] = f"被 {datetime.now():%H:%M} 新批次替代"
+                t.evidence = ev
+                t.status = "rejected"
+                s.add(t)
+                superseded.append(t.id)
+        for x in batch:
             t = Topic(
                 title=str(x.get("title"))[:60],
                 angle=str(x.get("angle") or ""),
@@ -180,7 +269,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 evidence={
                     "hotspot": x.get("hotspot", ""),
                     "why_now": x.get("why_now", ""),
-                    "material": {"watch_count": len(watch_items), "web": web_meta},
+                    "material": {"watch_count": len(watch_items), "hot": hot_meta,
+                                 "queries": q_status, "web": search_metas},
                 },
                 status="draft",
             )
@@ -189,8 +279,11 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             created.append(t.id)
         s.commit()
 
-    ctx.set_progress(100, f"完成：{len(created)} 个切角已入选题库（trending）")
-    return {"topic_ids": created, "material": {"watch": len(watch_items), "web": web_meta}}
+    ctx.set_progress(100, f"完成：{len(created)} 个切角已入选题库"
+                          f"（替代 {len(superseded)} 条当日旧批次）")
+    return {"topic_ids": created, "superseded": superseded,
+            "material": {"watch": len(watch_items), "hot": hot_meta,
+                         "queries": queries, "web": search_metas}}
 
 
 def mark_similar(title: str, topic_id: int, session: Session) -> None:

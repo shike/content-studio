@@ -210,6 +210,17 @@ register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号�
                            enabled_by="watch_scan_enabled", run=_run_self_scan))
 register_schedule(Schedule(key="topic_radar", label="话题雷达巡检",
                            daily_hour=1, hour_from_settings=True, run=_run_topic_radar))
+async def _run_trending_daily() -> str:
+    from .runner import runner
+    # 与 API 端点同款 dedup_key（部分唯一索引只挡活跃状态，跨天可重复）
+    job = await runner.submit("trending_topics", {"tenant_id": 1},
+                              dedup_key="1:trending_topics:daily",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}"
+
+
+register_schedule(Schedule(key="trending_daily", label="今日热点提炼（每日 7 点·示例租户）",
+                           daily_hour=7, run=_run_trending_daily))
 register_schedule(Schedule(key="daily_backup", label="业务库每日备份",
                            daily_hour=4, run=_run_daily_backup))
 register_schedule(Schedule(key="media_cleanup", label="拆解媒体清扫",
