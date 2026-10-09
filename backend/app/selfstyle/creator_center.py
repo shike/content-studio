@@ -164,6 +164,8 @@ def fetch_all_videos(cookie: str, max_pages: int = 40) -> tuple[Optional[list[di
                 pass
             known_ids = {e["id"] for e in map(_entry_of, raw_items) if e}
             for page_no in range(1, max_pages):
+                # 人味节流：每页间隔 1.2~2.0s，读自己数据也要像人翻页（风控友好）
+                page.wait_for_timeout(1200 + (page_no * 797) % 800)
                 cursor = page_no * per_page
                 url2 = _bump_cursor(captured["url"], cursor)
                 body2 = _bump_cursor(captured["post_data"], cursor) if method == "POST" else ""
