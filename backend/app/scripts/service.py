@@ -13,7 +13,7 @@ from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
 DEFAULT_STRUCTURE = [
-    {"step": "hook", "requirement": "前3秒点名受众+痛点，制造看下去的理由"},
+    {"step": "hook", "requirement": "前3秒甩判断或喊话受众（反常识/身份定位/行动指令/提问，禁自我介绍与背景铺垫）"},
     {"step": "pain", "requirement": "把痛点讲透，让观众对号入座"},
     {"step": "solution", "requirement": "抛出你的解法或观点，先给结论"},
     {"step": "proof", "requirement": "用具体案例、数字或交付物证明（真实、可验收）"},
@@ -85,7 +85,10 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     # 还是下线该功能；定了再补占位符 + 让 render() 强制校验。
 
     length = payload.get("length", "short")
-    length_spec = "600~900 字（2~3 分钟长版）" if length == "long" else "300~500 字（60~90 秒短版）"
+    # 2026-10-09 流量诊断定档：自己账号 40~70s 视频中位播放 441，<40s 只有 248，>120s 更差
+    # → 默认档锁定黄金带 240~320 字（50~70 秒）；长版保留给视频号/数字人场景
+    length_spec = ("600~900 字（2~3 分钟长版）" if length == "long"
+                   else "240~320 字（50~70 秒黄金档）")
     use_style = bool(payload.get("use_style", True))
     from ..tenant_brand import brand_of
 
@@ -110,7 +113,8 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
 
     # 新契约（PRD R2.3）：生成后自动批判打磨一轮
     ctx.set_progress(60, "自动批判打磨一轮（约 3~8 分钟，慢是正常的）")
-    versions = await _polish_core(versions, use_style=bool(payload.get("use_style", True)))
+    versions = await _polish_core(versions, use_style=bool(payload.get("use_style", True)),
+                                  length=length)
 
     with Session(engine) as s:
         script = s.get(Script, script_id)
@@ -128,10 +132,14 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     return {"script_id": script_id, "versions": len(versions)}
 
 
-async def _polish_core(versions: list[dict], use_style: bool = True) -> list[dict]:
+async def _polish_core(versions: list[dict], use_style: bool = True,
+                       length: str = "short") -> list[dict]:
     """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。"""
+    length_spec = ("600~900 字（2~3 分钟长版）" if length == "long"
+                   else "240~320 字（50~70 秒黄金档）")
     data = await gateway.complete_json(
-        [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style))},
+        [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style),
+                                              LENGTH=length_spec)},
          {"role": "user", "content": json.dumps(versions, ensure_ascii=False)}],
         purpose="script_polish", max_tokens=12000)
     polished = _normalize_versions(data.get("versions") or [])
@@ -174,7 +182,8 @@ async def _script_polish(ctx: JobContext, payload: dict) -> dict:
         original = list(script.versions)
 
     ctx.set_progress(30, "批判打磨中")
-    merged = await _polish_core(original, use_style=bool(payload.get("use_style", True)))
+    merged = await _polish_core(original, use_style=bool(payload.get("use_style", True)),
+                                length=payload.get("length", "short"))
 
     with Session(engine) as s:
         script = s.get(Script, script_id)

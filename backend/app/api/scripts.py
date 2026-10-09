@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/scripts")
 class GenerateIn(BaseModel):
     topic_id: int
     use_style: bool = True  # 贴合我的风格（R9.4）
-    length: str = "short"  # short=300~500字 | long=600~900字（PRD R2.1 两档）
+    length: str = "short"  # short=240~320字（50~70s 黄金档）| long=600~900字（PRD R2.1 两档，2026-10-09 定档）
 
 
 class FinalizeIn(BaseModel):
