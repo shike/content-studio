@@ -74,6 +74,7 @@ class AccountIn(BaseModel):
     url: str = ""
     note: str = ""
     kind: str = "competitor"  # competitor | self
+    creator_cookie: str = ""  # 创作者中心登录态（仅 self 用；回显只给 has_cookie 不回 cookie）
 
 
 class AccountUpdate(BaseModel):
@@ -82,6 +83,7 @@ class AccountUpdate(BaseModel):
     note: str | None = None
     enabled: bool | None = None
     kind: str | None = None
+    creator_cookie: str | None = None  # 传空串=清除（换号/作废）
 
 
 class ResolveIn(BaseModel):
@@ -123,6 +125,8 @@ def list_accounts() -> dict:
         for r in rows:
             st = stats.get(r.name) or {"total": 0, "recent": 0}
             d = r.model_dump()
+            d.pop("creator_cookie", None)  # 凭据不出后端：回显只有 has_cookie 位
+            d["has_cookie"] = bool(r.creator_cookie)
             d["video_total"] = st["total"]
             d["video_recent_7d"] = st["recent"]
             d["scores"] = _parse_scores(r.note or "")
@@ -147,11 +151,15 @@ def create_account(body: AccountIn) -> dict:
             raise HTTPException(status_code=400, detail="仅支持抖音链接（防任意 URL 抓取）")
     with Session(engine) as s:
         acc = WatchAccount(platform=body.platform, name=body.name.strip(),
-                           url=body.url.strip(), note=body.note.strip(), kind=body.kind)
+                           url=body.url.strip(), note=body.note.strip(), kind=body.kind,
+                           creator_cookie=body.creator_cookie.strip() if body.kind == "self" else "")
         s.add(acc)
         s.commit()
         s.refresh(acc)
-        return acc.model_dump()
+        d = acc.model_dump()
+        d.pop("creator_cookie", None)
+        d["has_cookie"] = bool(acc.creator_cookie)
+        return d
 
 
 @router.put("/accounts/{account_id}")
@@ -177,10 +185,15 @@ def update_account(account_id: int, body: AccountUpdate) -> dict:
             if body.kind not in ("competitor", "self"):
                 raise HTTPException(status_code=400, detail="kind 必须是 competitor / self")
             acc.kind = body.kind
+        if body.creator_cookie is not None and acc.kind == "self":
+            acc.creator_cookie = body.creator_cookie.strip()  # 传空串=清除
         s.add(acc)
         s.commit()
         s.refresh(acc)
-        return acc.model_dump()
+        d = acc.model_dump()
+        d.pop("creator_cookie", None)
+        d["has_cookie"] = bool(acc.creator_cookie)
+        return d
 
 
 @router.delete("/accounts/{account_id}")

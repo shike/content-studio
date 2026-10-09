@@ -162,6 +162,9 @@ def _migrate(engine) -> None:
         if cols and "kind" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN kind VARCHAR NOT NULL DEFAULT 'competitor'"))
+        if cols and "creator_cookie" not in cols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))
         jcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(jobs)"))]
         if jcols and "history" not in jcols:
             conn.execute(sqlalchemy.text("ALTER TABLE jobs ADD COLUMN history JSON DEFAULT '[]'"))

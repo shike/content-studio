@@ -285,6 +285,7 @@ class WatchAccount(TenantScoped, TimestampMixin, table=True):
     url: str = ""  # 账号主页链接（抖音：App 内分享主页→复制链接）
     enabled: bool = True
     kind: str = Field(default="competitor")  # competitor | self（我的账号，走自我研究链）
+    creator_cookie: str = Field(default="")  # 创作者中心登录态（仅 self；有它全量抓播放/点赞，无它公开路线）
     note: str = ""
     last_scan_at: Optional[datetime] = None
 

@@ -145,6 +145,53 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
     for i, acc in enumerate(accounts):
         ctx.set_progress(5 + int(80 * i / len(accounts)),
                          f"扫描我的账号 {acc.name}（{i + 1}/{len(accounts)}）")
+
+        # 创作者中心路线（R9 增强）：配了 cookie 就全量抓+刷新存量（播放/点赞/评论/转发）。
+        # 失败可见降级公开路线（notes 留原因），绝不静默——播放量口径的数据不能静默变没。
+        if acc.creator_cookie:
+            from .creator_center import CreatorCookieError, fetch_all_videos
+
+            try:
+                entries, err = await asyncio.to_thread(fetch_all_videos, acc.creator_cookie)
+            except CreatorCookieError as e:
+                entries, err = None, str(e)
+            if entries is not None:
+                created = updated = 0
+                with Session(engine) as s:
+                    for e in entries:
+                        vid = str(e.get("id") or "")
+                        if not vid:
+                            continue
+                        row = s.exec(select(SelfVideo).where(
+                            SelfVideo.aweme_id == vid)).first()  # type: ignore[attr-defined]
+                        if row is None:
+                            s.add(SelfVideo(tenant_id=acc.tenant_id,  # 父账号继承（调度上下文无 ACTOR 归属）
+                                            url=f"https://www.douyin.com/video/{vid}",
+                                            aweme_id=vid,
+                                            title=str(e.get("title") or "")[:80],
+                                            stats=e.get("stats") or {},
+                                            scan_status="pending"))  # 待定夺，批准后进风格分析
+                            created += 1
+                        else:
+                            row.stats = e.get("stats") or row.stats
+                            if not row.title and e.get("title"):
+                                row.title = str(e["title"])[:80]
+                            s.add(row)
+                            updated += 1
+                    s.commit()
+                known |= {str(e.get("id")) for e in entries if e.get("id")}
+                queued += created
+                with Session(engine) as s:
+                    row = s.get(WatchAccount, acc.id)
+                    if row is not None:
+                        row.last_scan_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                        s.add(row)
+                        s.commit()
+                notes.append(f"{acc.name}：创作者中心全量 {len(entries)} 条"
+                             f"（新增 {created}，存量刷新 {updated}，含播放量）")
+                continue
+            notes.append(f"{acc.name}：创作者中心路线失败（{err}），降级公开路线")
+
         entries, err = await asyncio.to_thread(_list_self_videos, acc.url)
         if entries is None:
             notes.append(f"{acc.name}：扫描失败（{err}）")

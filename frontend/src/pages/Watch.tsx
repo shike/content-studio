@@ -21,6 +21,7 @@ interface WatchAccount {
   note: string
   enabled: boolean
   kind: string
+  has_cookie?: boolean
   last_scan_at: string | null
   video_total: number
   video_recent_7d: number
@@ -78,7 +79,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [accVideos, setAccVideos] = useState<BenchmarkLite[]>([])
   const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', url: '', note: '' })
+  const [editForm, setEditForm] = useState({ name: '', url: '', note: '', creator_cookie: '' })
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ platform: 'douyin', name: '', url: '', note: '', kind: 'competitor' })
   const [resolveHint, setResolveHint] = useState('')
@@ -177,9 +178,20 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           name: editForm.name,
           url: editForm.url,
           note: editForm.note,
+          ...(editForm.creator_cookie.trim()
+            ? { creator_cookie: editForm.creator_cookie.trim() } : {}),
         }),
       })
       setEditId(null)
+      await reload()
+    })
+
+  const clearCookie = (id: number) =>
+    guard(async () => {
+      await api(`/watch/accounts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ creator_cookie: '' }),
+      })
       await reload()
     })
 
@@ -617,6 +629,9 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                     {acc.kind === 'self' && (
                       <span className="badge shrink-0 bg-sky-100 text-sky-700" title="我的账号：走「我的风格」研究链">我的</span>
                     )}
+                    {acc.kind === 'self' && acc.has_cookie && (
+                      <span className="badge shrink-0 bg-emerald-100 text-emerald-700" title="已配创作者中心登录态：扫描走全量抓取，含播放量">播放量已配</span>
+                    )}
                     <span className={`badge shrink-0 ${acc.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
                       {acc.enabled ? '监控中' : '已停用'}
                     </span>
@@ -663,7 +678,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                     <button
                       onClick={() => {
                         setEditId(editId === acc.id ? null : acc.id)
-                        setEditForm({ name: acc.name, url: acc.url, note: acc.note })
+                        setEditForm({ name: acc.name, url: acc.url, note: acc.note, creator_cookie: '' })
                       }}
                       className="btn-ghost btn-xs text-slate-500"
                     >
@@ -706,6 +721,14 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                         <input value={editForm.note} onChange={(e) => setEditForm({ ...editForm, note: e.target.value })} placeholder="备注" className="input flex-1" />
                         <button onClick={saveEdit} className="btn-accent btn-xs">保存</button>
                       </div>
+                      {acc.kind === 'self' && (
+                        <div className="flex items-center gap-2">
+                          <input type="password" value={editForm.creator_cookie} onChange={(e) => setEditForm({ ...editForm, creator_cookie: e.target.value })} placeholder={acc.has_cookie ? '已配置创作者中心 Cookie（粘贴新值=更换，留空=不变）' : '创作者中心 Cookie：creator.douyin.com 登录后 F12 → Network → 复制整串 Cookie'} className="input min-w-72 flex-1 font-mono text-xs" />
+                          {acc.has_cookie && (
+                            <button onClick={() => clearCookie(acc.id)} className="btn btn-xs">清除</button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

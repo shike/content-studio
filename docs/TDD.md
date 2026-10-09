@@ -136,7 +136,7 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `failure_patterns` | fp(唯一), kind, fail_class, label, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
 | `schedules` | key, label, enabled, hour 覆盖, last/next_run_at, last_status, run_count | 统一调度中心运行态 |
 | `app_settings` | key(主键), value(JSON) | 平台运行时配置（LLM/检索/ASR/数字人凭证/扫描计划；密钥只写不读） |
-| `watch_accounts` | tenant_id, platform, name, url, note, kind(competitor/self), enabled, last_scan_at | 对标/自有账号（R3.1/R9.1；评分口径见 MRD §2.1.1） |
+| `watch_accounts` | tenant_id, platform, name, url, note, kind(competitor/self), creator_cookie(self 创作者中心登录态), enabled, last_scan_at | 对标/自有账号（R3.1/R9.1；评分口径见 MRD §2.1.1） |
 | `avatar_configs` | tenant_id, name, engine, chanjing_person_id, chanjing_audio_man, chanjing_pic_url, chanjing_preview_url | 数字人配置（克隆形象+配套音色） |
 | `avatar_videos` | tenant_id, avatar_id, script_id, status(generating/done/failed), seconds, beans_used, model(0基础/1高质), audio_path, video_path | 数字人生成记录 |
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
@@ -258,7 +258,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
 
 ### 我的风格（自我研究，R9）
 - `GET /api/style/overview` → `{account: WatchAccount|null, profile: 最新画像|null, profile_history:[...], videos:[{id,title,analyzed_at,style_analysis}], stats:{total, analyzed, pending}}`
-- `POST /api/style/scan` → 202 `{job_id}`（扫描我的账号，新视频自动排队风格拆解；无 self 账号 400）
+- `POST /api/style/scan` → 202 `{job_id}`（扫描我的账号，新视频自动排队风格拆解；无 self 账号 400）。**双路扫描（2026-10-09）**：自我账号配 `creator_cookie`（创作者中心登录态，存 watch_accounts 行内，API 回显只给 has_cookie 不回凭据）→ Playwright 注入 cookie 打开内容管理页拦列表 XHR、页面上下文同源重放翻页，**全量抓取+每次刷新存量**（播放/点赞/评论/转发，self_videos.stats）；cookie 失效/任何失败→notes 可见降级公开路线（点赞快照、只抓新增）。凭据绝不出后端。
 - `POST /api/style/profile/update` → 202 `{job_id}`（手动重算画像；无已分析视频 400）
 - `GET /api/style/videos?status=&limit=&offset=` → `{items,total}`（分页+标注筛选；items 含 analyzed 派生字段）
 - `POST /api/style/videos/{id}/resolve` `{action}` → 风格视频人工定夺（批准拆解/忽略）
