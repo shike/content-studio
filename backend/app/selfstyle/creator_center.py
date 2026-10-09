@@ -1,23 +1,28 @@
 """创作者中心登录态抓取（R9 增强）：全部视频的播放/点赞/评论/转发。
 
 前提：用户在同行监测「我的账号」上配置 creator_cookie（creator.douyin.com 的
-登录态，浏览器 F12 → Network → 复制整串 Cookie）。
+登录态，扫码或 F12 导出均可）。
 
-路线：Playwright 注入 cookie → 打开内容管理页 → 拦页面自己的内容列表 XHR →
-拿到首个请求后在页面上下文内同源重放改 cursor 翻页（同源 fetch 带站点自己的
-凭据与签名，不怕接口参数变化）。cookie 失效明确报错，绝不静默回落公开路线
-——两条路线数据口径不同（播放量全量 vs 点赞快照），混着刷会把新数据刷没。
+路线（2026-10-09 真实接口校准）：Playwright 注入 cookie → 打开内容管理页 →
+拦页面自己的 work_list XHR（janus/douyin/creator/pc/work_list，GET 分页，键是
+max_cursor/has_more）→ 在页面上下文内同源重放改 max_cursor 翻页（同源 fetch
+带站点自己的凭据与签名，不怕参数变化）。出口随 browser.launch 统一走
+douyin_proxy 住宅出口（出口 IP=家宽，与账号日常登录环境一致）。
+cookie 失效明确报错，绝不静默回落公开路线——两条路线数据口径不同（播放量
+全量 vs 点赞快照），混着刷会把新数据刷没。
 """
 from __future__ import annotations
 
 import json
 import re
 from typing import Optional
-from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
+from urllib.parse import parse_qsl, urlencode
 
 
 class CreatorCookieError(RuntimeError):
     """cookie 失效/未登录（用户需要重新导出）。"""
+
+_WORK_LIST_PATH = "janus/douyin/creator/pc/work_list"
 
 
 def _parse_cookie(cookie_str: str) -> list[dict]:
@@ -34,25 +39,11 @@ def _parse_cookie(cookie_str: str) -> list[dict]:
     return out
 
 
-def _walk_items(o, out: list) -> None:
-    """防御式挖列表：兼容 item_list / aweme_list / data.item_list 等包法。"""
-    if isinstance(o, dict):
-        for key in ("item_list", "aweme_list", "items"):
-            v = o.get(key)
-            if isinstance(v, list) and v:
-                out.extend(x for x in v if isinstance(x, dict))
-        for v in o.values():
-            _walk_items(v, out)
-    elif isinstance(o, list):
-        for v in o:
-            _walk_items(v, out)
-
-
 def _entry_of(raw: dict) -> Optional[dict]:
-    aweme_id = str(raw.get("aweme_id") or raw.get("item_id") or raw.get("id") or "").strip()
+    aweme_id = str(raw.get("aweme_id") or raw.get("item_id") or "").strip()
     if not aweme_id or not aweme_id.isdigit():
         return None
-    stat = raw.get("statistics") if isinstance(raw.get("statistics"), dict) else raw
+    stat = raw.get("statistics") if isinstance(raw.get("statistics"), dict) else {}
 
     def _num(*keys: str) -> int:
         for k in keys:
@@ -61,38 +52,29 @@ def _entry_of(raw: dict) -> Optional[dict]:
                 return int(v)
         return 0
 
-    title = re.sub(r"\s+", " ", str(raw.get("title") or raw.get("desc") or "")).strip()
+    title = re.sub(r"\s+", " ", str(raw.get("item_title") or raw.get("desc")
+                                   or raw.get("caption") or "")).strip()
     return {"id": aweme_id, "title": title[:120],
             "stats": {"play": _num("play_count", "watch_count"),
                       "digg": _num("digg_count", "like_count"),
                       "comment": _num("comment_count"),
-                      "share": _num("share_count"),
+                      "share": _num("share_count", "forward_count"),
                       "collect": _num("collect_count")}}
 
 
-def _bump_cursor(source: str, cursor: int) -> str:
-    """URL（GET）或表单体（POST）里的 cursor 参数替换为指定页。"""
-    if "=" in source and source.lstrip().startswith(("http", "/")):
-        parts = urlsplit(source)
-        q = [(k, str(cursor) if k == "cursor" else v) for k, v in parse_qsl(parts.query)]
-        return urlunsplit(parts._replace(query=urlencode(q)))
-    q = [(k, str(cursor) if k == "cursor" else v) for k, v in parse_qsl(source)]
-    return urlencode(q)
+def _qget(query: dict, key: str, default: str = "") -> str:
+    return str(query.get(key, default))
 
 
 _REPLAY_JS = """
 async (args) => {
-  const opt = {method: args.method, headers: Object.assign({},
-    args.content_type ? {"content-type": args.content_type} : {}),
-    credentials: "include"};
-  if (args.method === "POST" && args.body) opt.body = args.body;
-  const r = await fetch(args.url, opt);
+  const r = await fetch(args.url, {method: "GET", credentials: "include"});
   return await r.text();
 }
 """
 
 
-def fetch_all_videos(cookie: str, max_pages: int = 40) -> tuple[Optional[list[dict]], Optional[str]]:
+def fetch_all_videos(cookie: str, max_pages: int = 60) -> tuple[Optional[list[dict]], Optional[str]]:
     """拉登录账号的全部作品（含播放/点赞/评论/转发）。
 
     返回 (entries, error)；entries=None 时 error 给原因。cookie 失效抛
@@ -107,34 +89,49 @@ def fetch_all_videos(cookie: str, max_pages: int = 40) -> tuple[Optional[list[di
 
     jar = _parse_cookie(cookie)
     if not any(c["name"] in ("sessionid", "sessionid_ss") for c in jar):
-        return None, ("cookie 里没有 sessionid——复制的可能不是创作者中心的登录态"
-                      "（要在 creator.douyin.com 登录状态下从请求头里复制）")
+        return None, ("cookie 里没有 sessionid——拿到的不像是创作者中心的登录态"
+                      "（要在 creator.douyin.com 登录状态下取）")
 
-    captured: dict = {}      # 首个内容列表 XHR：url/method/post_data/content_type
-    raw_items: list[dict] = []   # 首屏 + 翻页的全部原始条目（出口统一去重映射）
+    captured: dict = {}   # work_list 模板：base_url + query（取 count 最大的那个请求）
+    state = {"max_cursor": None, "has_more": False}
+    raw_items: list[dict] = []
     login_wall = {"hit": False}
 
     def _on_response(resp):
         url = resp.url
         if "passport" in url and "login" in url:
             login_wall["hit"] = True
-        if captured or "item/list" not in url or "creator" not in url:
+        if _WORK_LIST_PATH not in url:
             return
         try:
             body = resp.json()
         except Exception:  # noqa: BLE001 非 JSON 响应忽略
             return
-        probe: list = []
-        _walk_items(body, probe)
-        if not any(_entry_of(r) for r in probe):
+        query = dict(parse_qsl(url.split("?", 1)[1])) if "?" in url else {}
+        items = [x for x in (body.get("aweme_list") or body.get("items") or [])
+                 if isinstance(x, dict)]
+        if not items and not query:
             return
-        captured.update({"url": url, "method": resp.request.method,
-                         "post_data": resp.request.post_data or "",
-                         "content_type": resp.request.headers.get("content-type", "")})
-        raw_items.extend(probe)
+        raw_items.extend(items)
+        # 模板取 count 最大的请求（首屏可能先发 count=1 的探测，别拿它当翻页模板）
+        try:
+            cur_count = int(_qget(query, "count", "0"))
+        except ValueError:
+            cur_count = 0
+        try:
+            old_query = captured.get("query") or {}
+            old_count = int(_qget(old_query, "count", "0"))
+        except ValueError:
+            old_count = 0
+        if not captured or cur_count > old_count:
+            captured.clear()
+            captured.update({"base": url.split("?", 1)[0], "query": query})
+            # 游标状态只从模板响应取——count=1 的探测请求会带偏翻页起点
+            state["max_cursor"] = body.get("max_cursor")
+            state["has_more"] = bool(body.get("has_more"))
 
     with sync_playwright() as p:
-        browser = launch(p)  # 统一出口（含可选代理）
+        browser = launch(p)  # 统一出口（含可选代理=住宅出口）
         try:
             ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
                                       viewport={"width": 1440, "height": 900})
@@ -146,42 +143,35 @@ def fetch_all_videos(cookie: str, max_pages: int = 40) -> tuple[Optional[list[di
             page.wait_for_timeout(6500)
             if login_wall["hit"] and not captured:
                 raise CreatorCookieError(
-                    "创作者中心 cookie 失效（跳到了登录页）——请重新扫码登录后导出新 cookie")
+                    "创作者中心 cookie 失效（跳到了登录页）——请重新扫码登录再取一次")
             if not captured:
                 raise CreatorCookieError(
                     "内容管理页没有吐出作品列表接口（页面结构可能变了，或 cookie 无效）")
 
-            # 页面上下文内同源重放翻页：改 cursor 逐页拉，直到没有新条目
-            method = captured["method"]
-            ctype = (captured["content_type"] or "").split(";")[0]
-            per_page = 20
-            try:  # 从首个请求里学每页条数
-                src = captured["post_data"] if method == "POST" else captured["url"]
-                for k, v in parse_qsl(src):
-                    if k == "count" and v.isdigit():
-                        per_page = max(5, int(v))
-            except Exception:  # noqa: BLE001 学不到就用 20
-                pass
-            known_ids = {e["id"] for e in map(_entry_of, raw_items) if e}
-            for page_no in range(1, max_pages):
+            # 页面上下文内同源重放翻页：接口用 max_cursor 游标（响应回传下一个游标）
+            query = dict(captured["query"])
+            for page_no in range(max_pages):
+                if not state["has_more"] or state["max_cursor"] in (None, "", 0, "0"):
+                    break
                 # 人味节流：每页间隔 1.2~2.0s，读自己数据也要像人翻页（风控友好）
                 page.wait_for_timeout(1200 + (page_no * 797) % 800)
-                cursor = page_no * per_page
-                url2 = _bump_cursor(captured["url"], cursor)
-                body2 = _bump_cursor(captured["post_data"], cursor) if method == "POST" else ""
+                query["max_cursor"] = str(state["max_cursor"])
+                url2 = captured["base"] + "?" + urlencode(query)
                 try:
-                    text = page.evaluate(
-                        _REPLAY_JS, {"url": url2, "method": method,
-                                     "content_type": ctype or None, "body": body2})
-                    batch: list = []
-                    _walk_items(json.loads(text), batch)
+                    text = page.evaluate(_REPLAY_JS, {"url": url2})
+                    body = json.loads(text)
                 except Exception:  # noqa: BLE001 翻页失败以已到手的收尾
                     break
-                fresh_ids = {e["id"] for e in map(_entry_of, batch) if e} - known_ids
+                batch = [x for x in (body.get("aweme_list") or body.get("items") or [])
+                         if isinstance(x, dict)]
+                fresh = {e["id"] for e in map(_entry_of, batch) if e}
+                before = len({e["id"] for e in map(_entry_of, raw_items) if e})
                 raw_items.extend(batch)
-                if not fresh_ids:
+                after = len({e["id"] for e in map(_entry_of, raw_items) if e})
+                state["max_cursor"] = body.get("max_cursor")
+                state["has_more"] = bool(body.get("has_more"))
+                if after <= before:
                     break
-                known_ids |= fresh_ids
         except CreatorCookieError:
             raise
         except Exception as e:  # noqa: BLE001
