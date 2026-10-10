@@ -6,6 +6,7 @@ import json
 
 import httpx
 from difflib import SequenceMatcher
+from typing import Optional
 
 from sqlmodel import Session, select
 
@@ -60,7 +61,9 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(60, "结构化评分中")
     data = await gateway.complete_json(
-        [{"role": "system", "content": render("idea_research_struct", AUDIENCE_NOTE=audience_note)},
+        [{"role": "system", "content": render(
+            "idea_research_struct", AUDIENCE_NOTE=audience_note,
+            RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(14)) or "（近 14 天无出题记录）")},
          {"role": "user", "content": report_md}],
         purpose="idea_research_struct")
 
@@ -139,7 +142,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         ][:40]
 
     # 近 7 天已出题热点（旧闻连出两天=质量事故：最高法 9-07 旧闻曾连续两天被当"今日"出题）
-    ctx.set_progress(16, "整理近 7 天已出题热点（禁写清单）")
+    ctx.set_progress(16, "整理禁写清单（7 天热点 + 14 天已有选题）")
     prev_hotspots: list[str] = []
     prev_norms: list[str] = []
     pcutoff = datetime.now() - timedelta(days=7)
@@ -151,6 +154,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             if h:
                 prev_hotspots.append(h[:110])
                 prev_norms.append(_norm(h))
+    recent_titles = recent_topic_titles(14)  # 本模块尾部定义的防撞车件
+    ban_lines = [f"- {h}" for h in prev_hotspots]
+    ban_lines += [f"- （已有选题）{t}" for t in recent_titles]
 
     ctx.set_progress(24, "抓国内热点榜与科技资讯（百度热搜+爱范儿/IT之家）")
     hot_items, hot_meta = await asyncio.to_thread(fetch_baidu_hot, 15)
@@ -218,8 +224,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                                               PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                                               TODAY=datetime.now().strftime("%Y-%m-%d"),
                                               MATERIAL=material,
-                                              BAN_LIST="\n".join(f"- {h}" for h in prev_hotspots)
-                                              or "（近 7 天无出题记录）")},
+                                              BAN_LIST="\n".join(ban_lines)
+                                              or "（近 14 天无出题记录）")},
          {"role": "user", "content": "提炼今天可写的 3 个选题切角。"}],
         purpose="trending_topics", max_tokens=8000, thinking="disabled")
 
@@ -232,6 +238,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     for x in items:
         hotspot = str(x.get("hotspot") or "").strip()
         if not hotspot or "对标圈" in hotspot:
+            continue
+        if is_similar_title(str(x.get("title") or "")):  # 标题撞车：不同热点落到同一角度的兜底
             continue
         hn = _norm(hotspot)
         if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
@@ -292,6 +300,50 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     return {"topic_ids": created, "superseded": superseded,
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "queries": queries, "web": search_metas}}
+
+
+def recent_topic_titles(days: int = 14, limit: int = 24) -> list[str]:
+    """近 N 天已有选题标题（防撞车清单：生成前注入 prompt，让模型主动避开）。"""
+    from datetime import datetime, timedelta
+
+    cutoff = datetime.now() - timedelta(days=days)
+    with Session(engine) as s:
+        rows = s.exec(
+            select(Topic.title).where(Topic.created_at >= cutoff)  # type: ignore[attr-defined]
+            .order_by(Topic.id.desc())  # type: ignore[attr-defined]
+        ).all()
+    out = []
+    for t in rows:
+        t = str(t or "").strip()
+        if t:
+            out.append(t)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def is_similar_title(title: str, days: int = 14, threshold: float = 0.55) -> Optional[int]:
+    """标题相似拦截：与近 N 天已有选题归一化相似度 ≥阈值时返回撞车选题 id。
+
+    生成链路（热点/拆解）落库前硬拦截；人工链路（快速记题/深研）只标记不拦。"""
+    from datetime import datetime, timedelta
+
+    if not (title or "").strip():
+        return None
+    def _norm(t: str) -> str:
+        import re as _re
+        return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]", "", str(t)).lower()
+    n = _norm(title)
+    if not n:
+        return None
+    cutoff = datetime.now() - timedelta(days=days)
+    with Session(engine) as s:
+        for t in s.exec(select(Topic).where(Topic.created_at >= cutoff)).all():  # type: ignore[attr-defined]
+            if not t.title:
+                continue
+            if SequenceMatcher(None, n, _norm(t.title)).ratio() >= threshold:
+                return t.id
+    return None
 
 
 def mark_similar(title: str, topic_id: int, session: Session) -> None:

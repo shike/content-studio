@@ -307,7 +307,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - **重试策略**：`RetryPolicy(max_retries, base, cap, classes, park_backoff, max_parks, stuck_after)` 按 type 注册于 `_POLICIES`，提交时 `max_retries` 落到任务行。人工重试清零自动重试计数；批量"重试全部"跳过 deterministic。
 - **闭环判定（失败→恢复的因果链可见）**：`_coverage()` 对每个 failed 任务检测"同 type + 同 dedup_key/同实体 id 且 id 更大的 succeeded 任务"→ 附 `covered_by`。三态语义：**待处置**（未闭环、无排期）/ **重试中**（有 next_retry_at）/ **已闭环**（covered_by 存在，绿标"由 #N 成功重跑"，自动移出待处置）。重试血缘：`jobs.retry_of` 记录由哪个失败任务重试而来（手动重试/批量重试/按指纹复活三条路径都写入），详情页显示链路。
 - **统一调度中心**（`jobs/schedules.py`，Q"任务调度管理中心"）：所有周期任务一处注册（`REGISTRY`：key/label/执行体/节奏 daily_hour 或 interval_hours/设置开关字段）、`schedules` 表存运行态（enabled/hour 覆盖/last_run_at/next_run_at/last_status/run_count）、`_schedule_loop`（runner 内受监督循环，每 60s 巡检）到点执行。内置五项：同行扫描/自我扫描/话题雷达（每日，钟点默认取 `watch_scan_hour` 可按项覆盖）、业务库每日备份（4 点）、拆解媒体清扫（每 6h）。API：`GET /api/schedules`、`POST /{key}/toggle`、`PUT /{key}/hour`、`POST /{key}/run`（立即执行并记运行态）；任务页「调度中心」卡片可视化。旧 main.py 硬编码调度循环已删除。
-- **同行发现·每日**（调度 key=`watch_discover_daily`，每日 2 点，随 watch_scan_enabled 开关）：关键词按天轮换（企业AI落地/AI落地 培训/企业AI 数字化转型/AI 提效 获客）走 DDG→视频链接→反查作者→粉丝 Top8 入候选表（status=open 待人工定夺；已在清单/已忽略的不重复）；候选粉丝 ≥1 万（_DISCOVER_QUALITY_FANS）计入工作台周报卡「清单外高赞同行」。
+- **同行发现·每日**（调度 key=`watch_discover_daily`，每日 2 点，随 watch_scan_enabled 开关）：关键词按天轮换，优先级=设置页配置 > 对标圈近 30 天标题 LLM 动态提炼（discover_keywords 小调用，2026-10-10 防发现池同质）> 12 词静态池走 DDG→视频链接→反查作者→粉丝 Top8 入候选表（status=open 待人工定夺；已在清单/已忽略的不重复）；候选粉丝 ≥1 万（_DISCOVER_QUALITY_FANS）计入工作台周报卡「清单外高赞同行」。
 - **抖音采集探针**（`crawler_probe.py`，调度 key=`crawl_probe`，15 分钟）：先 TCP 探出口隧道
   （断=`proxy_down` 不浪费浏览器），再开真实视频页（轮换拆解库最近 20 条已定夺视频、避开上次用的）
   按形态分类 `ok / login_wall / captcha / proxy_down / browser_error / no_data`；结果落

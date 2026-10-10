@@ -186,14 +186,10 @@ register_schedule(Schedule(key="watch_scan", label="同行扫描（全部监控�
 async def _run_watch_discover() -> str:
     from .runner import runner
 
-    day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
-    # 关键词池可配（设置页"发现关键词"，逗号/顿号分隔；空=平台默认轮换词）——
-    # 此前硬编码 FDE 业务词，换业务方向/其他行业部署就是错默认
-    configured = [k.strip() for k in
-                  settings.watch_discover_keywords.replace("，", ",").replace("、", ",").split(",")
-                  if k.strip()]
-    keywords = configured or ["行业 AI 应用", "企业 数字化转型", "AI 提效", "人工智能 落地"]
-    keyword = keywords[day_idx % len(keywords)]  # 关键词按天轮换，省 DDG 配额扩覆盖
+    # 关键词选择统一收口 watch.pick_discover_keyword：设置页配置 > 对标圈动态提炼 > 静态池
+    from ..watch.service import pick_discover_keyword
+
+    keyword = await pick_discover_keyword()
     job = await runner.submit("watch_discover", {"keyword": keyword, "auto": True},
                               dedup_key=f"1:discover:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))

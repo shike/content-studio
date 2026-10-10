@@ -30,7 +30,7 @@ cd frontend && npx tsc --noEmit && npm run build
 
 ## LLM 硬规矩（思考型模型 glm-5.3-flash，Coding Plan 端点）
 
-- **max_tokens 定律**：输出 = 思考链 + 正文，预算按"实测输出 × 2"给。现行值：article_generate 分段式（article_title 8192 + article_outline 8192 + article_section 12000/节 + article_editor 20000 + article_charts 4000，均 thinking disabled）· kg_spec 4000 · poster 三端点 3000/8000/6000 · script_generate/polish 12000 · script_finalize 8000 · idea_research_report/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · ping 1024。贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。
+- **max_tokens 定律**：输出 = 思考链 + 正文，预算按"实测输出 × 2"给。现行值：article_generate 分段式（article_title 8192 + article_outline 8192 + article_section 12000/节 + article_editor 20000 + article_charts 4000，均 thinking disabled）· kg_spec 4000 · poster 三端点 3000/8000/6000 · script_generate/polish 12000 · script_finalize 8000 · idea_research_report/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · discover_keywords 1024 · ping 1024。贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。
 - httpx 超时 300s（打磨实测 346s 曾把 180s 打穿）；验收轮询：常规 ≥600s、脚本生成（三版+自动打磨两段）≥900s。
 - 空正文（推理耗尽预算）必须显式报错，不许静默；gateway 已修过"空串当成功返回"的 bug，别改回去。
 - Coding Plan 套餐端点 `ZHIPU_BASE_URL` 不含 web_search → `SEARCH_PROVIDER=ddg` 锁定；智谱按量充值后才可切 auto/glm。切模型/检索通道/密钥走 设置页（运行时生效，存数据库 app_settings；.env 只留引导项 host/port/data_dir/安全阈值）。

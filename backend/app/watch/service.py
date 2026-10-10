@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 
 from ..browser import launch, ua
 from ..db import engine
+from ..settings import settings
 from ..jobs.errors import TransientError
 from ..jobs.runner import register_concurrent, register_executor, runner
 from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
@@ -480,8 +481,56 @@ async def watch_resolve(ctx, payload: dict) -> dict:
 
 _DISCOVER_SAMPLE_CAP = 10  # 最多反查的视频页数（控任务时长 ~2min）
 _DISCOVER_QUALITY_FANS = 10000  # 「清单外高赞同行」质量线：候选粉丝 ≥1 万才进周报（2026-10-03）
-# 每日发现的关键词轮换：一天一个词，省 DDG 配额也保证覆盖面按天展开
-DISCOVER_DAILY_KEYWORDS = ["行业 AI 应用", "企业 数字化转型", "AI 提效", "人工智能 落地"]  # 兜底池；定时调度读 settings.watch_discover_keywords
+# 每日发现的关键词轮换：一天一个词，省搜索配额也保证覆盖面按天展开。
+# 优先级：设置页「发现关键词」> 对标圈近 30 天标题动态提炼（LLM 小调用）> 下面的静态扩容池。
+# （2026-10-10 扩容+动态化：原 4 词池轮换两周就把同行发现拧成同质循环——发现池窄=拆解素材窄=选题趋同）
+DISCOVER_DAILY_KEYWORDS = [
+    "行业 AI 应用", "企业 数字化转型", "AI 提效", "人工智能 落地",
+    "AI 质检", "数字员工", "智能工厂", "AI 获客",
+    "大模型 企业应用", "AI 培训", "AI 工具 推荐", "传统企业 AI",
+]
+
+
+async def pick_discover_keyword(day_idx: int | None = None) -> str:
+    """今天的发现关键词：设置页配置 > 对标圈动态提炼 > 静态池轮换。"""
+    if day_idx is None:
+        day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
+    configured = [k.strip() for k in
+                  (getattr(settings, "watch_discover_keywords", "") or "")
+                  .replace("，", ",").replace("、", ",").split(",") if k.strip()]
+    if configured:
+        return configured[day_idx % len(configured)]
+
+    titles: list[str] = []
+    try:
+        from ..models import BenchmarkVideo
+
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None)  # 对标圈近 30 天标题
+        with Session(engine) as s:
+            rows = s.exec(
+                select(BenchmarkVideo.title).where(  # type: ignore[attr-defined]
+                    BenchmarkVideo.created_at >= cutoff,  # type: ignore[attr-defined]
+                    BenchmarkVideo.title != "",
+                )).all()
+        titles = [str(t) for t in rows if t][:40]
+    except Exception:  # noqa: BLE001 动态提炼失败回落静态池
+        titles = []
+    if titles:
+        try:
+            from ..llm import gateway
+            from ..prompts import render
+
+            data = await gateway.complete_json(
+                [{"role": "user", "content": render(
+                    "discover_keywords",
+                    TITLES="\n".join(f"- {t[:50]}" for t in titles))}],
+                purpose="discover_keywords", max_tokens=1024, thinking="disabled")
+            kws = [str(k).strip() for k in (data.get("keywords") or []) if str(k).strip()]
+            if kws:
+                return kws[day_idx % len(kws)]
+        except Exception:  # noqa: BLE001 静态池兜底
+            pass
+    return DISCOVER_DAILY_KEYWORDS[day_idx % len(DISCOVER_DAILY_KEYWORDS)]
 _DISCOVER_TOP_N = 8        # 最终保留的候选账号数（按粉丝数）
 
 

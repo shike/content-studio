@@ -152,6 +152,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         stats = b.stats or {}
         tenant_id = b.tenant_id
         from ..tenant_brand import brand_of
+        from ..topics.service import is_similar_title, recent_topic_titles
 
         persona_text = brand_of(tenant_id)["persona"]
 
@@ -229,7 +230,10 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         # R3.4b 数据归因：把赞/评/转带给 LLM，分析"为什么这条（没）爆"
         llm_input += f"\n\n互动数据（做数据归因用）：{json.dumps(stats, ensure_ascii=False)}"
     analysis = await gateway.complete_json(
-        [{"role": "system", "content": render("benchmark_analyze", PERSONA=persona_text)},
+        [{"role": "system", "content": render(
+            "benchmark_analyze", PERSONA=persona_text,
+            RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(14))
+            or "（近 14 天无出题记录）")},
          {"role": "user", "content": llm_input}],
         purpose="benchmark_analyze", max_tokens=5000)
 
@@ -239,10 +243,14 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         if not b.title and analysis.get("summary"):
             b.title = analysis["summary"][:80]
         s.add(b)
-        # 沉淀选题候选（source=benchmark，draft 状态待人工定审）
+        # 沉淀选题候选（source=benchmark，draft 状态待人工定审）；标题撞车直接不入库——
+        # 不同同行视频产出同一角度是选题趋同的主通道（2026-10-10 用户裁定拦截）
         candidate = (analysis.get("topic_candidate") or {})
         topic_id = None
-        if candidate.get("title"):
+        dup_of = is_similar_title(str(candidate.get("title") or "")) if candidate.get("title") else None
+        if dup_of is not None:
+            analysis["topic_candidate_suppressed"] = f"与近期选题 #{dup_of} 撞车，候选未入库"
+        if candidate.get("title") and dup_of is None:
             audience = candidate.get("audience")
             topic = Topic(
                 title=str(candidate["title"])[:60],
