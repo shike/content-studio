@@ -21,6 +21,9 @@ DEFAULT_STRUCTURE = [
 ]
 DEFAULT_TEMPLATE_NAME = "默认口播结构"
 
+# 六打法（2026-10-09 流量诊断定版，与 script_generate.md 同表；前端 chips 与 API 校验共用）
+SIX_ANGLES = ["反常识判断", "身份定位喊话", "行动指令", "提问式", "对比打假", "数字落差"]
+
 
 def seed_default_template() -> None:
     with Session(engine) as s:
@@ -79,12 +82,25 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             "pain_points": (topic.evidence or {}).get("pain_points", []) if topic else [],
             "hooks": (topic.evidence or {}).get("hooks", []) if topic else [],
         }
-    template = _pick_template()
+    template_id = int(payload.get("template_id") or 0)
+    template = None
+    if template_id:
+        with Session(engine) as s:
+            template = s.get(ScriptTemplate, template_id)
+        if template is None:
+            print(f"[script] 结构模板 #{template_id} 不存在，按不使用处理")
     # 结构模板：prompt 里没有 {{STRUCTURE}} 占位符，注入一直是静默失效（usage_count 照加、
     # 模型收不到结构）——2026-09-27 待用户拍板：恢复注入（模板收尾步要按「不刻意 CTA」改写）
     # 还是下线该功能；定了再补占位符 + 让 render() 强制校验。
 
     length = payload.get("length", "short")
+    # 打法：指定（≤3 个，每版一种）或自动挑
+    angles = [a for a in (payload.get("angles") or []) if a in SIX_ANGLES][:3]
+    if angles:
+        angles_spec = ("三版必须**分别使用**以下打法，每版一种、label 直接用打法名，不得换用其他打法：\n"
+                       + "、".join(angles))
+    else:
+        angles_spec = "从上面六个里挑 3 种最贴合这个选题的（每版一种）"
     # 2026-10-09 流量诊断定档：自己账号 40~70s 视频中位播放 441，<40s 只有 248，>120s 更差
     # → 默认档锁定黄金带 240~320 字（50~70 秒）；长版保留给视频号/数字人场景
     length_spec = ("600~900 字（2~3 分钟长版）" if length == "long"
@@ -92,8 +108,15 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     use_style = bool(payload.get("use_style", True))
     from ..tenant_brand import brand_of
 
+    if template is not None:
+        structure_text = "本版按以下段落结构推进（每步的覆盖要求）：\n" + "\n".join(
+            f"- {st.get('step', '')}：{st.get('requirement', '')}"
+            for st in (template.structure or []) if st.get("step"))
+    else:
+        structure_text = "（未选用结构模板：按上方「口播结构」硬规则组织——判断开场、单判断推进、可转述判断收尾）"
     prompt = render("script_generate", LENGTH=length_spec,
                     MY_STYLE=build_my_style(use_style),
+                    ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
                     PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"])
     versions: list[dict] = []
     for attempt in range(2):  # 不足 3 版时补一轮
@@ -121,7 +144,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         script.versions = versions
         script.status = "generated"
         s.add(script)
-        if template is not None:
+        if template is not None:  # usage_count 只记真实注入（此前占位符缺失静默失效也在计数——假账已修）
             tpl = s.get(ScriptTemplate, template.id)
             if tpl:
                 tpl.usage_count += 1

@@ -385,7 +385,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - 关键 Prompt 与输出 schema：
   - `idea_research`：输出 `{title, angle, audience, pain_points[], hooks[], business_fit{boss,fde}, competitors, score, score_breakdown}`
   - `benchmark_analyze`：输出 `{hook{type,position_sec,text}, structure[], topic_value, comment_insights[], replicable_points[], score}`
-  - `script_generate`：按结构模板出 3 版。**打法与时长按 2026-10-09 流量诊断重定**：六打法（反常识判断/身份定位喊话/行动指令/提问/对比打假/数字落差，观点判断导向）、默认档 240~320 字（50~70 秒黄金档）、前 3 秒甩判断禁铺垫、黑话必须大白话化、每版必含一个可转述的点赞钩子判断；选题链路（idea_research/benchmark_analyze/trending）同步禁纪实类角度与黑话标题——依据：自有账号24 条实测（观点类均播 384 vs 纪实类 56，黑话标题 213 vs 大白话 369，问句标题 479 vs 246）
+  - `script_generate`：**结构模板按 template_id 显式选择（0=不使用；2026-10-10 修：此前 prompt 无 {{STRUCTURE}} 占位符注入静默失效、usage_count 记假账——现只有真注入才计数）；三版打法支持指定（angles=六打法子集 ≤3，每版一种，空=自动挑；use_style 此前在 API 层丢失、开关失效已修）**。时长按 2026-10-09 流量诊断重定：六打法（反常识判断/身份定位喊话/行动指令/提问/对比打假/数字落差，观点判断导向）、默认档 240~320 字（50~70 秒黄金档）、前 3 秒甩判断禁铺垫、黑话必须大白话化、每版必含一个可转述的点赞钩子判断；选题链路（idea_research/benchmark_analyze/trending）同步禁纪实类角度与黑话标题——依据：自有账号24 条实测（观点类均播 384 vs 纪实类 56，黑话标题 213 vs 大白话 369，问句标题 479 vs 246）
   - `script_critique`：输出问题清单 + 定向重写
   - `style_pick`：长文透镜自动挑选（style=auto 时生成开头小调用，输出 `{style, reason}`，无效回落 deep_dive）
   - `article_title`+`article_outline`+`article_section`：长文标题组/大纲/逐节写作（深研报告全文注入，

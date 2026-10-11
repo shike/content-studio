@@ -67,6 +67,9 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [useStyle, setUseStyle] = useState(true)
+  const [templateId, setTemplateId] = useState(0) // 0=不使用结构模板
+  const [selAngles, setSelAngles] = useState<string[]>([]) // 指定打法（空=自动挑 3 种）
+  const [anglesOpen, setAnglesOpen] = useState(false)
   const [finalizedView, setFinalizedView] = useState<{ id: number; titles: { platform: string; title: string }[]; teleLen: number } | null>(null)
   const [genProg, setGenProg] = useState<Record<number, { p: number; m: string }>>({})
 
@@ -217,7 +220,11 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
     try {
       const r = await api<{ script_id: number; job_id: number }>('/scripts/generate', {
         method: 'POST',
-        body: JSON.stringify({ topic_id: tid, length, use_style: useStyle }),
+        body: JSON.stringify({
+          topic_id: tid, length, use_style: useStyle,
+          ...(selAngles.length >= 2 ? { angles: selAngles } : {}),
+          ...(templateId > 0 ? { template_id: templateId } : {}),
+        }),
       })
       await waitJob(r.job_id, (j) => {
         setTopicGen((m) => ({ ...m, [tid]: { p: j.progress, m: j.message || '' } }))
@@ -510,9 +517,27 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
             ))}
           </select>
           <div className="segment shrink-0">
-            <button onClick={() => setLength('short')} className={`segment-item ${length === 'short' ? 'segment-item-active' : ''}`}>短版 60~90s</button>
+            <button onClick={() => setLength('short')} className={`segment-item ${length === 'short' ? 'segment-item-active' : ''}`}>黄金档 50~70s</button>
             <button onClick={() => setLength('long')} className={`segment-item ${length === 'long' ? 'segment-item-active' : ''}`}>长版 2~3min</button>
           </div>
+          <button
+            onClick={() => setAnglesOpen((v) => !v)}
+            title="三版开场打法：默认自动挑 3 种；点开可指定 2~3 种"
+            className={`badge shrink-0 h-9 cursor-pointer px-3 ${selAngles.length > 0 ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-400'}`}
+          >
+            {selAngles.length > 0 ? `打法：指定 ${selAngles.length}` : '打法：自动'}
+          </button>
+          <select
+            value={templateId}
+            onChange={(e) => setTemplateId(Number(e.target.value))}
+            title="口播结构模板：段落推进步骤（可选；不使用=默认流程）"
+            className="input max-w-40 shrink-0 border-sky-200 text-xs"
+          >
+            <option value={0}>结构模板：不使用</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}（{t.structure.length} 步）</option>
+            ))}
+          </select>
           <button
             onClick={() => setUseStyle((v) => !v)}
             title="开启后生成会注入「我的风格画像」，使脚本贴近本人说话方式（画像在「我的风格」页）"
@@ -524,6 +549,29 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
             生成三版
           </button>
         </div>
+        {anglesOpen && (
+          <div className="mt-3 rounded-xl border border-sky-100 bg-white p-3">
+            <div className="text-xs font-semibold text-slate-500">指定三版开场打法（选 2~3 个；留空=自动挑最贴的 3 种）</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {['反常识判断', '身份定位喊话', '行动指令', '提问式', '对比打假', '数字落差'].map((a) => {
+                const on = selAngles.includes(a)
+                return (
+                  <button
+                    key={a}
+                    onClick={() => setSelAngles((cur) => on ? cur.filter((x) => x !== a) : (cur.length >= 3 ? cur : [...cur, a]))}
+                    className={`badge cursor-pointer px-3 py-1.5 ${on ? 'bg-sky-100 text-sky-700' : 'bg-slate-50 text-slate-500'}`}
+                  >
+                    {a}
+                  </button>
+                )
+              })}
+              {selAngles.length > 0 && (
+                <button onClick={() => setSelAngles([])} className="btn-ghost btn-xs">清除（回到自动）</button>
+              )}
+            </div>
+            <div className="mt-2 text-[11px] text-slate-400">打法=开场风格；结构模板=段落推进（hook→pain→proof→cta），两者叠加生效</div>
+          </div>
+        )}
         <div className="mt-2 text-[11px] text-slate-400">长度/风格贴合两处同源（此处与清单头条都能改）；待写选题在下方清单里点行内「生成三版」，生成约 1~2 分钟、完成后直接进入三版对比定稿</div>
       </div>
 
@@ -795,7 +843,7 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
         <summary className="flex cursor-pointer items-center gap-2 px-5 py-3.5 text-sm font-semibold text-zinc-800">
           口播结构模板
           <span className="font-normal text-slate-400">
-            {templates.length} 个 · 生成三版时自动选用使用次数最多的
+            {templates.length} 个 · 生成时在上方「结构模板」下拉选择使用（不选=默认流程）
           </span>
           <span className="ml-auto text-xs font-normal text-slate-400">展开/收起</span>
         </summary>

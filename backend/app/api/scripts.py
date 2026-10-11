@@ -17,6 +17,8 @@ class GenerateIn(BaseModel):
     topic_id: int
     use_style: bool = True  # 贴合我的风格（R9.4）
     length: str = "short"  # short=240~320字（50~70s 黄金档）| long=600~900字（PRD R2.1 两档，2026-10-09 定档）
+    angles: list[str] = []  # 指定三版打法（六打法子集 ≤3 个；空=自动挑）
+    template_id: int = 0  # 结构模板（0=不使用，走默认流程）
 
 
 class FinalizeIn(BaseModel):
@@ -52,8 +54,20 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
         s.commit()
         s.refresh(script)
         script_id = script.id
+    angles = [a.strip() for a in body.angles if a.strip()][:3]
+    known = script_service.SIX_ANGLES
+    bad = [a for a in angles if a not in known]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"未知打法：{'、'.join(bad)}")
+    if body.template_id:
+        with Session(engine) as s:
+            if s.get(ScriptTemplate, body.template_id) is None:
+                raise HTTPException(status_code=404, detail="结构模板不存在")
+    # use_style 此前在此处丢失（开关一直是坏的：关了也注入风格画像）——2026-10-10 修
     job = await runner.submit("script_generate",
-                              {"script_id": script_id, "length": body.length},
+                              {"script_id": script_id, "length": body.length,
+                               "use_style": body.use_style, "angles": angles,
+                               "template_id": body.template_id},
                               points=job_points("script_generate"))
     return {"script_id": script_id, "job_id": job.id}
 
