@@ -20,3 +20,6 @@ scripts/.deploy.env
 
 # 数据核对副本（含生产数据，绝不入库）
 data-integrity/
+
+# 滴答清单 skill 本地绑定状态
+.dida-task.json
