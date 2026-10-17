@@ -155,6 +155,10 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 prev_hotspots.append(h[:110])
                 prev_norms.append(_norm(h))
     recent_titles = recent_topic_titles(14)  # 本模块尾部定义的防撞车件
+    # 内容支柱轮转（课程定位 2026-10-12）：欲望钩子常驻（流量引擎），另两席在干货/打假/背书间轮换
+    _doy = datetime.now().timetuple().tm_yday
+    _rest = ["干货切片", "信任打假", "交付背书"]
+    pillars = ["欲望钩子", _rest[_doy % 3], _rest[(_doy + 1) % 3]]
     ban_lines = [f"- {h}" for h in prev_hotspots]
     ban_lines += [f"- （已有选题）{t}" for t in recent_titles]
 
@@ -223,6 +227,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         [{"role": "system", "content": render("trending_topics",
                                               PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                                               TODAY=datetime.now().strftime("%Y-%m-%d"),
+                                              PILLARS="；".join(pillars),
                                               MATERIAL=material,
                                               BAN_LIST="\n".join(ban_lines)
                                               or "（近 14 天无出题记录）")},
@@ -275,7 +280,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 t.status = "rejected"
                 s.add(t)
                 superseded.append(t.id)
-        for x in batch:
+        for i, x in enumerate(batch):
             t = Topic(
                 title=str(x.get("title"))[:60],
                 angle=str(x.get("angle") or ""),
@@ -285,6 +290,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 evidence={
                     "hotspot": x.get("hotspot", ""),
                     "why_now": x.get("why_now", ""),
+                    "pillar": pillars[i % len(pillars)],
                     "material": {"watch_count": len(watch_items), "news": news_meta,
                                  "hot": hot_meta, "queries": q_status, "web": search_metas},
                 },
