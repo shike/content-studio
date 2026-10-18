@@ -18,7 +18,7 @@ from ..models import AccountMetricsDaily, SelfVideo
 
 
 def _week_window(today: date | None = None) -> tuple[date, date]:
-    """上一个完整自然周（周一~周日）。"""
+    """上一个完整自然周（周一~周日）。today 传次日日期即可取"本周"（周日当晚用）。"""
     today = today or date.today()
     last_monday = today - timedelta(days=today.weekday() + 7)
     return last_monday, last_monday + timedelta(days=6)
@@ -61,6 +61,7 @@ def _collect(tenant_id: int, week_start: date, week_end: date) -> dict:
             "score": video_score(play, int(st.get("digg") or 0), int(st.get("comment") or 0),
                                  int(st.get("share") or 0), int(st.get("collect") or 0)),
         })
+    videos = [v for v in videos if v["play"] > 0]  # play=0=平台统计滞后，不进榜（等下轮刷新）
     videos.sort(key=lambda x: -x["score"])
     daily = [{"date": d.date, "play": d.play, "new_fans": d.new_fans,
               "profile_views": d.profile_views} for d in
@@ -96,11 +97,12 @@ async def _interpret(facts: dict) -> str:
         return ""
 
 
-async def build_weekly_report(tenant_id: int, force: bool = False) -> dict:
+async def build_weekly_report(tenant_id: int, force: bool = False,
+                              today: date | None = None) -> dict:
     """生成（或读取缓存的）上周周报。返回 {week, facts, summary}。"""
     from ..models import WeeklyReport
 
-    ws, we = _week_window()
+    ws, we = _week_window(today)
     week_key = ws.isoformat()
     with Session(engine) as s:
         row = s.exec(select(WeeklyReport).where(

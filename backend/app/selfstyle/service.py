@@ -175,7 +175,12 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                                             scan_status="pending"))  # 待定夺，批准后进风格分析
                             created += 1
                         else:
-                            row.stats = e.get("stats") or row.stats
+                            # 计数器单调：按字段取最大值合并（work_list 偶发吐 play=0 的滞后数据，
+                            # 直接覆盖会把真实数据抹成 0——2026-10-12 实测修复）
+                            _old = row.stats or {}
+                            _new = e.get("stats") or {}
+                            row.stats = {k: max(int(_old.get(k) or 0), int(_new.get(k) or 0))
+                                         for k in set(_old) | set(_new)}
                             if not row.title and e.get("title"):
                                 row.title = str(e["title"])[:80]
                             if e.get("published_at"):
