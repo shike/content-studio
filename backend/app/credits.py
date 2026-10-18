@@ -17,6 +17,7 @@ from .models import CreditTransaction, Tenant
 JOB_POINTS: dict[str, int] = {
     "idea_research": 30,
     "trending_topics": 10,
+    "video_weekly_report": 0,  # 纯聚合+一次小解读，不扣积分
     "benchmark_analyze": 15,
     "script_generate": 30,
     "script_polish": 10,
