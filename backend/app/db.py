@@ -189,6 +189,10 @@ def _migrate(engine) -> None:
         svcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(self_videos)"))]
         if svcols and "stats" not in svcols:
             conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN stats JSON DEFAULT '{}'"))
+        if svcols and "published_at" not in svcols:
+            conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN published_at VARCHAR DEFAULT ''"))
+        if svcols and "duration" not in svcols:
+            conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN duration INTEGER DEFAULT 0"))
         rtcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(radar_topics)"))]
         if rtcols and "hits" not in rtcols:
             conn.execute(sqlalchemy.text("ALTER TABLE radar_topics ADD COLUMN hits JSON DEFAULT '[]'"))

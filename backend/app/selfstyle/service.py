@@ -170,12 +170,18 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                                             aweme_id=vid,
                                             title=str(e.get("title") or "")[:80],
                                             stats=e.get("stats") or {},
+                                            published_at=str(e.get("published_at") or ""),
+                                            duration=int(e.get("duration") or 0),
                                             scan_status="pending"))  # 待定夺，批准后进风格分析
                             created += 1
                         else:
                             row.stats = e.get("stats") or row.stats
                             if not row.title and e.get("title"):
                                 row.title = str(e["title"])[:80]
+                            if e.get("published_at"):
+                                row.published_at = e["published_at"]
+                            if e.get("duration"):
+                                row.duration = e["duration"]
                             s.add(row)
                             updated += 1
                     s.commit()
@@ -365,3 +371,29 @@ async def creator_data_scan(ctx: JobContext, payload: dict) -> dict:
         notes.append(f"租户 {acc.tenant_id}：入库 {n} 天（{why}）")
     ctx.set_progress(100, "；".join(notes))
     return {"notes": notes}
+
+
+register_concurrent("video_weekly_report")
+@register_executor("video_weekly_report")
+async def video_weekly_report(ctx: JobContext, payload: dict) -> dict:
+    """视频表现周报（每周一生成上周一期；数字聚合+LLM 解读，按周缓存）。"""
+    from .weekly_report import build_weekly_report
+
+    tenants_seen: set[int] = set()
+    outs = []
+    with Session(engine) as s:
+        accounts = s.exec(
+            select(WatchAccount).where(  # type: ignore[attr-defined]
+                WatchAccount.kind == "self",  # type: ignore[attr-defined]
+                WatchAccount.enabled == True,  # noqa: E712
+            )
+        ).all()
+    for acc in accounts:
+        if acc.tenant_id in tenants_seen:
+            continue
+        tenants_seen.add(acc.tenant_id)
+        rep = await build_weekly_report(acc.tenant_id, force=bool(payload.get("force")))
+        outs.append({"tenant": acc.tenant_id, "week": rep.get("week"),
+                     "videos": len((rep.get("videos") or []))})
+    ctx.set_progress(100, f"周报 {len(outs)} 份")
+    return {"reports": outs}

@@ -330,6 +330,15 @@ class Dismissal(TenantScoped, TimestampMixin, table=True):
     asset_id: int = Field(index=True)
 
 
+class WeeklyReport(TenantScoped, TimestampMixin, table=True):
+    """视频表现周报（按周缓存；数字为确定性聚合，summary 为 LLM 解读）。"""
+    __tablename__ = "video_weekly_reports"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    week_start: str = Field(default="", index=True)  # 周一日期 YYYY-MM-DD
+    report: dict = Field(default_factory=dict, sa_column=Column(JSON))
+
+
 class AccountMetricsDaily(TenantScoped, TimestampMixin, table=True):
     """自有账号的日级运营指标（创作者中心 overview/all，2026-10-12 课程定位北极星）。
 
@@ -364,6 +373,8 @@ class SelfVideo(TenantScoped, TimestampMixin, table=True):
     style_analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
     analyzed_at: Optional[datetime] = None
     stats: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 互动数（扫描时捕获）
+    published_at: str = Field(default="")  # 发布时间（创作者中心回写；周报用）
+    duration: int = 0                      # 时长秒
 
 
 class StyleProfile(TenantScoped, TimestampMixin, table=True):

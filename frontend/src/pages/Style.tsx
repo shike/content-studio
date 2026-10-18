@@ -86,6 +86,61 @@ function AccountMetricsCard() {
   )
 }
 
+function WeeklyReportCard() {
+  const [rep, setRep] = useState<Record<string, unknown> | null>(null)
+  const [msg, setMsg] = useState('')
+  const [busy2, setBusy2] = useState(false)
+  const load = useCallback(() => {
+    api<Record<string, unknown>>('/metrics/weekly').then(setRep).catch(() => setRep(null))
+  }, [])
+  useEffect(load, [load])
+  const gen = async () => {
+    setBusy2(true)
+    try {
+      const r = await api<{ job_id: number }>('/metrics/weekly/generate', { method: 'POST' })
+      await waitJob(r.job_id, (j) => setMsg(`生成中 ${j.progress}% ${j.message || ''}`))
+      setMsg('')
+      load()
+    } catch (e) {
+      setMsg(String(e).replace(/^Error:\s*/, ''))
+    } finally {
+      setBusy2(false)
+    }
+  }
+  const videos = (rep?.videos as { title: string; play: number; score: number }[] | undefined) || []
+  const top = videos.slice(0, 3)
+  return (
+    <div className="card mt-4 p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-zinc-800">视频表现周报{rep?.week ? `（${String(rep.week)}）` : ''}</div>
+        <button onClick={gen} disabled={busy2} className="btn-ghost btn-xs disabled:opacity-40">
+          {busy2 ? '生成中…' : '生成/刷新周报'}
+        </button>
+      </div>
+      {msg && <div className="mt-2 text-xs text-amber-600">{msg}</div>}
+      {!rep?.week && !msg && (
+        <div className="mt-2 text-xs text-slate-400">还没有周报。数据每天自动回流，点上面按钮生成上一周的。</div>
+      )}
+      {top.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {top.map((v, i) => (
+            <div key={i} className="flex items-center gap-2 text-[13px]">
+              <span className="badge shrink-0 bg-emerald-50 text-emerald-600">TOP{i + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-zinc-700">{v.title}</span>
+              <span className="num-serif shrink-0 text-slate-500">播 {v.play} · 分 {v.score}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {Boolean(rep?.summary) && (
+        <div className="mt-3 rounded-xl bg-sky-50/70 px-3 py-2 text-[13px] leading-relaxed text-zinc-700">
+          {String(rep?.summary ?? '')}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
   const [data, setData] = useState<Overview | null>(null)
   const [videos, setVideos] = useState<SelfVideoRow[]>([])
@@ -215,6 +270,7 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         }
       />
       <AccountMetricsCard />
+      <WeeklyReportCard />
 
       {/* 状态行 */}
       <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">

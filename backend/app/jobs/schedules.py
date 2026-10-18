@@ -230,6 +230,18 @@ async def _run_creator_data() -> str:
 register_schedule(Schedule(key="creator_data_daily", label="自有账号日级指标（每日 6 点）",
                            daily_hour=6, enabled_by="creator_data_enabled",
                            run=_run_creator_data))
+
+
+async def _run_weekly_report() -> str:
+    from .runner import runner
+    job = await runner.submit("video_weekly_report", {"auto": True},
+                              dedup_key=f"1:weeklyreport:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}"
+
+
+register_schedule(Schedule(key="video_weekly_report", label="视频表现周报（每日 7 点自愈，按周幂等）",
+                           daily_hour=7, run=_run_weekly_report))
 register_schedule(Schedule(key="daily_backup", label="业务库每日备份",
                            daily_hour=4, run=_run_daily_backup))
 register_schedule(Schedule(key="media_cleanup", label="拆解媒体清扫",

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode
 
@@ -54,7 +55,13 @@ def _entry_of(raw: dict) -> Optional[dict]:
 
     title = re.sub(r"\s+", " ", str(raw.get("item_title") or raw.get("desc")
                                    or raw.get("caption") or "")).strip()
+    created = raw.get("create_time")
+    published = (datetime.fromtimestamp(int(created)).strftime("%Y-%m-%d %H:%M")
+                 if isinstance(created, (int, float)) and created > 0 else "")
+    dur = raw.get("duration")
     return {"id": aweme_id, "title": title[:120],
+            "published_at": published,
+            "duration": round(dur / 1000) if isinstance(dur, (int, float)) else 0,
             "stats": {"play": _num("play_count", "watch_count"),
                       "digg": _num("digg_count", "like_count"),
                       "comment": _num("comment_count"),
