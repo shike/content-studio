@@ -68,6 +68,7 @@ _POLICIES: dict[str, RetryPolicy] = {
     "article_generate": RetryPolicy(max_retries=1, base=300, task_timeout=3600),
     "idea_research": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
     "trending_topics": RetryPolicy(max_retries=1, base=300, task_timeout=900),
+    "creator_data_scan": RetryPolicy(max_retries=2, base=300, task_timeout=300),
     "self_analyze": RetryPolicy(max_retries=1, base=300, cap=1800,
                                 classes=("transient", "captcha"), task_timeout=2700),
     "self_profile_update": RetryPolicy(max_retries=1, base=300, task_timeout=1800),

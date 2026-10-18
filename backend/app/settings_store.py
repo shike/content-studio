@@ -30,6 +30,7 @@ MANAGED: dict[str, str] = {
     "douyin_proxy": "str",
     "douyin_ua": "str",
     "watch_scan_enabled": "bool",
+    "creator_data_enabled": "bool",
     "watch_scan_hour": "int",
     "watch_discover_keywords": "str",
     "chanjing_app_id": "str",

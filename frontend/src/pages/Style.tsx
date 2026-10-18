@@ -4,6 +4,27 @@ import {
 } from 'lucide-react'
 import { api, waitJob } from '../api'
 import { Busy, EmptyState, ErrorLine, PageHeader, relTime, Pager, safeHref } from '../components'
+
+interface MetricsRow {
+  date: string
+  fans: number
+  new_fans: number
+  profile_views: number
+  play: number
+  digg: number
+  comment: number
+  share: number
+  account_search: number
+  post_search: number
+}
+
+interface MetricsSummary {
+  fans: number
+  new_fans_7d: number
+  profile_views_7d: number
+  play_7d: number
+  days: number
+}
 import type { SectionKey } from '../App'
 
 interface Profile {
@@ -31,6 +52,38 @@ interface Overview {
   profile_history: Profile[]
   videos: SelfVideoRow[]
   stats: { total: number; analyzed: number; pending: number }
+}
+
+function AccountMetricsCard() {
+  const [m, setM] = useState<{ items: MetricsRow[]; summary: MetricsSummary } | null>(null)
+  useEffect(() => {
+    api<{ items: MetricsRow[]; summary: MetricsSummary }>('/metrics/account?days=30')
+      .then(setM)
+      .catch(() => setM(null))
+  }, [])
+  if (!m || m.items.length === 0) return null
+  const s = m.summary
+  return (
+    <div className="card mt-4 p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-zinc-800">账号数据（近 {s.days} 天）</div>
+        <span className="text-[11px] text-slate-400">每天 6 点自动从创作者中心回流</span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          ['粉丝总量', s.fans],
+          ['近7天净增', s.new_fans_7d],
+          ['近7天主页访问', s.profile_views_7d],
+          ['近7天播放', s.play_7d],
+        ].map(([k, v]) => (
+          <div key={k as string} className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+            <div className="text-[11px] text-slate-400">{k as string}</div>
+            <div className="num-serif text-lg font-semibold text-zinc-900">{Number(v).toLocaleString()}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
@@ -161,6 +214,7 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           </div>
         }
       />
+      <AccountMetricsCard />
 
       {/* 状态行 */}
       <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">

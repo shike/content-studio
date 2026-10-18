@@ -336,3 +336,32 @@ async def self_profile_update(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(100, f"画像 v{profile.version} 已生成")
     return {"version": profile.version, "based_on": profile.based_on}
+
+
+register_concurrent("creator_data_scan")
+@register_executor("creator_data_scan")
+async def creator_data_scan(ctx: JobContext, payload: dict) -> dict:
+    """自有账号日级运营指标（粉丝/主页访问/播放/搜索，创作者中心 overview）。
+
+    轻活并发道；失败零连带（指标缺一天=周报少一格，不碰任何内容链路）。"""
+    from .creator_data import collect_for_tenant
+
+    notes: list[str] = []
+    with Session(engine) as s:
+        accounts = s.exec(
+            select(WatchAccount).where(  # type: ignore[attr-defined]
+                WatchAccount.kind == "self",  # type: ignore[attr-defined]
+                WatchAccount.enabled == True,  # noqa: E712
+            )
+        ).all()
+    if not accounts:
+        raise RuntimeError("未添加我的账号：在同行监测页添加并勾选「这是我的账号」")
+    tenants_seen: set[int] = set()
+    for acc in accounts:
+        if acc.tenant_id in tenants_seen:
+            continue
+        tenants_seen.add(acc.tenant_id)
+        n, why = await asyncio.to_thread(collect_for_tenant, acc.tenant_id)
+        notes.append(f"租户 {acc.tenant_id}：入库 {n} 天（{why}）")
+    ctx.set_progress(100, "；".join(notes))
+    return {"notes": notes}

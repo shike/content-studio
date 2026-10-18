@@ -217,6 +217,19 @@ async def _run_trending_daily() -> str:
 
 register_schedule(Schedule(key="trending_daily", label="今日热点提炼（每日 7 点·示例租户）",
                            daily_hour=7, run=_run_trending_daily))
+
+
+async def _run_creator_data() -> str:
+    from .runner import runner
+    job = await runner.submit("creator_data_scan", {"auto": True},
+                              dedup_key=f"1:creatordata:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}"
+
+
+register_schedule(Schedule(key="creator_data_daily", label="自有账号日级指标（每日 6 点）",
+                           daily_hour=6, enabled_by="creator_data_enabled",
+                           run=_run_creator_data))
 register_schedule(Schedule(key="daily_backup", label="业务库每日备份",
                            daily_hour=4, run=_run_daily_backup))
 register_schedule(Schedule(key="media_cleanup", label="拆解媒体清扫",

@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (admin, articles, auth_api as auth_routes, avatar, benchmarks, credits_api, stats, crawl, health, jobs, llm, poster, tenant_api,
+from .api import (admin, articles, auth_api as auth_routes, avatar, benchmarks, credits_api, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
                   public_media, publishing, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
@@ -131,6 +131,7 @@ app.include_router(publishing.router, dependencies=[Depends(require_ready_user)]
 app.include_router(radar.router, dependencies=[Depends(require_ready_user)])
 app.include_router(watch.router, dependencies=[Depends(require_ready_user)])
 app.include_router(style.router, dependencies=[Depends(require_ready_user)])
+app.include_router(metrics.router, dependencies=[Depends(require_ready_user)])
 app.include_router(schedules.router, dependencies=[Depends(require_admin_dep)])
 app.include_router(admin.router, dependencies=[Depends(require_ready_user)])
 app.include_router(auth_routes.router)

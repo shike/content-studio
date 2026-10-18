@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     login_ip_max: int = 40        # 同一来源 IP 窗口内失败上限（防撞库扫号）
 
     watch_scan_enabled: bool = True   # 定时同行扫描（PRD R3.4c）
+    creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
     watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）

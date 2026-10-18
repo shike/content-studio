@@ -330,6 +330,26 @@ class Dismissal(TenantScoped, TimestampMixin, table=True):
     asset_id: int = Field(index=True)
 
 
+class AccountMetricsDaily(TenantScoped, TimestampMixin, table=True):
+    """自有账号的日级运营指标（创作者中心 overview/all，2026-10-12 课程定位北极星）。
+
+    每日一快照；搜索类指标平台有数日延迟，缺失日按列合并补齐（不整行覆盖）。"""
+    __tablename__ = "account_metrics_daily"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date: str = Field(default="", index=True)  # YYYY-MM-DD（平台口径，通常 T-1）
+    fans: int = 0            # 粉丝总量
+    new_fans: int = 0        # 净增粉丝
+    cancel_fans: int = 0     # 取关
+    profile_views: int = 0   # 主页访问（课程转化北极星）
+    play: int = 0            # 播放
+    digg: int = 0
+    comment: int = 0
+    share: int = 0
+    account_search: int = 0  # 账号搜索次数
+    post_search: int = 0     # 作品搜索次数
+
+
 class SelfVideo(TenantScoped, TimestampMixin, table=True):
     """我的账号视频 + 逐条风格标注（R9.2）。不进拆解库、不产选题候选。"""
     __tablename__ = "self_videos"
