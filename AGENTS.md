@@ -2,7 +2,7 @@
 
 多租户内容生产流水线（登录门禁 + 租户隔离 + 积分池，PRD R11/TDD §15）：选题 → 三版口播脚本 → 口播数字人 → 公众号长文 → 发布物料包（发布永远人工）。
 
-- 架构：FastAPI + SQLModel + SQLite（`backend/app/`，28 表；生产库另有 2 张无模型孤儿表待清）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）
+- 架构：FastAPI + SQLModel + SQLite（`backend/app/`，28 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）
 - 五大文档（英文文件名，规格型：不含版本号、不含完成情况）：`docs/PRD.md`（需求总账，改需求先改它）· `docs/TDD.md`（技术契约）· `docs/TEST.md`（验收合同）· `docs/AUDIT.md`（审计规程）· `docs/MRD.md`（市场调研存档）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根目录）

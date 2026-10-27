@@ -146,8 +146,6 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `jobs` | type, status(queued/running/succeeded/failed/superseded；parked 已退役→failed), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light/external/scheduled), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 | `llm_calls` | tenant_id, purpose, model, tokens_in/out, cost_est, latency_ms, ok | 用量与成本台账（tenant_id=0 为系统调用） |
 
-> 注：生产库另有 `jianying_templates` / `video_projects` 两张**孤儿表**（P3 视频生产线移除遗留，代码已无模型引用），待清仓处理，不计入契约。
-
 **内容资产状态机**（串联各表的状态流转）：
 
 ```
