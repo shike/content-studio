@@ -61,7 +61,8 @@ _POLICIES: dict[str, RetryPolicy] = {
     # 拆解含 captcha 自动重试（2026-10-07）：验证码是 IP 级惩罚窗（几十分钟），
     # 30min 指数退避 ≤2 次正好覆盖窗体——此前 classes 只有 transient，验证码失败直接终态纯靠人工
     "benchmark_analyze": RetryPolicy(max_retries=2, base=300, cap=1800,
-                                     classes=("transient", "captcha"), task_timeout=2700),
+                                     classes=("transient", "captcha"), task_timeout=2700,
+                                     park_backoff=7200),  # 验证码挂起重查 2h（57 条×30min 的密度会给惩罚窗续期）
     "script_generate": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
     "script_polish": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
     "script_finalize": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
