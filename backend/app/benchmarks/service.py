@@ -171,7 +171,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             ctx.set_progress(8, f"下载节流：等待 {int(wait_s)} 秒（防触发抖音风控）")
             await asyncio.sleep(wait_s)
         _LAST_DOWNLOAD_TS = _time.time()
-        ctx.set_progress(10, "通过下载容器获取无水印视频")
+        ctx.set_progress(10, "打开视频页获取无水印直链")
         try:
             media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
         except Exception as e:
