@@ -549,20 +549,37 @@ class JobRunner:
             count = (job.retry_count or 0) + 1
             # captcha 与 quota 同走挂起语义（2026-10-07）：IP 风控窗可持续数小时，
             # 30min×2 的重试退避熬不过去就终态失败——挂起模式 16×30min=8h 容忍窗
-            if fc in ("quota", "captcha"):
+            if fc == "quota":
                 if count <= max(policy.max_parks, policy.max_retries):
                     job.status = "parked"
                     job.retry_count = count
                     job.next_retry_at = now + timedelta(seconds=policy.park_backoff)
                     job.error = scrub_paths(str(e))[:2000]
-                    job.message = ("额度窗口挂起" if fc == "quota" else "风控验证码挂起") + \
-                        f"（第 {count} 次），{policy.park_backoff // 60} 分钟后自动重查"
+                    job.message = f"额度窗口挂起（第 {count} 次），{policy.park_backoff // 60} 分钟后自动重查"
                 else:
                     job.status = "failed"
                     job.retry_count = count
                     job.next_retry_at = None
                     job.error = str(e)[:2000]
-                    job.message = ("额度窗口" if fc == "quota" else "风控验证码") + "持续不可用，停止挂起（可人工重试）"
+                    job.message = "额度窗口持续不可用，停止挂起（可人工重试）"
+            elif fc == "captcha":
+                # 验证码挂起上限 5 次（quota 保持 16）：多数是 IP 窗（1~2 次内自然过）；
+                # 超 5 次仍撞=该视频页被平台特殊标记（热门/投诉/权限），继续轮询是空转——
+                # 终态失败并给人工出口：App 内确认视频状态，本地下载走「本地视频拆解」上传（2026-10-12）
+                if count <= 5:
+                    job.status = "parked"
+                    job.retry_count = count
+                    job.next_retry_at = now + timedelta(seconds=policy.park_backoff)
+                    job.error = scrub_paths(str(e))[:2000]
+                    job.message = f"风控验证码挂起（第 {count}/5 次），{policy.park_backoff // 60} 分钟后自动重查"
+                else:
+                    job.status = "failed"
+                    job.retry_count = count
+                    job.next_retry_at = None
+                    job.error = str(e)[:2000]
+                    job.message = ("风控验证码 5 次未过：该视频页可能被特殊标记。"
+                                   "App 里确认视频是否还在，能播就在 App 保存到相册后走「本地视频拆解」上传，"
+                                   "已删除/私密则直接忽略该条")
             elif fc in policy.classes and (job.retry_count or 0) < policy.max_retries:
                 delay = min(policy.cap, policy.base * 2 ** (job.retry_count or 0))
                 job.status = "failed"  # 失败但已排期：next_retry_at 到点由重试循环放行
