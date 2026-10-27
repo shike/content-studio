@@ -141,7 +141,7 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `avatar_videos` | tenant_id, avatar_id, script_id, status(generating/done/failed), seconds, beans_used, model(0基础/1高质), audio_path, video_path | 数字人生成记录 |
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `dismissals` | scope, ref_id | 「不做」永久出口（可恢复） |
-| `jobs` | type, status(queued/running/parked/succeeded/failed/superseded), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light/external/scheduled), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
+| `jobs` | type, status(queued/running/succeeded/failed/superseded；parked 已退役→failed), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light/external/scheduled), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 | `llm_calls` | tenant_id, purpose, model, tokens_in/out, cost_est, latency_ms, ok | 用量与成本台账（tenant_id=0 为系统调用） |
 
 **内容资产状态机**（串联各表的状态流转）：
@@ -297,11 +297,16 @@ article:    draft ──► edited ──► rendered ──► published（由 
 ## 7. 后台任务框架（五要素统一任务体系）
 
 - 一切待处理工作都是任务：`jobs` 表 + 进程内 runner。任务五要素 = 类型（type）+ 去重键（dedup_key）+ 分道（lane）+ 重试策略（RetryPolicy）+ 失败分类（fail_class）。
-- **提交**：`submit(type, payload, dedup_key="", actor=None, points=0)`。dedup_key 非空时，同 type 下活跃任务（queued/running/parked）唯一，重复提交幂等返回原任务（活跃唯一部分索引兜底）。dedup_key 由各提交点按实体给出：拆解=分享链接（实体去重：同链接不建重复行）与 `bm:{id}`；扫描=`scan:{account_id|all}:{YYYYMMDD}`；自我扫描=`selfscan:all:{日期}`；链接识别=提取后的 URL；画像重算=全局 `profile:update`；数字人=`avatar:{script_id}`；自我风格分析=`selfanalyze:{video_id}`。
+- **提交**：`submit(type, payload, dedup_key="", actor=None, points=0)`。dedup_key 非空时，同 type 下活跃任务（queued/running）唯一，重复提交幂等返回原任务（活跃唯一部分索引兜底）。dedup_key 由各提交点按实体给出：拆解=分享链接（实体去重：同链接不建重复行）与 `bm:{id}`；扫描=`scan:{account_id|all}:{YYYYMMDD}`；自我扫描=`selfscan:all:{日期}`；链接识别=提取后的 URL；画像重算=全局 `profile:update`；数字人=`avatar:{script_id}`；自我风格分析=`selfanalyze:{video_id}`。
 - **分道**：`heavy`=LLM 长任务串行队列；`light`=扫描/识别类并发池（上限 3，同类执行中后来者合并跳过）；`scheduled`/`external` 预留。定时任务由调度循环到点 submit（带当日 dedup 键，天然防重复触发），调度循环本身不是任务。
 - **异常分类学**（`jobs/errors.py`，`classify()` 对历史 RuntimeError 按消息特征兜底分诊）：
   - `transient`（网络/超时/5xx/LLM 通道抖动）→ 按类型策略自动重试，指数退避 base×2ⁿ 封顶 cap，`next_retry_at` 到点由重试循环（30s）放行；
-  - `quota`（LLM 额度窗口/余额不足）→ 任务转 `parked` 挂起（不算失败），按 `park_backoff` 周期重查，超过 `max_parks` 转失败；
+  - **引擎统一（2026-10-12）**：`transient`/`captcha`/`quota` 一切可重试失败共用全局退避梯子
+    `RETRY_LADDER = [30min, 2h, 6h, 24h]`（`failed` + `next_retry_at`，到点由重试循环放行），
+    4 次重试后转终态失败（进「需要处理」区，可人工重试清零重走梯子）；`deterministic` 立即终态。
+    `fail_class` 只影响文案与失败中台指纹，不再影响机制；`parked` 状态退役（启动迁移→failed）。
+  - 任务类型策略仅剩超时阈值：`task_timeout`（硬超时）与 `stuck_after`（看门狗）；
+    看门狗卡死同样走梯子；
   - `captcha`（平台风控/验证墙）→ 失败并打标"可人工重试"；
   - `deterministic`（默认；参数/配置/内容问题）→ 立即失败，永不自动重试。
 - **重试策略**：`RetryPolicy(max_retries, base, cap, classes, park_backoff, max_parks, stuck_after)` 按 type 注册于 `_POLICIES`，提交时 `max_retries` 落到任务行。人工重试清零自动重试计数；批量"重试全部"跳过 deterministic。
@@ -316,8 +321,8 @@ article:    draft ──► edited ──► rendered ──► published（由 
   拆解提交两处返回带 `crawl_warning`（探针异常时提交即预警）。
 - **reaper**（周期巡逻，`CS_REAPER_SEC` 可配，默认 1800s，启动快速首巡）：①看门狗——`running` 超过类型策略 `stuck_after`（默认 2h）无更新判卡死，按 transient 自动重试；②欠任务——执行 `register_owed(type, fn)` 声明：fn 返回缺失工作的 `[(payload, dedup_key)]`，reaper 幂等补队。拆解已注册：`approved` 且 `analysis` 为空、无活跃任务、近 6h 无失败 → 补队（6h 退避防确定性失败空烧）。
 - **进度约定**：`progress` 0~100 + `message`；阶段轨迹落 `history`（≤80 条）；终态写 `result` 或 `error`（重试中的失败带 `next_retry_at`）。
-- **服务重启自愈**（`recover_interrupted_jobs`，须在 `runner.start()` 之后）：`queued` 重新入队（旧记录标 `superseded`=已续跑）；`running` 按 transient 排 90s 自动重试（重启中断不再需要人工）；`parked` 不受影响（`next_retry_at` 已持久化）。
-- **观测**：任务行携带 `lane/retry_count/max_retries/next_retry_at/fail_class/dedup_key`；任务页展示分道徽章、parked 计数与自动重查时间、失败自动重试排期与失败分类标签。
+- **服务重启自愈**（`recover_interrupted_jobs`，须在 `runner.start()` 之后）：`queued` 重新入队（旧记录标 `superseded`=已续跑）；`running` 按 transient 排 90s 自动重试（重启中断不再需要人工）；历史 parked 行由启动迁移转为 failed（`next_retry_at` 已持久化）。
+- **观测**：任务行携带 `lane/retry_count/max_retries/next_retry_at/fail_class/dedup_key`；任务页展示三态（进行中/需要处理/完成）、重试进度（N/4 与下次时间）与失败分类标签。
 - **失败中台（错误指纹 + 待处置 + 按指纹复活）**：
   - 每次失败由 runner 计算**错误指纹**（`errors.fingerprint`：规则表命中如 `llm:empty-body`/`asr:vocab`/`ddg:rate-limited`/`douyin:risk`/`db:constraint`/`code:bug`；未命中按归一化消息哈希），落 `jobs.error_fp` 并 upsert `failure_patterns` 表（fp 唯一，count 累计、样本错误、处置状态 open/fixed/ignored；fixed 后再出现自动回 open）。
   - `GET /api/jobs/failures` → 待处置盘点：失败且无重试排期且未归档的任务按指纹聚类 + **实体孤儿**组（实体 failed 且无活跃任务，合成指纹 `entity:{type}`）；`disposal`=待处置总数（进工作台计数：任务徽章=运行中+排队+待处置，非空=系统带病运行必须可见）。
