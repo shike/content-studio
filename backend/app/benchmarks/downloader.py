@@ -116,29 +116,10 @@ def _download_mp4(video_url: str, out_dir: Path) -> Optional[str]:
     return str(path) if path.stat().st_size > 0 else None
 
 
-def _self_cookie() -> str:
-    """自有账号的创作者中心登录态（.douyin.com 全域）。下载走登录身份，
-    规避匿名访客限流（2026-10-12 实测：匿名身份按 IP 累积热度后数据接口被扣留）。"""
-    try:
-        from ..db import engine
-        from sqlmodel import Session, select
-
-        from ..models import WatchAccount
-
-        with Session(engine) as s:
-            row = s.exec(
-                select(WatchAccount)
-                .where(WatchAccount.kind == "self",  # type: ignore[attr-defined]
-                       WatchAccount.creator_cookie != "")  # type: ignore[attr-defined]
-            ).first()  # type: ignore[union-attr]
-        return (row.creator_cookie or "").strip() if row else ""
-    except Exception:  # noqa: BLE001 读不到就匿名跑（原行为）
-        return ""
-
-
 def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[str]]:
-    """真浏览器路线：打开视频页，拦页面自身发出的 aweme/detail（自带合法签名与身份）。
-    有登录态则注入（登录身份不受匿名访客限流）；无则匿名（历史行为）。"""
+    """真浏览器路线：打开视频页，拦页面自身发出的 aweme/detail（自带合法签名与访客身份）。
+    匿名 + Mac 设备指纹（2026-10-27 用户裁定：登录态只用于自有账号数据回流，
+    不参与对他人内容的爬取；此前带登录态下载的路线作废）。"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -154,8 +135,8 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
         try:
             from ..browser import mac_spoof_context
 
-            # Mac 设备指纹 + 登录态（2026-10-12）：Linux 指纹被点名限流的根治
-            ctx = mac_spoof_context(browser, _self_cookie())
+            # Mac 设备指纹（2026-10-27 起匿名身份，不带任何登录态）
+            ctx = mac_spoof_context(browser, "")
             page = ctx.new_page()
 
             def on_response(resp):
