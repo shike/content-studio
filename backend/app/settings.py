@@ -44,6 +44,11 @@ class Settings(BaseSettings):
 
     watch_scan_enabled: bool = True   # 定时同行扫描（PRD R3.4c）
     creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
+    # 拆解下载外包本机 worker（2026-10-27）：服务器浏览器指纹被抖音扣数据、登录态授权被
+    # 用户否决——匿名可行的只有真实 Mac 浏览器（同 IP 实测对照）。开启后下载请求排队
+    # home_dl/*.req，由 Mac 上的 worker（scripts/home-dl.sh install）取件回传
+    home_dl_enabled: bool = False
+    home_dl_timeout: int = 480  # 等本机回传的超时秒数（超时进 transient 退避梯子）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
     watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）

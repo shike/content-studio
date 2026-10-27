@@ -9,6 +9,9 @@ python-multipart>=0.0.12
 markdown>=3.7
 bleach[css]>=6.0
 faster-whisper>=1.0
+# 钉住 <19：faster-whisper 1.2.x 调 av.open(..., metadata_errors=...)，av 19 移除该参数
+# （2026-10-27 实测：18.1.0 可跑、19.0.2 直接 TypeError；本地 venv 漂移到 19 打断 P2 验收）
+av>=12,<19
 Pillow>=10.0
 matplotlib>=3.9
 playwright>=1.48

@@ -15,7 +15,7 @@ from ..llm import gateway
 from ..models import BenchmarkVideo, Topic
 from ..prompts import load, render
 from ..settings import settings
-from ..jobs.errors import CaptchaError
+from ..jobs.errors import CaptchaError, TransientError
 from . import downloader
 
 
@@ -46,6 +46,42 @@ def _captcha_breaker() -> None:
             f"约 {wait_min} 分钟后自动重试")
 
 _BENCHMARK_DIR = settings.data_dir / "benchmarks"
+
+
+async def _home_download(ctx: JobContext, benchmark_id: int, url: str) -> str:
+    """下载外包给本机 worker（2026-10-27）：服务器浏览器指纹被抖音扣数据（同 IP 本机
+    Mac 实测可过），登录态授权被用户否决——服务器侧匿名路线无解，只有本机真实浏览器可行。
+
+    协议：data/home_dl/<id>.req 排队（JSON：benchmark_id/url/dest）；Mac worker 取件，
+    下载后先落 dest.part 再原子改名 dest，失败写 dest.err。幂等：dest 已存在直接用
+    （任务重试不重复下载）；req 由 worker 独占删除。Mac 离线=超时 TransientError 进退避梯子。"""
+    qdir = settings.data_dir / "home_dl"
+    qdir.mkdir(parents=True, exist_ok=True)
+    req = qdir / f"{benchmark_id}.req"
+    dest = _BENCHMARK_DIR / f"bm{benchmark_id}.mp4"
+    err = Path(str(dest) + ".err")
+    if not req.exists() and not dest.exists():
+        req.write_text(json.dumps(
+            {"benchmark_id": benchmark_id, "url": url, "dest": str(dest)}), encoding="utf-8")
+    ctx.set_progress(10, "下载已交本机 worker 排队（Mac 在线时 2 分钟内取件）")
+    deadline = _time.time() + settings.home_dl_timeout
+    while _time.time() < deadline:
+        await asyncio.sleep(5)
+        if dest.exists() and dest.stat().st_size > 0:
+            return str(dest)
+        if err.exists():
+            msg = err.read_text(encoding="utf-8", errors="replace").strip()[:200]
+            for p in (err, req):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            if "验证码" in msg:
+                _captcha_record()
+                raise CaptchaError(f"本机下载失败（验证码）：{msg}")
+            raise RuntimeError(f"本机下载失败：{msg}")
+    raise TransientError(
+        "等待本机下载超时（Mac 离线或 worker 未安装：scripts/home-dl.sh install）")
 
 
 def cleanup_completed_media() -> int:
@@ -159,26 +195,31 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     if not media_path:
         if source != "douyin" or not url:
             raise RuntimeError("本地原文件已按「拆解完即删」策略清理，请重新上传后再拆解")
-        _captcha_breaker()  # 下载熔断：风控窗中不再撞墙（快速失败进 30min 退避重试）
-        # 全局下载节流：两次下载最小间隔（默认 45s）——批量拆解连续高频下载会触发抖音
-        # IP 级验证码（家宽出口 IP 被 punishing）；夜间低密度批次全部成功证明低频可过
-        import os as _os
-        _min_gap = float(_os.environ.get("CS_DOWNLOAD_MIN_INTERVAL", "45"))
-        global _LAST_DOWNLOAD_TS
-        now_ts = _time.time()
-        if _LAST_DOWNLOAD_TS and now_ts - _LAST_DOWNLOAD_TS < _min_gap:
-            wait_s = _min_gap - (now_ts - _LAST_DOWNLOAD_TS)
-            ctx.set_progress(8, f"下载节流：等待 {int(wait_s)} 秒（防触发抖音风控）")
-            await asyncio.sleep(wait_s)
-        _LAST_DOWNLOAD_TS = _time.time()
-        ctx.set_progress(10, "通过下载容器获取无水印视频")
-        try:
-            media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
-        except Exception as e:
-            if "验证码" in str(e):
-                _captcha_record()
-                raise CaptchaError(f"自动下载失败（抖音风控验证码）：{str(e)[:120]}") from e
-            raise
+        if settings.home_dl_enabled:
+            # 下载外包本机（服务器浏览器被扣数据，2026-10-27）：不走熔断/节流——
+            # 服务器不再直接碰抖音，熔断只对 remaining 服务器侧直连路线有意义
+            media_path = await _home_download(ctx, benchmark_id, url)
+        else:
+            _captcha_breaker()  # 下载熔断：风控窗中不再撞墙（快速失败进 30min 退避重试）
+            # 全局下载节流：两次下载最小间隔（默认 45s）——批量拆解连续高频下载会触发抖音
+            # IP 级验证码（家宽出口 IP 被 punishing）；夜间低密度批次全部成功证明低频可过
+            import os as _os
+            _min_gap = float(_os.environ.get("CS_DOWNLOAD_MIN_INTERVAL", "45"))
+            global _LAST_DOWNLOAD_TS
+            now_ts = _time.time()
+            if _LAST_DOWNLOAD_TS and now_ts - _LAST_DOWNLOAD_TS < _min_gap:
+                wait_s = _min_gap - (now_ts - _LAST_DOWNLOAD_TS)
+                ctx.set_progress(8, f"下载节流：等待 {int(wait_s)} 秒（防触发抖音风控）")
+                await asyncio.sleep(wait_s)
+            _LAST_DOWNLOAD_TS = _time.time()
+            ctx.set_progress(10, "通过下载容器获取无水印视频")
+            try:
+                media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
+            except Exception as e:
+                if "验证码" in str(e):
+                    _captcha_record()
+                    raise CaptchaError(f"自动下载失败（抖音风控验证码）：{str(e)[:120]}") from e
+                raise
         with Session(engine) as s:
             b = s.get(BenchmarkVideo, benchmark_id)
             b.media_path = media_path
