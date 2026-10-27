@@ -23,3 +23,6 @@ data-integrity/
 
 # 滴答清单 skill 本地绑定状态
 .dida-task.json
+
+# 工具缓存（自动重建，不进库）
+.ruff_cache/
