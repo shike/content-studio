@@ -65,7 +65,7 @@ const STATUS_BADGE: Record<string, string> = {
   succeeded: 'bg-emerald-100 text-emerald-700',
 }
 const STATUS_LABEL: Record<string, string> = {
-  running: '运行中', queued: '排队', parked: '额度挂起', superseded: '已续跑', failed: '失败', succeeded: '完成',
+  running: '运行中', queued: '排队', parked: '挂起重试', superseded: '已续跑', failed: '失败', succeeded: '完成',
 }
 
 interface ScheduleRow {
@@ -373,7 +373,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>运行中 <b className="text-sky-600">{counts.running}</b></span>
         <span>排队 <b className="text-zinc-900">{counts.queued}</b></span>
-        {counts.parked > 0 && <span className="text-violet-500">额度挂起 <b>{counts.parked}</b></span>}
+        {counts.parked > 0 && <span className="text-violet-500">挂起重试 <b>{counts.parked}</b></span>}
         <span>失败 <b className="text-red-500">{counts.failed}</b></span>
         <span>已完成 <b className="text-zinc-900">{counts.succeeded}</b></span>
         {counts.superseded > 0 && <span className="text-slate-400">已续跑 {counts.superseded}</span>}
@@ -533,7 +533,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
             { key: '', label: '全部', count: counts.running + counts.queued + counts.parked + counts.failed + counts.succeeded },
             { key: 'running', label: '运行中', count: counts.running },
             { key: 'queued', label: '排队', count: counts.queued },
-            { key: 'parked', label: '额度挂起', count: counts.parked },
+            { key: 'parked', label: '挂起重试', count: counts.parked },
             { key: 'failed', label: '失败', count: counts.failed },
             { key: 'succeeded', label: '已完成', count: counts.succeeded },
             { key: 'superseded', label: '已续跑', count: counts.superseded },
@@ -601,14 +601,33 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                           </span>
                         )}
                       </div>
-                      {(t.error || (isRun && t.message)) && (
+                      {t.status === 'parked' ? (
+                        <div className="mt-0.5 truncate text-xs">
+                          {t.message && <div className="truncate text-violet-500">{t.message}</div>}
+                          {t.error && (
+                            <div className="truncate text-slate-400">
+                              <span className="mr-1.5 rounded bg-slate-100 px-1 py-px text-[10px] text-slate-400">
+                                上次失败（挂起中，非当前失败）
+                              </span>
+                              {t.error}
+                            </div>
+                          )}
+                        </div>
+                      ) : (t.status === 'failed' && t.next_retry_at) ? (
+                        <div className="mt-0.5 truncate text-xs text-slate-400">
+                          <span className="mr-1.5 rounded bg-amber-50 px-1 py-px text-[10px] text-amber-500">
+                            上次失败（已排期自动重试）
+                          </span>
+                          {t.error}
+                        </div>
+                      ) : (
                         <div className={`mt-0.5 truncate text-xs ${t.error ? 'text-red-500' : 'text-slate-400'}`}>
                           {t.fail_class && t.status === 'failed' && (
                             <span className="mr-1.5 rounded bg-red-50 px-1 py-px text-[10px] text-red-400">
                               {FAIL_CLASS_LABEL[t.fail_class] || t.fail_class}
                             </span>
                           )}
-                          {t.error || t.message}
+                          {t.error || (isRun && t.message)}
                         </div>
                       )}
                     </div>
