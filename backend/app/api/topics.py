@@ -100,7 +100,7 @@ async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
         topic_id = topic.id
     active = s.exec(select(Job).where(
         Job.type == "idea_research",  # type: ignore[attr-defined]
-        Job.status.in_(["queued", "running", "parked"]),  # type: ignore[attr-defined]
+        Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
     )).all()  # type: ignore[attr-defined]
     for j in active:  # 实体级去重：相同原文正在深研不重复提交
         if (j.payload or {}).get("text") == text:

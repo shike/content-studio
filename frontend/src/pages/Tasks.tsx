@@ -32,11 +32,12 @@ const FAIL_CLASS_LABEL: Record<string, string> = {
 
 interface Counts {
   running: number
-  parked: number
+  parked: number  // 已退役状态（历史行兼容）
   queued: number
   superseded: number
   failed: number
   succeeded: number
+  summary: { active: number; todo: number; done: number }
 }
 
 const TYPE_NAMES: Record<string, string> = {
@@ -56,16 +57,26 @@ const TYPE_NAMES: Record<string, string> = {
   topic_radar: '话题雷达',
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  running: 'bg-sky-100 text-sky-700',
-  queued: 'bg-slate-200 text-slate-600',
-  parked: 'bg-violet-100 text-violet-700',
-  superseded: 'bg-slate-100 text-slate-400',
-  failed: 'bg-red-100 text-red-700',
-  succeeded: 'bg-emerald-100 text-emerald-700',
+// 用户可见三态（2026-10-12 引擎统一）：failed+next_retry_at=退避中（属"进行中"）
+type UserState = 'active' | 'todo' | 'done'
+function userState(t: { status: string; next_retry_at?: string | null }): UserState {
+  if (t.status === 'succeeded' || t.status === 'superseded') return 'done'
+  if (t.status === 'failed') return t.next_retry_at ? 'active' : 'todo'
+  return 'active'
 }
-const STATUS_LABEL: Record<string, string> = {
-  running: '运行中', queued: '排队', parked: '挂起重试', superseded: '已续跑', failed: '失败', succeeded: '完成',
+const STATE_BADGE: Record<UserState, string> = {
+  active: 'bg-sky-100 text-sky-700',
+  todo: 'bg-red-100 text-red-700',
+  done: 'bg-emerald-100 text-emerald-700',
+}
+function stateBadge(t: { status: string; next_retry_at?: string | null; retry_count?: number }): { cls: string; label: string } {
+  const st = userState(t)
+  if (t.status === 'running') return { cls: STATE_BADGE.active, label: '运行中' }
+  if (t.status === 'queued') return { cls: STATE_BADGE.active, label: '排队' }
+  if (t.status === 'superseded') return { cls: STATE_BADGE.done, label: '已续跑' }
+  if (t.status === 'succeeded') return { cls: STATE_BADGE.done, label: '完成' }
+  if (st === 'active') return { cls: STATE_BADGE.active, label: `重试中 ${t.retry_count || 0}/4` }
+  return { cls: STATE_BADGE.todo, label: '需要处理' }
 }
 
 interface ScheduleRow {
@@ -110,7 +121,10 @@ function objectLabel(payload: Record<string, any>): string {
 
 export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
   const [items, setItems] = useState<TaskRow[]>([])
-  const [counts, setCounts] = useState<Counts>({ running: 0, queued: 0, parked: 0, superseded: 0, failed: 0, succeeded: 0 })
+  const [counts, setCounts] = useState<Counts>({
+    running: 0, parked: 0, queued: 0, superseded: 0, failed: 0, succeeded: 0,
+    summary: { active: 0, todo: 0, done: 0 },
+  })
   const [total, setTotal] = useState(0)
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(0)
@@ -371,12 +385,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
 
       {/* 状态行 */}
       <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
-        <span>运行中 <b className="text-sky-600">{counts.running}</b></span>
-        <span>排队 <b className="text-zinc-900">{counts.queued}</b></span>
-        {counts.parked > 0 && <span className="text-violet-500">挂起重试 <b>{counts.parked}</b></span>}
-        <span>失败 <b className="text-red-500">{counts.failed}</b></span>
-        <span>已完成 <b className="text-zinc-900">{counts.succeeded}</b></span>
-        {counts.superseded > 0 && <span className="text-slate-400">已续跑 {counts.superseded}</span>}
+        <span>进行中 <b className="text-sky-600">{counts.summary.active}</b></span>
+        <span className="text-xs text-slate-400">（运行中 {counts.running} · 排队 {counts.queued} · 等重试 {counts.failed && counts.summary.active - counts.running - counts.queued >= 0 ? counts.summary.active - counts.running - counts.queued : 0}）</span>
+        <span>需要处理 <b className={counts.summary.todo ? 'text-red-500' : 'text-zinc-900'}>{counts.summary.todo}</b></span>
+        <span>完成 <b className="text-zinc-900">{counts.summary.done}</b></span>
         <span className="ml-auto text-[11px] text-slate-400">
           {auto ? `每 3 秒自动刷新 · 最近更新 ${lastUpdate}` : '自动刷新已暂停'}
         </span>
@@ -530,13 +542,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           active={filter}
           onChange={changeFilter}
           chips={[
-            { key: '', label: '全部', count: counts.running + counts.queued + counts.parked + counts.failed + counts.succeeded },
-            { key: 'running', label: '运行中', count: counts.running },
-            { key: 'queued', label: '排队', count: counts.queued },
-            { key: 'parked', label: '挂起重试', count: counts.parked },
-            { key: 'failed', label: '失败', count: counts.failed },
-            { key: 'succeeded', label: '已完成', count: counts.succeeded },
-            { key: 'superseded', label: '已续跑', count: counts.superseded },
+            { key: '', label: '全部', count: counts.summary.active + counts.summary.todo + counts.summary.done },
+            { key: 'active', label: '进行中', count: counts.summary.active },
+            { key: 'todo', label: '需要处理', count: counts.summary.todo },
+            { key: 'done', label: '完成', count: counts.summary.done },
           ]}
         />
       </div>
@@ -565,9 +574,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                     className="cursor-pointer px-4 pt-2.5 pb-2 transition hover:bg-slate-50"
                   >
                   <div className="flex items-center gap-3">
-                    <span className={`badge shrink-0 ${STATUS_BADGE[t.status] || 'bg-slate-200 text-slate-600'}`}>
-                      {STATUS_LABEL[t.status] || t.status}
-                    </span>
+                    {(() => {
+                      const b = stateBadge(t)
+                      return <span className={`badge shrink-0 ${b.cls}`}>{b.label}</span>
+                    })()}
                     {t.status === 'failed' && t.covered_by != null && (
                       <span className="badge shrink-0 bg-emerald-100 text-emerald-700" title={`后续任务 #${t.covered_by} 已成功重跑同一工作，此失败已闭环`}>
                         ✓ 已闭环
@@ -585,14 +595,9 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                             {LANE_LABEL[t.lane] || t.lane}
                           </span>
                         )}
-                        {t.status === 'parked' && t.next_retry_at && (
-                          <span className="ml-1.5 text-xs text-violet-500">
-                            {relTime(t.next_retry_at + 'Z')}自动重查额度
-                          </span>
-                        )}
                         {t.status === 'failed' && t.next_retry_at && (
-                          <span className="ml-1.5 text-xs text-amber-500">
-                            {relTime(t.next_retry_at + 'Z')}自动重试（第 {(t.retry_count || 0)} 次）
+                          <span className="ml-1.5 text-xs text-sky-600">
+                            第 {(t.retry_count || 0)}/4 次重试 · {relTime(t.next_retry_at + 'Z')}自动重试
                           </span>
                         )}
                         {t.status === 'succeeded' && (
@@ -601,32 +606,24 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                           </span>
                         )}
                       </div>
-                      {t.status === 'parked' ? (
-                        <div className="mt-0.5 truncate text-xs">
-                          {t.message && <div className="truncate text-violet-500">{t.message}</div>}
-                          {t.error && (
-                            <div className="truncate text-slate-400">
-                              <span className="mr-1.5 rounded bg-slate-100 px-1 py-px text-[10px] text-slate-400">
-                                上次失败（挂起中，非当前失败）
-                              </span>
-                              {t.error}
-                            </div>
-                          )}
-                        </div>
-                      ) : (t.status === 'failed' && t.next_retry_at) ? (
+                      {userState(t) === 'active' && t.status === 'failed' ? (
                         <div className="mt-0.5 truncate text-xs text-slate-400">
-                          <span className="mr-1.5 rounded bg-amber-50 px-1 py-px text-[10px] text-amber-500">
-                            上次失败（已排期自动重试）
+                          <span className="mr-1.5 rounded bg-sky-50 px-1 py-px text-[10px] text-sky-600">
+                            上次失败（退避中，非当前失败）
                           </span>
                           {t.error}
                         </div>
-                      ) : (
-                        <div className={`mt-0.5 truncate text-xs ${t.error ? 'text-red-500' : 'text-slate-400'}`}>
-                          {t.fail_class && t.status === 'failed' && (
+                      ) : userState(t) === 'todo' ? (
+                        <div className="mt-0.5 truncate text-xs text-red-500">
+                          {t.fail_class && (
                             <span className="mr-1.5 rounded bg-red-50 px-1 py-px text-[10px] text-red-400">
                               {FAIL_CLASS_LABEL[t.fail_class] || t.fail_class}
                             </span>
                           )}
+                          {t.error || t.message}
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 truncate text-xs text-slate-400">
                           {t.error || (isRun && t.message)}
                         </div>
                       )}
@@ -635,7 +632,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                     <span className="hidden w-16 shrink-0 text-right text-[11px] text-slate-400 md:inline">
                       {relTime(t.created_at)}
                     </span>
-                    {t.status === 'failed' && (
+                    {userState(t) === 'todo' && (
                       <button
                         onClick={(e) => { e.stopPropagation(); retryOne(t.id) }}
                         title="重新入队执行"
@@ -687,9 +684,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                       {detail && detail.id === t.id ? (
                         <div className="space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`badge ${STATUS_BADGE[t.status] || 'bg-slate-200 text-slate-600'}`}>
-                              {STATUS_LABEL[t.status] || t.status}
-                            </span>
+                            {(() => {
+                              const b = stateBadge(t)
+                              return <span className={`badge ${b.cls}`}>{b.label}</span>
+                            })()}
                             <span className="text-sm font-semibold text-zinc-900">
                               {TYPE_NAMES[t.type] || t.type} · 任务 #{t.id}
                             </span>

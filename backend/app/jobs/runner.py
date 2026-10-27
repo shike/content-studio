@@ -1,16 +1,12 @@
-"""进程内任务框架（docs/技术方案.md §7，P1 骨架升级）。
+"""任务运行器（2026-10-12 引擎统一版）。
 
-- submit(type, payload, dedup_key) 入库为 queued，投入 asyncio 队列；
-  dedup_key 相同的活跃任务（queued/running/parked）只存在一个，重复提交幂等返回原任务
-- 消费者按注册表分发：协程函数直接 await；同步函数丢线程池（ASR/FFmpeg 等 CPU 密集）
-- 执行器通过 JobContext.set_progress 上报进度
-- 失败按 errors.classify 分类：
-  transient  → 按类型策略自动重试（指数退避，failed + next_retry_at，到点由重试循环放行）
-  quota      → 任务转 parked 挂起（不算失败），30 分钟粒度到点重查，超出挂起上限才失败
-  captcha    → 失败并打 fail_class=captcha（可人工重试，人工重试清零计数）
-  deterministic（默认）→ 立即失败，永不自动重试
-- 服务重启时：queued 自动重新入队（排队位不该因重启清零），running 标 failed；
-  parked 不受影响（next_retry_at 持久化，重试循环到点照常放行）
+状态机：queued → running → succeeded / failed
+- failed + next_retry_at = 退避中（梯子 30min→2h→6h→24h，到点由 _retry_loop 放行重试）
+- failed + next_retry_at=None = 终态"需要处理"（重试上限或确定性错误）
+- fail_class（transient/captcha/quota/deterministic）只影响文案，不影响机制
+
+并发结构：heavy 串行单工人 / light 并发池（Semaphore 2）+ 全局 LLM 信号量；
+看门狗（stuck_after）清扫卡死；recover 启动自愈；dedup_key 活跃任务幂等。
 """
 from __future__ import annotations
 
@@ -41,50 +37,60 @@ _OWNED: dict[str, Callable[[], list[tuple[dict, str]]]] = {}
 
 @dataclass
 class RetryPolicy:
-    """按任务类型的自动重试策略（策略一处定义，见 P1 方案）。"""
+    """按任务类型的策略（2026-10-12 引擎统一）：类型间只剩本质差异——超时阈值。
 
-    max_retries: int = 0
-    base: int = 60  # 首次退避秒数
-    cap: int = 1800  # 退避封顶秒数
-    classes: tuple = ("transient",)  # 参与自动重试的 fail_class
-    park_backoff: int = 1800  # quota 挂起的重查间隔（秒）
-    max_parks: int = 16  # quota 挂起次数上限（16×30min=8h，超过转失败）
-    stuck_after: int = 7200  # running 超过此秒数无更新 → 看门狗判定卡死（transient，自动重试）
+    重试统一走全局退避梯子 RETRY_LADDER（30min→2h→6h→24h，4 次重试后转终态"需要处理"）；
+    fail_class 只影响文案（告诉用户撞了什么），不再影响机制。"""
+
+    max_retries: int = 4  # 梯子跳数（默认 4：初试+4 重试=5 次尝试）
+    stuck_after: int = 7200  # running 超过此秒数无更新 → 看门狗判定卡死（transient，走梯子）
     task_timeout: Optional[int] = None  # 任务级硬超时（秒）：超时即失败重试，防单任务卡死唯一 heavy worker
+
+
+# 全局退避梯子：一切可重试失败（transient/captcha/quota）共用；401/429/验证码窗/网络抖动全覆盖
+RETRY_LADDER = [1800, 7200, 21600, 86400]  # 30分钟 → 2小时 → 6小时 → 24小时
+
+
+def _ladder_delay(retry_count: int) -> int:
+    """第 retry_count 次失败后的下次重试延迟（秒）；超出梯子取最后一跳。"""
+    i = min(max(retry_count - 1, 0), len(RETRY_LADDER) - 1)
+    return RETRY_LADDER[i]
+
+
+_LADDER_STEPS = len(RETRY_LADDER)
+
+
+def _human_delay(seconds: int) -> str:
+    if seconds >= 3600:
+        return f"{seconds // 3600} 小时" + (f"{(seconds % 3600) // 60} 分钟" if seconds % 3600 else "")
+    return f"{seconds // 60} 分钟"
 
 
 # 策略注册表：LLM 类失败多为通道抖动/额度窗口，允许 1 次跨任务重试 + 挂起；
 # 扫描类按原补丁语义（1h 后重试 ≤3 次）；确定性失败默认零重试。
 # task_timeout：hard 单 worker，任何任务卡死=全队列停摆——按类型给硬上限（超时线程不中断，
 # 会以僵尸形态跑完，但完成回调有状态护栏不再覆写结果）。
+# 重试机制统一后（2026-10-12），类型间只剩超时阈值差异；重试全走 RETRY_LADDER（默认 4 跳）
 _POLICIES: dict[str, RetryPolicy] = {
-    # 拆解含 captcha 自动重试（2026-10-07）：验证码是 IP 级惩罚窗（几十分钟），
-    # 30min 指数退避 ≤2 次正好覆盖窗体——此前 classes 只有 transient，验证码失败直接终态纯靠人工
-    "benchmark_analyze": RetryPolicy(max_retries=2, base=300, cap=1800,
-                                     classes=("transient", "captcha"), task_timeout=2700,
-                                     park_backoff=7200),  # 验证码挂起重查 2h（57 条×30min 的密度会给惩罚窗续期）
-    "script_generate": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
-    "script_polish": RetryPolicy(max_retries=1, base=300, task_timeout=2400),
-    "script_finalize": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
-    "article_generate": RetryPolicy(max_retries=1, base=300, task_timeout=3600),
-    "idea_research": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
-    "trending_topics": RetryPolicy(max_retries=1, base=300, task_timeout=900),
-    "creator_data_scan": RetryPolicy(max_retries=2, base=300, task_timeout=300),
-    "video_weekly_report": RetryPolicy(max_retries=2, base=300, task_timeout=600),
-    "self_analyze": RetryPolicy(max_retries=1, base=300, cap=1800,
-                                classes=("transient", "captcha"), task_timeout=2700),
-    "self_profile_update": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
-    "watch_scan": RetryPolicy(max_retries=3, base=3600, cap=3600,
-                              classes=("transient", "captcha"), task_timeout=3600),
-    "self_scan": RetryPolicy(max_retries=3, base=3600, cap=3600, task_timeout=2700),
-    "watch_resolve": RetryPolicy(max_retries=1, base=3600, cap=3600,
-                                 classes=("transient", "captcha"), task_timeout=1800),  # Q19：风控退避拉长到 1 小时
-    "radar_extract": RetryPolicy(max_retries=1, base=120, task_timeout=900),  # 话题提取风控瞬时失败
-    "watch_discover": RetryPolicy(max_retries=2, base=3600, cap=3600,
-                                  classes=("transient", "captcha"), task_timeout=3600),  # Q19：DDG/抖音风控统一 1 小时退避
-    "avatar_video": RetryPolicy(max_retries=1, base=120, task_timeout=3600),
-    "radar_mine": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
-    "topic_radar": RetryPolicy(max_retries=1, base=300, task_timeout=1800),
+    "benchmark_analyze": RetryPolicy(task_timeout=2700),
+    "script_generate": RetryPolicy(task_timeout=2400),
+    "script_polish": RetryPolicy(task_timeout=2400),
+    "script_finalize": RetryPolicy(task_timeout=1800),
+    "article_generate": RetryPolicy(task_timeout=3600),
+    "idea_research": RetryPolicy(task_timeout=1800),
+    "trending_topics": RetryPolicy(task_timeout=900),
+    "creator_data_scan": RetryPolicy(task_timeout=300),
+    "video_weekly_report": RetryPolicy(task_timeout=600),
+    "self_analyze": RetryPolicy(task_timeout=2700),
+    "self_profile_update": RetryPolicy(task_timeout=1800),
+    "watch_scan": RetryPolicy(task_timeout=3600),
+    "self_scan": RetryPolicy(task_timeout=2700),
+    "watch_resolve": RetryPolicy(task_timeout=1800),
+    "radar_extract": RetryPolicy(task_timeout=900),
+    "watch_discover": RetryPolicy(task_timeout=3600),
+    "avatar_video": RetryPolicy(task_timeout=3600),
+    "radar_mine": RetryPolicy(task_timeout=1800),
+    "topic_radar": RetryPolicy(task_timeout=1800),
 }
 _DEFAULT_POLICY = RetryPolicy()
 
@@ -147,7 +153,7 @@ class JobContext:
 async def recover_interrupted_jobs() -> None:
     """启动自愈：queued **原行**直接回内存队列（不新建任务行——旧行为"改 superseded 再 submit"
     因 dedup 必 miss 导致每次重启每任务膨胀一行、且新行断租户归属）；running 标失败并按
-    transient 排自动重试。须在 runner.start() 之后调用。parked 不动。
+    transient 排自动重试。须在 runner.start() 之后调用。
     """
     requeued: list[tuple[int, int]] = []
     requeued_types: list[tuple[int, str, str]] = []
@@ -237,7 +243,7 @@ class JobRunner:
                      dedup_key: str = "", retry_of: int = 0,
                      actor: Optional[tuple[int, int, str]] = None,
                      points: int = 0) -> Job:
-        """提交任务。dedup_key 相同的活跃任务（queued/running/parked）幂等返回原任务。
+        """提交任务。dedup_key 相同的活跃任务（queued/running）幂等返回原任务。
 
         归属：默认读 ACTOR contextvar（require_user 在请求上下文设值）；
         人工重试/复活传 actor=原任务归属；系统调度与自动重试为 (0,0,"")。
@@ -256,7 +262,7 @@ class JobRunner:
                     select(Job).where(
                         Job.type == job_type,  # type: ignore[attr-defined]
                         Job.dedup_key == dedup_key,  # type: ignore[attr-defined]
-                        Job.status.in_(["queued", "running", "parked"]),  # type: ignore[attr-defined]
+                        Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
                     )
                 ).first()
                 if existing is not None:
@@ -301,7 +307,7 @@ class JobRunner:
         return job
 
     async def _retry_loop(self) -> None:
-        """到点放行：failed(带 next_retry_at) 与 parked 的任务到期后重新入队。"""
+        """到点放行：failed(带 next_retry_at) 的任务到期后重新入队（退避中）。"""
         while True:
             await asyncio.sleep(30)
             try:
@@ -310,7 +316,7 @@ class JobRunner:
                 with Session(engine) as s:
                     rows = s.exec(
                         select(Job).where(
-                            Job.status.in_(["failed", "parked"]),  # type: ignore[attr-defined]
+                            Job.status == "failed",  # type: ignore[attr-defined]
                             Job.next_retry_at is not None,  # type: ignore[attr-defined]
                         )  # type: ignore[attr-defined]
                     ).all()
@@ -354,12 +360,13 @@ class JobRunner:
                         job.status = "failed"
                         job.fail_class = "transient"
                         job.error_fp = "infra:watchdog"
-                        job.retry_count = (job.retry_count or 0) + 1
-                        # 重试次数上限（2026-10-07）：此前不查上限会无限 2h 轮重试
-                        if policy.max_retries and job.retry_count <= policy.max_retries:
-                            delay = min(policy.cap, policy.base) if policy.max_retries else 0
+                        count = (job.retry_count or 0) + 1
+                        job.retry_count = count
+                        # 看门狗复用全局梯子（引擎统一 2026-10-12）：上限内排下一跳，超限转终态
+                        if count <= policy.max_retries:
+                            delay = _ladder_delay(count)
                             job.next_retry_at = now + timedelta(seconds=delay)
-                            job.error = f"运行超时（超过 {stuck_after // 60} 分钟无更新），看门狗判定卡死，自动重试 {job.retry_count}/{policy.max_retries}"
+                            job.error = f"运行超时（超过 {stuck_after // 60} 分钟无更新），看门狗判定卡死，自动重试 {count}/{policy.max_retries}"
                         else:
                             job.next_retry_at = None
                             job.error = f"运行超时（超过 {stuck_after // 60} 分钟无更新），已达重试上限，转终态失败（可人工重试）"
@@ -411,7 +418,7 @@ class JobRunner:
     async def _reenqueue(self, job_id: int) -> None:
         with Session(engine) as s:
             job = s.get(Job, job_id)
-            if job is None or job.status not in ("failed", "parked"):
+            if job is None or job.status != "failed":
                 return
             job_type = job.type
             # light 同类在跑：保持 failed+到期时间不动（下轮到点再查），先行置 queued 会让
@@ -548,51 +555,32 @@ class JobRunner:
             job.fail_class = fc
             job.error_fp = fp
             count = (job.retry_count or 0) + 1
-            # captcha 与 quota 同走挂起语义（2026-10-07）：IP 风控窗可持续数小时，
-            # 30min×2 的重试退避熬不过去就终态失败——挂起模式 16×30min=8h 容忍窗
-            if fc == "quota":
-                if count <= max(policy.max_parks, policy.max_retries):
-                    job.status = "parked"
-                    job.retry_count = count
-                    job.next_retry_at = now + timedelta(seconds=policy.park_backoff)
-                    job.error = scrub_paths(str(e))[:2000]
-                    job.message = f"额度窗口挂起（第 {count} 次），{policy.park_backoff // 60} 分钟后自动重查"
-                else:
-                    job.status = "failed"
-                    job.retry_count = count
-                    job.next_retry_at = None
-                    job.error = str(e)[:2000]
-                    job.message = "额度窗口持续不可用，停止挂起（可人工重试）"
-            elif fc == "captcha":
-                # 验证码挂起上限 5 次（quota 保持 16）：多数是 IP 窗（1~2 次内自然过）；
-                # 超 5 次仍撞=该视频页被平台特殊标记（热门/投诉/权限），继续轮询是空转——
-                # 终态失败并给人工出口：App 内确认视频状态，本地下载走「本地视频拆解」上传（2026-10-12）
-                if count <= 5:
-                    job.status = "parked"
-                    job.retry_count = count
-                    job.next_retry_at = now + timedelta(seconds=policy.park_backoff)
-                    job.error = scrub_paths(str(e))[:2000]
-                    job.message = f"风控验证码挂起（第 {count}/5 次），{policy.park_backoff // 60} 分钟后自动重查"
-                else:
-                    job.status = "failed"
-                    job.retry_count = count
-                    job.next_retry_at = None
-                    job.error = str(e)[:2000]
-                    job.message = ("风控验证码 5 次未过：该视频页可能被特殊标记。"
-                                   "App 里确认视频是否还在，能播就在 App 保存到相册后走「本地视频拆解」上传，"
-                                   "已删除/私密则直接忽略该条")
-            elif fc in policy.classes and (job.retry_count or 0) < policy.max_retries:
-                delay = min(policy.cap, policy.base * 2 ** (job.retry_count or 0))
+            job.error = scrub_paths(str(e))[:2000]
+            # 引擎统一（2026-10-12）：一条退避梯子管一切可重试失败。
+            # deterministic（参数/内容/代码错误）立即终态；其余（transient/captcha/quota）
+            # 全走 RETRY_LADDER（30min→2h→6h→24h）——分类只影响文案，不影响机制。
+            if fc == "deterministic":
+                job.status = "failed"
+                job.retry_count = count
+                job.next_retry_at = None
+                job.message = "确定性错误（不重试）：查看错误详情定位原因"
+            elif count <= policy.max_retries:
+                delay = _ladder_delay(count)
                 job.status = "failed"  # 失败但已排期：next_retry_at 到点由重试循环放行
                 job.retry_count = count
                 job.next_retry_at = now + timedelta(seconds=delay)
-                job.error = str(e)[:2000]
-                job.message = f"自动重试 {count}/{policy.max_retries}（{delay} 秒后）"
+                _why = {"transient": "瞬时故障", "captcha": "平台风控验证码",
+                        "quota": "平台额度窗口"}.get(fc, fc)
+                job.message = (f"{_why}，自动重试 {count}/{policy.max_retries}"
+                               f"（{_human_delay(delay)}后）")
             else:
                 job.status = "failed"
+                job.retry_count = count
                 job.next_retry_at = None
-                job.error = str(e)[:2000]
-                job.message = "失败"
+                _why = {"transient": "瞬时故障", "captcha": "平台风控",
+                        "quota": "平台额度"}.get(fc, "故障")
+                job.message = (f"{_why}重试 {_LADDER_STEPS} 次未恢复，转「需要处理」——"
+                               "可人工重试，或按错误详情人工处置")
             _upsert_failure_pattern(s, fp, fc, job_type, str(e), job_id)
             s.add(job)
             s.commit()
@@ -618,7 +606,7 @@ class JobRunner:
 
 
 def _check_tenant_quota(tenant_id: int) -> None:
-    """每租户活跃任务（queued/running/parked）上限，防单租户灌爆全局队列。"""
+    """每租户活跃任务（queued/running）上限，防单租户灌爆全局队列。"""
     if not tenant_id:
         return
     import os
@@ -629,7 +617,7 @@ def _check_tenant_quota(tenant_id: int) -> None:
     with Session(engine) as s:
         n = s.exec(select(func.count(Job.id)).where(  # type: ignore[attr-defined]
             Job.tenant_id == tenant_id,  # type: ignore[attr-defined]
-            Job.status.in_(["queued", "running", "parked"]),  # type: ignore[attr-defined]
+            Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
         )).one()
         if int(n[0] if isinstance(n, tuple) else n) >= cap:
             raise HTTPException(status_code=429,

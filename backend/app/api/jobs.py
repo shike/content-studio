@@ -1,6 +1,7 @@
 """任务查询/删除接口（列表 + 单任务 + 终态清理 + 失败中台）。"""
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from ..auth import get_current_user
@@ -47,10 +48,29 @@ def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 5
         for st, n in s.exec(cnt_q).all():
             if st in counts:
                 counts[st] += 1
+        # 用户可见三态汇总（引擎统一 2026-10-12）：failed+next_retry_at 属"进行中"
+        s_active = s_todo = s_done = 0
+        for st, nrt in s.exec(cnt_q).all():
+            if st in ("succeeded", "superseded"):
+                s_done += 1
+            elif st == "failed" and nrt is None:
+                s_todo += 1
+            else:
+                s_active += 1
+        counts["summary"] = {"active": s_active, "todo": s_todo, "done": s_done}
         q = select(Job).where(Job.archived == 0)  # type: ignore[attr-defined]
         if my_tenant:
             q = q.where(Job.tenant_id == my_tenant)  # type: ignore[attr-defined]
-        if status in _WEIGHT:
+        if status == "active":
+            q = q.where(or_(Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
+                            and_(Job.status == "failed",  # type: ignore[attr-defined]
+                                 Job.next_retry_at.is_not(None))))  # type: ignore[attr-defined]
+        elif status == "todo":
+            q = q.where(and_(Job.status == "failed",  # type: ignore[attr-defined]
+                             Job.next_retry_at.is_(None)))  # type: ignore[attr-defined]
+        elif status == "done":
+            q = q.where(Job.status.in_(["succeeded", "superseded"]))  # type: ignore[attr-defined]
+        elif status in _WEIGHT:
             q = q.where(Job.status == status)  # type: ignore[attr-defined]
         if type:
             names = [t.strip() for t in type.split(",") if t.strip()]
@@ -63,7 +83,11 @@ def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 5
         from sqlmodel import func as _f
         total = s.exec(select(_f.count()).select_from(q.subquery())).one() or 0
         rows = s.exec(q.order_by(Job.id.desc()).limit(500)).all()  # type: ignore[attr-defined]
-        rows = sorted(rows, key=lambda j: (_WEIGHT.get(j.status, 9),
+        def _w(j: Job) -> int:
+            if j.status == "failed":
+                return 2 if j.next_retry_at else 4  # 退避中排在终态失败前
+            return _WEIGHT.get(j.status, 9)
+        rows = sorted(rows, key=lambda j: (_w(j),
                                            j.id if j.status == "queued" else -j.id))
         queued_ahead = sorted(j.id for j in rows if j.status == "queued")
         page = rows[max(0, offset): max(0, offset) + max(1, min(limit, 200))]
@@ -114,7 +138,7 @@ async def retry_job(job_id: int) -> dict:
         job = s.get(Job, job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        if job.status not in ("failed", "parked"):
+        if job.status != "failed":
             raise HTTPException(status_code=400, detail="只有失败/挂起的任务可以重试")
         job.status = "superseded"
         job.error = "已手动重试，重新入队"

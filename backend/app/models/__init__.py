@@ -45,7 +45,7 @@ class Job(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "jobs"
     id: Optional[int] = Field(default=None, primary_key=True)
     type: str = Field(index=True)
-    status: str = Field(default="queued", index=True)  # queued|running|parked(额度挂起)|succeeded|failed|superseded(重启后已被新任务承接)
+    status: str = Field(default="queued", index=True)  # queued|running|succeeded|failed(parked 已退役→failed)|superseded(重启后已被新任务承接)
     progress: int = 0
     message: str = ""
     payload: dict = Field(default_factory=dict, sa_column=Column(JSON))

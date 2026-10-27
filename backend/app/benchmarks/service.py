@@ -64,7 +64,7 @@ def cleanup_completed_media() -> int:
             for j in s.exec(
                 _select(Job).where(
                     Job.type == "benchmark_analyze",  # type: ignore[attr-defined]
-                    Job.status.in_(["queued", "running", "parked"]),  # type: ignore[attr-defined]
+                    Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
                 )  # type: ignore[attr-defined]
             ).all()
         }
@@ -114,7 +114,7 @@ def owed_benchmarks() -> list[tuple[dict, str]]:
             for j in s.exec(
                 select(Job).where(
                     Job.type == "benchmark_analyze",  # type: ignore[attr-defined]
-                    Job.status.in_(["queued", "running", "parked"]),  # type: ignore[attr-defined]
+                    Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
                 )  # type: ignore[attr-defined]
             ).all()
         }

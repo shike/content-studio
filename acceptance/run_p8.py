@@ -23,6 +23,7 @@ from app.jobs.runner import policy_of as _policy_of  # noqa: E402
 from app.jobs import schedules as _sched  # noqa: E402
 from app.benchmarks import service as _bms  # noqa: E402
 from app.articles.service import length_specs as _ls  # noqa: E402
+from app.jobs.runner import RETRY_LADDER, _ladder_delay, policy_of as _policy_of  # noqa: E402
 
 class _FakeRow:  # effective_hour 只读 key/hour
     key = "watch_discover_daily"
@@ -32,9 +33,11 @@ check("发现任务生效钟点=2（不被全局扫描钟点覆盖）", _sched.e
 check("验证码失败分类为 captcha（可挂起重试）",
       _classify(Exception("页面未吐出视频数据（可能触发验证码）")) == "captcha")
 _p = _policy_of("benchmark_analyze")
-check("拆解策略含 captcha 自动处置 + 挂起上限 16",
-      "captcha" in _p.classes and _p.max_parks == 16 and _p.task_timeout == 2700,
-      f"classes={_p.classes}, max_parks={_p.max_parks}, timeout={_p.task_timeout}")
+check("拆解策略：统一退避梯子 + 硬超时 2700（引擎统一 2026-10-12）",
+      _p.task_timeout == 2700 and _p.max_retries == 4
+      and [1800, 7200, 21600, 86400] == RETRY_LADDER
+      and _ladder_delay(1) == 1800 and _ladder_delay(4) == 86400,
+      f"timeout={_p.task_timeout}, max_retries={_p.max_retries}, ladder={RETRY_LADDER}")
 _bms._CAPTCHA_FAILS.clear()
 try:
     _bms._captcha_breaker()

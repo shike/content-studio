@@ -786,7 +786,7 @@ async def tenant_delete(tenant_id: int, request: Request, confirm_name: str = ""
             raise HTTPException(status_code=400, detail="确认名称与租户名不一致")
         active = s.exec(select(Job).where(  # type: ignore[attr-defined]
             Job.tenant_id == tenant_id,  # type: ignore[attr-defined]
-            Job.status.in_(["queued", "running", "parked"]),  # type: ignore[attr-defined]
+            Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
         )).first()
         if active is not None:
             raise HTTPException(status_code=400,
