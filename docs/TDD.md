@@ -120,13 +120,15 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `topics` | title, angle, audience(boss/fde/both), source_type(idea/benchmark/manual), source_ref, evidence(JSON), score, score_breakdown(JSON 仅内容评分维度), status(draft/approved/rejected/produced) | 选题库；评分不含发布数据回流（R1.6 不做） |
 | `research_reports` | topic_id(FK), content(MD), model, tokens_in/out, cost_est | idea 深研产物 |
 | `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), media_path, source(douyin/local) | 同行拆解样本 |
-| `self_videos` | url, aweme_id, title, transcript, style_analysis(JSON), analyzed_at | 我的账号视频 + 逐条风格标注（R9.2） |
+| `self_videos` | url, aweme_id, title, transcript, style_analysis(JSON), analyzed_at, published_at, duration, stats(JSON) | 我的账号视频 + 逐条风格标注（R9.2） |
+| `account_metrics_daily` | tenant_id, date, fans/new_fans/cancel_fans, profile_views, play, digg, comment, share, account_search, post_search | 自有账号日级运营指标（创作者中心 overview 回流，按日列合并不整行覆盖；每日 6 点轻活，kill switch=creator_data_enabled）（R9.7） |
+| `video_weekly_reports` | tenant_id, week_start, report(JSON) | 视频表现周报（质量分=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3；LLM 解读按周缓存）（R9.8） |
 | `style_profiles` | tenant_id, account_name, version, digest, traits(JSON), exemplars(JSON), based_on | 风格画像版本快照，保留历史（R9.3） |
 | `scripts` | topic_id(FK), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/final) | 一个选题一个脚本对象，内含 3 版本 |
 | `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
 | `media_assets` | kind(footage/broll/bgm/sticker/intro/outro), tags(JSON), path, duration, meta(JSON) | 素材库 |
 | `articles` | topic_id?(FK), script_id?(FK), md, html, status(draft/edited/rendered/published) | 公众号文章 |
-| `publish_records` | asset_type, asset_id, platform, published_url, metrics(JSON) | 发布台账（R6.2 裁定不做后仅保留表与模型引用，低优技术债） |
+| `tenant_memberships` | user_id, tenant_id, role(tenant_admin/member)，unique(user_id,tenant_id) | 一人多租户归属（R11；users.tenant_id 降级为「默认租户」落点，活跃租户存会话） |
 | `tenants` | name, credits, status(active/disabled) | 租户；共享积分池（R11.4） |
 | `users` | tenant_id(FK), username(全局唯一), password_hash(scrypt), role(platform_admin/tenant_admin/member), display_name, status, must_change_password | 租户成员 |
 | `user_sessions` | token_hash(唯一), user_id, tenant_id, expires_at | 服务端会话（Cookie 只带明文 token） |
@@ -143,6 +145,8 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `dismissals` | scope, ref_id | 「不做」永久出口（可恢复） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded；parked 已退役→failed), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light/external/scheduled), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 | `llm_calls` | tenant_id, purpose, model, tokens_in/out, cost_est, latency_ms, ok | 用量与成本台账（tenant_id=0 为系统调用） |
+
+> 注：生产库另有 `jianying_templates` / `video_projects` 两张**孤儿表**（P3 视频生产线移除遗留，代码已无模型引用），待清仓处理，不计入契约。
 
 **内容资产状态机**（串联各表的状态流转）：
 
@@ -264,6 +268,8 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - `POST /api/style/videos/{id}/resolve` `{action}` → 风格视频人工定夺（批准拆解/忽略）
 - `POST /api/topics/cleanup-rejected` `{days=30}` → 清理 N 天前已否决选题（级联删报告/解绑脚本文章）
 - `GET /api/style/profile/history` → `{items:[{version, digest, traits, exemplars, based_on, created_at}]}`
+- `GET /api/metrics/account?days=30` → 自有账号日级指标序列（升序，1~120 天封顶）+ 最新摘要（粉丝/净增/取关/主页访问/播放/互动/搜索）；数据源创作者中心 overview/all httpx 直连回流，每日 6 点轻活（kill switch=creator_data_enabled）（R9.7）
+- `GET /api/metrics/weekly` → 视频表现周报（按周聚合视频质量分榜=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3 + 账号日级归因「发布日 vs 停更日」；LLM 解读按周缓存；任务 video_weekly_report 每日 7 点自愈按周幂等+手动生成）（R9.8）
 
 ### 脚本工场
 - `POST /api/scripts/generate` `{topic_id}` → 202 `{script_id, job_id}`（3 版生成）
@@ -314,11 +320,16 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - **统一调度中心**（`jobs/schedules.py`，Q"任务调度管理中心"）：所有周期任务一处注册（`REGISTRY`：key/label/执行体/节奏 daily_hour 或 interval_hours/设置开关字段）、`schedules` 表存运行态（enabled/hour 覆盖/last_run_at/next_run_at/last_status/run_count）、`_schedule_loop`（runner 内受监督循环，每 60s 巡检）到点执行。内置五项：同行扫描/自我扫描/话题雷达（每日，钟点默认取 `watch_scan_hour` 可按项覆盖）、业务库每日备份（4 点）、拆解媒体清扫（每 6h）。API：`GET /api/schedules`、`POST /{key}/toggle`、`PUT /{key}/hour`、`POST /{key}/run`（立即执行并记运行态）；任务页「调度中心」卡片可视化。旧 main.py 硬编码调度循环已删除。
 - **同行发现·每日**（调度 key=`watch_discover_daily`，每日 2 点，随 watch_scan_enabled 开关）：关键词按天轮换，优先级=设置页配置 > 对标圈近 30 天标题 LLM 动态提炼（discover_keywords 小调用，2026-10-10 防发现池同质）> 12 词静态池走 DDG→视频链接→反查作者→粉丝 Top8 入候选表（status=open 待人工定夺；已在清单/已忽略的不重复）；候选粉丝 ≥1 万（_DISCOVER_QUALITY_FANS）计入工作台周报卡「清单外高赞同行」。
 - **抖音采集探针**（`crawler_probe.py`，调度 key=`crawl_probe`，15 分钟）：先 TCP 探出口隧道
-  （断=`proxy_down` 不浪费浏览器），再开真实视频页（轮换拆解库最近 20 条已定夺视频、避开上次用的）
-  按形态分类 `ok / login_wall / captcha / proxy_down / browser_error / no_data`；结果落
-  `data/crawl_probe.json`（最近+历史 20），**状态翻转才发系统通知**。API：`GET /api/crawl/status`
-  （近 1h 爬取类失败数被动印证）、`POST /api/crawl/probe`（手动）；设置页「数据采集（抖音）」卡；
-  拆解提交两处返回带 `crawl_warning`（探针异常时提交即预警）。
+  （断=`proxy_down` 不浪费浏览器）；**多样本表决（2026-10-12 四修）**：连测 3 条轮换样本
+  （拆解库最近 20 条已定夺视频、避开上次用的），≥1 条通即判可用、detail 带过 N/M 比例——
+  单条毒视频不再一票否决；同 URL 连续 2 次探不通→24h 冷却移出样本池；分类 `ok / login_wall /
+  captcha / proxy_down / browser_error / no_data / video_gone（视频已删除或不可见，与验证码区分）`；
+  结果落 `data/crawl_probe.json`（最近+历史 20，带被动信号：近 1h 爬取类任务真实失败数交叉印证），
+  **状态翻转才发系统通知**。API：`GET /api/crawl/status`、`POST /api/crawl/probe`（手动）；
+  设置页「数据采集（抖音）」卡；拆解提交两处返回带 `crawl_warning`（探针异常时提交即预警）。
+  拆解下载同口径：平台一致指纹（跨平台 UA 伪装=不一致指纹会被扣数据，2026-10-27 定论）；
+  下载失败按页面实际内容分类——毒视频「视频已删除」（终态带人工确认指引）／真验证码（进熔断）／
+  代理断连「出口代理不通」（transient，不进熔断）。
 - **reaper**（周期巡逻，`CS_REAPER_SEC` 可配，默认 1800s，启动快速首巡）：①看门狗——`running` 超过类型策略 `stuck_after`（默认 2h）无更新判卡死，按 transient 自动重试；②欠任务——执行 `register_owed(type, fn)` 声明：fn 返回缺失工作的 `[(payload, dedup_key)]`，reaper 幂等补队。拆解已注册：`approved` 且 `analysis` 为空、无活跃任务、近 6h 无失败 → 补队（6h 退避防确定性失败空烧）。
 - **进度约定**：`progress` 0~100 + `message`；阶段轨迹落 `history`（≤80 条）；终态写 `result` 或 `error`（重试中的失败带 `next_retry_at`）。
 - **服务重启自愈**（`recover_interrupted_jobs`，须在 `runner.start()` 之后）：`queued` 重新入队（旧记录标 `superseded`=已续跑）；`running` 按 transient 排 90s 自动重试（重启中断不再需要人工）；历史 parked 行由启动迁移转为 failed（`next_retry_at` 已持久化）。
