@@ -206,8 +206,20 @@ def main() -> int:
     _db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        os.environ.get("DATA_DIR", "data"), "studio.db")
     _conn = _sq.connect(_db, timeout=30)
-    _conn.execute("INSERT OR IGNORE INTO articles (id, topic_id, md, html, status, created_at, updated_at) "
-                  "VALUES (998001, NULL, '', '', 'failed', datetime('now'), datetime('now'))")
+    import time as _t
+    _t0 = _t.time()
+    for _i in range(150):
+        try:
+            _conn.execute("INSERT OR IGNORE INTO articles (id, topic_id, md, html, status, created_at, updated_at) "
+                          "VALUES (998001, NULL, '', '', 'failed', datetime('now'), datetime('now'))")
+            print(f"[P6探针] 第{_i}次写入成功，耗时 {_t.time()-_t0:.1f}s")
+            break
+        except _sq.OperationalError as _e:
+            if _i == 0:
+                print(f"[P6探针] 首写 BUSY: {_e}（开始重试）")
+            _t.sleep(2)
+    else:
+        raise RuntimeError("300s 仍锁")
     _conn.commit()
     _conn.close()
     _stf3, _bf3 = request("GET", "/api/jobs/failures")

@@ -59,9 +59,7 @@ def weekly_report(user: User = Depends(require_user)) -> dict:
 @router.post("/weekly/generate", status_code=202)
 async def generate_weekly(user: User = Depends(require_user)) -> dict:
     from ..jobs.runner import runner
-    from ..credits import job_points
 
     job = await runner.submit("video_weekly_report", {"force": True},
-                              dedup_key=f"{user.tenant_id}:weeklyreport:manual:{__import__('datetime').datetime.now():%Y%m%d%H%M}",
-                              points=job_points("video_weekly_report"))
+                              dedup_key=f"{user.tenant_id}:weeklyreport:manual:{__import__('datetime').datetime.now():%Y%m%d%H%M}")
     return {"job_id": job.id}

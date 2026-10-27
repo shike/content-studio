@@ -164,20 +164,15 @@ def main() -> int:
         check("渲染交互出 HTML 预览", page.locator("text=复制公众号 HTML").count() >= 1
               or page.locator("text=已渲染").count() >= 1)
 
-        # ---------- 管理后台：品牌卡九字段 ----------
-        section("E2E · 管理后台品牌卡")
-        goto_page("管理后台")
-        # 进租户 tab → 点租户行进详情 → 品牌卡在此层级
-        page.locator('button', has_text='租户（').first.click()
+        # ---------- 设置页：品牌卡九字段 ----------
+        section("E2E · 设置页品牌卡")
+        goto_page("设置")
         page.wait_for_timeout(900)
-        page.locator('main').get_by_text('示例工作室').first.click()
-        page.wait_for_timeout(1200)
         check("品牌卡九字段在位",
               all(page.locator(f'text={t}').count() >= 1 for t in
                   ["角标栏目 · 第一行", "头图口号", "受众域口径", "ASR 领域词表", "图表主色"]))
-        # 值级断言：列表接口必须带 brand（曾漏传导致品牌卡全空——用户报"我自己的租户什么内容都没有"）
         l1 = page.locator('label', has_text='角标栏目 · 第一行').locator('input').input_value()
-        check("品牌卡回显租户已配置内容（栏目第一行=示例种子值）", l1 == "跃迁", f"label_line1={l1!r}")
+        check("品牌卡回显已配置内容（栏目第一行=示例种子值）", l1 == "跃迁", f"label_line1={l1!r}")
         kw_input = page.locator('label', has_text='头图口号').locator('input')
         kw_input.wait_for(state='visible', timeout=8000)
         kw_input.fill('E2E口号 ' + stamp)
@@ -190,52 +185,13 @@ def main() -> int:
         page.wait_for_timeout(1200)
         check("品牌保存成功回显", "品牌已保存" in page.inner_text("main"))
 
-        # ---------- 租户白名单：成员无管理后台 ----------
-        section("E2E · 租户白名单冒烟")
-        member_name = f"e2e_member_{stamp}"
-        st, d = request("POST", "/api/admin/users", body={
-            "username": member_name, "role": "member", "tenant_id": 1})
-        one_time = d.get("one_time_password") if isinstance(d, dict) else ""
-        check("成员账号创建（返回一次性密码）", st in (200, 201) and bool(one_time), f"code={st}")
-        page.evaluate(
-            """() => {
-                const b = [...document.querySelectorAll('button')]
-                    .find(x => x.textContent.trim() === '退出');
-                if (b) b.click();
-            }""")
-        page.wait_for_timeout(1000)
-        if page.locator('input[placeholder="用户名"]').count() == 0:
-            page.reload()
-            page.wait_for_timeout(1000)
-        # 成员首登强制改密：先处理
-        page.fill('input[placeholder="用户名"]', member_name)
-        page.fill('input[placeholder="密码"]', one_time)
-        page.click('button:has-text("登录")')
-        page.wait_for_timeout(1500)
-        if page.locator('text=设置新密码').count() >= 1:
-            page.get_by_placeholder('刚才登录用的密码').fill(one_time)
-            page.get_by_placeholder('新密码', exact=True).fill(MEMBER_PWD)
-            page.get_by_placeholder('再输入一次新密码').fill(MEMBER_PWD)
-            page.click('button:has-text("保存并进入")')
-            page.wait_for_timeout(1800)
-        page.wait_for_selector('aside', timeout=8000)
-        nav_text = page.inner_text("aside")
-        check("成员无管理后台入口", "管理后台" not in nav_text)
-        # 登出
-        page.evaluate(
-            """() => {
-                const b = [...document.querySelectorAll('button')]
-                    .find(x => x.textContent.trim() === '退出');
-                if (b) b.click();
-            }""")
-        page.wait_for_timeout(800)
 
         # ---------- 汇总 ----------
         # 预期噪声：未登录探活/登出后的 401；无蝉镜凭证实例上数字人页 balance 探询的
         # 400（合法降级路径，前端有"未配置"回显）——浏览器把 4xx 响应自动记 console.error
         real_errors = [e for e in errors
                        if "favicon" not in e and "401 (Unauthorized)" not in e
-                       and "/api/avatar/balance" not in e]
+                      ]
         check("全站 console/pageerror 零异常（401 探活噪声除外）", not real_errors,
               f"{len(real_errors)} 条：{real_errors[:3]}")
         browser.close()

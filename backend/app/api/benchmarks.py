@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..auth import require_user
-from ..credits import job_points, require_points
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import BenchmarkVideo, ScriptTemplate, Topic, User
@@ -25,7 +24,6 @@ class AnalyzeIn(BaseModel):
 @router.post("/api/analyze/video", status_code=202)
 async def analyze_video(body: AnalyzeIn,
                         user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("benchmark_analyze"), "同行拆解")
     from ..benchmarks.downloader import extract_douyin_url, is_douyin_url
     url = extract_douyin_url(body.url.strip())
     if not url:
@@ -41,8 +39,7 @@ async def analyze_video(body: AnalyzeIn,
             s.refresh(b)
         benchmark_id = b.id
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
-                              dedup_key=f"bm:{benchmark_id}",
-                              points=job_points("benchmark_analyze"))
+                              dedup_key=f"bm:{benchmark_id}")
     out = {"benchmark_id": benchmark_id, "job_id": job.id}
     # 采集预警：最近一次探针异常且未过久 → 提交时就告诉用户可能失败（省一轮空等）
     try:
@@ -59,7 +56,6 @@ async def analyze_video(body: AnalyzeIn,
 @router.post("/api/analyze/local", status_code=202)
 async def analyze_local(file: UploadFile,
                         user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("benchmark_analyze"), "同行拆解")
     if not file.filename:
         raise HTTPException(status_code=400, detail="缺少文件")
     suffix = Path(file.filename).suffix or ".mp4"
@@ -83,8 +79,7 @@ async def analyze_local(file: UploadFile,
         s.refresh(b)
         benchmark_id = b.id
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
-                              dedup_key=f"bm:{benchmark_id}",
-                              points=job_points("benchmark_analyze"))
+                              dedup_key=f"bm:{benchmark_id}")
     out = {"benchmark_id": benchmark_id, "job_id": job.id}
     # 采集预警：最近一次探针异常且未过久 → 提交时就告诉用户可能失败（省一轮空等）
     try:
@@ -182,7 +177,6 @@ class ResolveIn(BaseModel):
 @router.post("/api/benchmarks/{benchmark_id}/resolve", status_code=202)
 async def resolve_benchmark(benchmark_id: int, body: ResolveIn,
                             user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("benchmark_analyze"), "同行拆解")
     """人工定夺：批准（排队拆解）或忽略。"""
     if body.action not in ("approve", "ignore", "pending"):
         raise HTTPException(status_code=400, detail="action 必须是 approve / ignore / pending")
@@ -203,7 +197,6 @@ async def resolve_benchmark(benchmark_id: int, body: ResolveIn,
 @router.post("/api/benchmarks/resolve-pending")
 async def resolve_pending(body: ResolveIn,
                           user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("benchmark_analyze"), "同行拆解")
     """批量定夺当前所有待定夺行（可按作者过滤）。"""
     if body.action not in ("approve", "ignore"):
         raise HTTPException(status_code=400, detail="action 必须是 approve / ignore")
@@ -223,8 +216,7 @@ async def resolve_pending(body: ResolveIn,
         if body.action == "approve":
             for b in rows:
                 job = await runner.submit("benchmark_analyze", {"benchmark_id": b.id},
-                                          dedup_key=f"bm:{b.id}",
-                                          points=job_points("benchmark_analyze"))
+                                          dedup_key=f"bm:{b.id}")
                 job_ids.append(job.id)
     return {"resolved": resolved, "job_ids": job_ids}
 

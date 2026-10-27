@@ -67,16 +67,13 @@ def main() -> int:
     st2, _ = request("GET", "/api/avatar/videos/999999999/file")
     check("不存在成片 404", st2 == 404)
 
-    # ---- 预估与余额（依赖凭证，但都不烧豆）----
-    st, body = request("GET", "/api/avatar/balance")
-    configured = not (st == 400 and "未配置" in str(body.get("detail", "")))
-    if st == 0:
-        skip("蝉豆余额接口", f"请求失败: {body}")
+    # ---- 预估（依赖凭证，但不烧豆）----
+    st_probe, body_probe = request("GET", "/api/avatar/estimate?script_id=0")
+    configured = not (st_probe == 400 and "未配置" in str(body_probe.get("detail", "")))
+    if st_probe == 0:
+        skip("预估用例", f"请求失败: {body_probe}")
     elif not configured:
-        skip("蝉豆余额接口", "凭证未配置")
-    else:
-        check("蝉豆余额接口 200 且为整数", st == 200 and isinstance(body.get("beans"), int),
-              f"beans={body.get('beans')}")
+        skip("预估用例", "凭证未配置")
 
     # 造一条带定稿文本的临时脚本（直接写隔离库，收尾删除）
     script_id = None
@@ -103,22 +100,6 @@ def main() -> int:
             check("预估数学自洽（beans=ceil(seconds)）",
                   body.get("beans") == exp_beans and body.get("chars", 0) > 0,
                   f"chars={body.get('chars')} seconds={body.get('seconds')} beans={body.get('beans')}")
-            check("预估含余额与充足性判断",
-                  isinstance(body.get("balance"), int) and isinstance(body.get("insufficient"), bool))
-            # 租户口径：本次扣多少积分（按秒）+ 自己的积分池余额（2026-09-27 起按秒计费）
-            import math as _math
-            exp_points = max(1, _math.ceil(body["seconds"] * 3))
-            check("预估含租户积分口径（points=ceil(秒×3)、credits）",
-                  body.get("points") == exp_points and isinstance(body.get("credits"), int),
-                  f"seconds={body.get('seconds')} points={body.get('points')} 期望={exp_points} credits={body.get('credits')}")
-            st_q, body_q = request("GET", f"/api/avatar/estimate?script_id={q}&model=1")
-            check("高质版积分翻倍（6 分/秒）",
-                  st_q == 200 and body_q.get("points") == max(1, _math.ceil(body_q["seconds"] * 6)),
-                  f"points={body_q.get('points')} seconds={body_q.get('seconds')}")
-            st_c, credits = request("GET", "/api/credits")
-            check("租户积分接口可用（余额+价目）",
-                  st_c == 200 and isinstance(credits.get("balance"), int) and len(credits.get("prices") or {}) >= 5,
-                  str(credits)[:100])
         st, body = request("GET", "/api/avatar/estimate?script_id=999999")
         check("预估无定稿脚本 400", st == 400)
     elif not configured:

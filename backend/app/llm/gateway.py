@@ -12,7 +12,6 @@ from sqlmodel import Session
 
 from ..db import engine
 from ..jobs.errors import QuotaExhaustedError, TransientError
-from ..models import LLMCall
 from ..settings import settings
 
 # 元 / 百万 tokens: (输入, 输出)。缺省按 glm-5 计。
@@ -57,13 +56,6 @@ def _record(purpose: str, model: str, tokens_in: int, tokens_out: int,
             latency_ms: int, ok: bool) -> None:
     price = _PRICES.get(model, _PRICES["glm-5"])
     cost = (tokens_in * price[0] + tokens_out * price[1]) / 1_000_000
-    from ..auth import ACTOR
-    tenant_id, _uid, _role = ACTOR.get()
-    with Session(engine) as s:
-        s.add(LLMCall(purpose=purpose, model=model, tokens_in=tokens_in,
-                      tokens_out=tokens_out, cost_est=round(cost, 6),
-                      latency_ms=latency_ms, ok=ok, tenant_id=tenant_id))
-        s.commit()
 
 
 # 全局 LLM 并发闸（2026-10-07）：直调端点（知识图解/海报/物料包标签/ping）不入任务队列，
@@ -185,25 +177,3 @@ def _extract_json(text: str) -> dict:
     return data
 
 
-def usage_summary(tenant_id: int | None = None) -> dict:
-    with Session(engine) as s:
-        q = s.query(LLMCall)
-        if tenant_id is not None:
-            q = q.filter(LLMCall.tenant_id == tenant_id)
-        rows = q.all()
-    by_purpose: dict[str, dict] = {}
-    for r in rows:
-        b = by_purpose.setdefault(r.purpose, {"purpose": r.purpose, "calls": 0,
-                                              "tokens_in": 0, "tokens_out": 0, "cost_est": 0.0})
-        b["calls"] += 1
-        b["tokens_in"] += r.tokens_in
-        b["tokens_out"] += r.tokens_out
-        b["cost_est"] = round(b["cost_est"] + r.cost_est, 4)
-    return {
-        "calls": len(rows),
-        "tokens_in": sum(r.tokens_in for r in rows),
-        "tokens_out": sum(r.tokens_out for r in rows),
-        "cost_est": round(sum(r.cost_est for r in rows), 4),
-        "by_purpose": sorted(by_purpose.values(),
-                             key=lambda x: -x["cost_est"]),
-    }

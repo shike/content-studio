@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (admin, articles, auth_api as auth_routes, avatar, benchmarks, credits_api, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
+from .api import (articles, auth_api as auth_routes, avatar, benchmarks, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
                   public_media, publishing, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
@@ -46,7 +46,7 @@ def _bootstrap_admin() -> None:
     初始密码随机生成并打印到日志一次，首登强制改密；
     验收隔离实例可用 CS_BOOTSTRAP_PASSWORD 指定确定性口令。"""
     from .auth import hash_password
-    from .models import Tenant, TenantMembership, User
+    from .models import Tenant, User
 
     # 安装参数（SaaS 产品化）：租户名/管理员可经 env 覆盖，默认给中性示例值
     bt_tenant = os.environ.get("CS_BOOTSTRAP_TENANT") or "示例工作室"
@@ -65,8 +65,6 @@ def _bootstrap_admin() -> None:
                  password_hash=hash_password(password), role="platform_admin",
                  display_name=bt_tenant, status="active", must_change_password=False)
         s.add(u)
-        s.flush()  # 取用户 id：管理员同步建初始归属（无归属登录会被拒）
-        s.add(TenantMembership(user_id=u.id, tenant_id=tenant.id, role="member"))
         s.commit()
         if os.environ.get("CS_BOOTSTRAP_PASSWORD"):
             print(f"[bootstrap] 管理员已创建：用户名 {bt_admin} / 密码取 CS_BOOTSTRAP_PASSWORD（验收模式）")
@@ -112,7 +110,6 @@ async def _security_headers(request, call_next):
 
 
 app.include_router(health.router)
-app.include_router(credits_api.router, dependencies=[Depends(require_ready_user)])
 app.include_router(stats.router, dependencies=[Depends(require_ready_user)])
 app.include_router(crawl.router, dependencies=[Depends(require_ready_user)])
 app.include_router(tenant_api.router, dependencies=[Depends(require_ready_user)])
@@ -133,7 +130,6 @@ app.include_router(watch.router, dependencies=[Depends(require_ready_user)])
 app.include_router(style.router, dependencies=[Depends(require_ready_user)])
 app.include_router(metrics.router, dependencies=[Depends(require_ready_user)])
 app.include_router(schedules.router, dependencies=[Depends(require_admin_dep)])
-app.include_router(admin.router, dependencies=[Depends(require_ready_user)])
 app.include_router(auth_routes.router)
 
 

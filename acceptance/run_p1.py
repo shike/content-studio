@@ -187,12 +187,3 @@ else:
           status == 200 and "/api/public/images/" in (payload_html or ""),
           f"status={status}, 签名图数={(payload_html or '').count('/api/public/images/')}")
 
-section("P1 · LLM 用量台账")
-if not llm_ready:
-    skip("用量统计", "未配置 ZHIPU_API_KEY")
-else:
-    status, usage = request("GET", "/api/llm/usage")
-    check("本次验收产生用量记录（calls≥4）",
-          status == 200 and usage.get("calls", 0) >= 4, f"{str(usage)[:120]}")
-
-sys.exit(finish("P1 内容核心"))

@@ -5,7 +5,6 @@ from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from ..auth import get_current_user
-from ..credits import JOB_POINTS
 from ..db import engine
 from ..jobs.errors import fingerprint
 from ..jobs.revive import entity_orphans, revive_entity
@@ -152,8 +151,7 @@ async def retry_job(job_id: int) -> dict:
         print(f"[jobs] 手动重试实体回退失败: {type(e).__name__}: {str(e)[:100]}")
     _runner.manual_retry_reset(job_id)
     new_job = await _runner.submit(new_type, new_payload, retry_of=job_id,
-                                   actor=_actor_of(job),
-                                   points=JOB_POINTS.get(new_type, 0))
+                                   actor=_actor_of(job))
     return {"job_id": new_job.id}
 
 
@@ -191,8 +189,7 @@ def retry_failed(body: RetryFailedIn | None = None) -> dict:
                 except Exception:  # noqa: BLE001
                     pass
                 _runner.submit(j.type, dict(j.payload), retry_of=j.id,
-                               actor=_actor_of(j),
-                               points=JOB_POINTS.get(j.type, 0))
+                               actor=_actor_of(j))
     return {"requeued": len(requeued_ids)}
 
 
@@ -371,8 +368,7 @@ async def retry_by_fingerprint(body: RetryByFpIn) -> dict:
             j = s.get(Job, jid)
             if j is not None:
                 await runner.submit(j.type, dict(j.payload), retry_of=jid,
-                                    actor=_actor_of(j),
-                                    points=JOB_POINTS.get(j.type, 0))
+                                    actor=_actor_of(j))
     if not requeued_ids:
         raise HTTPException(status_code=404, detail="该指纹下没有可复活的任务")
     return {"requeued": len(requeued_ids)}

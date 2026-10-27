@@ -1,8 +1,8 @@
 # 跃迁内容工作室 · Agent 工作规约
 
-多租户内容生产流水线（登录门禁 + 租户隔离 + 积分池，PRD R11/TDD §15）：选题 → 三版口播脚本 → 口播数字人 → 公众号长文 → 发布物料包（发布永远人工）。
+单管理员内容生产流水线（登录门禁，PRD R11/TDD §15；多租户/积分体系已于 2026-10-27 拆除）：选题 → 三版口播脚本 → 口播数字人 → 公众号长文 → 发布物料包（发布永远人工）。
 
-- 架构：FastAPI + SQLModel + SQLite（`backend/app/`，28 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）
+- 架构：FastAPI + SQLModel + SQLite（`backend/app/`，24 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）
 - 五大文档（英文文件名，规格型：不含版本号、不含完成情况）：`docs/PRD.md`（需求总账，改需求先改它）· `docs/TDD.md`（技术契约）· `docs/TEST.md`（验收合同）· `docs/AUDIT.md`（审计规程）· `docs/MRD.md`（市场调研存档）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根目录）
@@ -14,7 +14,7 @@
 
 ## 验收纪律（违反 = 白干）
 
-- `acceptance/run_p0.py…run_p8.py`（纯标准库；P5=数字人 P6=任务 P7=多租户）。**任何后端改动后必须重跑受影响套件**。
+- `acceptance/run_p0.py…run_p8.py`（纯标准库；P5=数字人 P6=任务 P7=认证与单管理员）。**任何后端改动后必须重跑受影响套件**。
 - 失败任务处置红线：要么自动恢复、要么进「待处置」带诊断等人修，修完点「标记已修复」再复活重跑；**待处置非空 = 带病运行**，不许静默清掉。
 - 隔离实例（别污染工作台）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`；跑套件 `CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 python3 acceptance/run_pX.py`（可加 `CS_REAPER_SEC=5` 加速快巡）。跑完删 `data-acceptance`。
   - 复制后先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`——否则验收任务排在真实队列后面必然超时。
@@ -27,7 +27,7 @@
 - **max_tokens = 实测输出 × 2**：贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。现行值：article 分段式（title 8192 / outline 8192 / section 12000/节 / editor 20000 / charts 4000，均 thinking disabled）· kg_spec 4000 · poster 3000/8000/6000 · script_generate/polish 20000 · script_finalize 8000 · idea_research/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · discover_keywords 1024 · ping 1024。
 - httpx 超时 300s；验收轮询常规 ≥600s、脚本生成（三版+自动打磨）≥900s。空正文（推理耗尽预算）必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定；密钥/模型/检索通道走设置页运行时改（存 app_settings，.env 只留引导项）。
-- 成本台账 llm_calls 按牌价记，套餐额度下数值是成本上界。
+- 成本台账已拆除（2026-10-27 用户裁定 2B）：系统不再记录任何成本；要花销概算直接看服务商控制台。
 
 ## 前端规矩
 

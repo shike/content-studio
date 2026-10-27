@@ -1,6 +1,6 @@
 """SQLite 引擎与会话。WAL 模式；库文件位于 DATA_DIR/studio.db。
 
-租户隔离三件套（install_tenant_scope，进程级一次接入全站生效）：
+租户作用域三件套（install_tenant_scope，进程级一次接入全站生效；单用户版退化为 tenant_id=1 的自动归属，product 面已无多租户概念 2026-10-27）：
 - do_orm_execute 事件：所有 ORM select 自动追加 tenant_id 过滤（platform_admin/系统上下文豁免）
 - before_flush 事件：新行 tenant_id=0 时自动回填提交者租户（归属=ACTOR）
 - Session.get 补丁：get() 不走 do_orm_execute，按同规则命中他租户行时返回 None（端点自然 404）
@@ -19,7 +19,7 @@ def _set_pragma(dbapi_conn, _record):  # noqa: ANN001
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA busy_timeout=5000")  # 并发写锁等 5s 再报 locked，吸收验收 CLI/双连接抖动
+    cursor.execute("PRAGMA busy_timeout=15000")  # 并发写锁等 15s 再报 locked（2026-10-27：5s 在轻任务并发+外部写入时会进入 BUSY 风暴，实测 15s 吸收）
     cursor.close()
 
 
@@ -61,7 +61,7 @@ install_datetime_normalizer()
 def install_tenant_scope() -> None:
     """租户隔离三件套。依赖 auth.ACTOR（(tenant_id, user_id, role)），
     ACTOR 在各处理器内延迟导入（auth 与 db 互相引用，模块级会循环）。"""
-    from .models import BeanLedger, TenantScoped
+    from .models import TenantScoped
 
     @event.listens_for(SASession, "do_orm_execute")
     def _tenant_scope(orm_state):  # noqa: ANN001
@@ -89,7 +89,7 @@ def install_tenant_scope() -> None:
         if not tenant_id:
             return
         for obj in session.new:
-            if isinstance(obj, (TenantScoped, BeanLedger)) and not getattr(obj, "tenant_id", 0):
+            if isinstance(obj, TenantScoped) and not getattr(obj, "tenant_id", 0):
                 obj.tenant_id = tenant_id
 
     _orig_get = SASession.get
@@ -231,9 +231,6 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN seconds REAL DEFAULT 0"))
         if vcols and "model" not in vcols:
             conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN model INTEGER DEFAULT 0"))
-        bcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(bean_ledger)"))]
-        if bcols and "points" not in bcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE bean_ledger ADD COLUMN points INTEGER DEFAULT 0"))
         if vcols and "bigtext" not in vcols:
             conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN bigtext JSON DEFAULT '[]'"))
         if vcols and "notes" not in vcols:
@@ -268,10 +265,9 @@ def _migrate(engine) -> None:
             " WHERE dedup_key <> '' AND status IN ('queued','running','parked')"))
         # 多租户：业务表补 tenant_id（历史数据归租户 1）
         for table in ("articles", "avatar_configs", "avatar_videos", "benchmark_videos",
-                      "dismissals", "llm_calls", "media_assets", "radar_topics",
+                      "dismissals", "media_assets", "radar_topics",
                       "research_reports", "scripts", "self_videos", "style_profiles",
-                      "topics", "video_projects", "watch_accounts", "watch_candidates",
-                      "bean_ledger"):
+                      "topics", "watch_accounts", "watch_candidates"):
             tcols = [r[1] for r in conn.execute(sqlalchemy.text(f"PRAGMA table_info({table})"))]
             if tcols and "tenant_id" not in tcols:
                 conn.execute(sqlalchemy.text(
@@ -279,16 +275,10 @@ def _migrate(engine) -> None:
             if tcols:
                 conn.execute(sqlalchemy.text(
                     f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant ON {table}(tenant_id)"))
-        # 一人多租户：存量用户按默认租户回填成员关系（表空才跑，幂等）
-        mcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(tenant_memberships)"))]
-        if mcols:
-            n = conn.execute(sqlalchemy.text("SELECT COUNT(*) FROM tenant_memberships")).scalar() or 0
-            if n == 0:
-                conn.execute(sqlalchemy.text(
-                    "INSERT INTO tenant_memberships (user_id, tenant_id, role, created_at, updated_at)"
-                    " SELECT id, tenant_id,"
-                    " CASE WHEN role='tenant_admin' THEN 'tenant_admin' ELSE 'member' END,"
-                    " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM users"))
+        # 拆积分/账本/多租户（2026-10-27 用户裁定 1A+2B）：四张死表退役
+        # （删表前启动自动快照已保现场；历史数据如需追溯用 pre-migrate 快照）
+        for dead in ("tenant_memberships", "credit_transactions", "bean_ledger", "llm_calls"):
+            conn.execute(sqlalchemy.text(f"DROP TABLE IF EXISTS {dead}"))
 
 
 def get_session():

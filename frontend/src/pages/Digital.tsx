@@ -44,10 +44,7 @@ interface Estimate {
   beans: number
   yuan: number
   balance: number
-  insufficient: boolean
   speed?: number
-  points: number      // 本次扣的积分（按秒：基础 3/秒、高质 6/秒）
-  credits: number     // 租户积分池余额
 }
 
 type Chip = 'all' | 'generating' | 'done' | 'failed'
@@ -64,9 +61,7 @@ export default function Digital({ role = 'member' }: { role?: string }) {
   const [configs, setConfigs] = useState<AvatarConfig[]>([])
   const [videos, setVideos] = useState<AvatarVideoRow[]>([])
   const [scripts, setScripts] = useState<Script[]>([])
-  const [credits, setCredits] = useState<number | null>(null)  // 租户积分池（租户口径：数字人按秒扣积分）
   const [bigtext, setBigtext] = useState(true)  // 左上角栏目角标（租户配置栏目名 + 暖黄框 + Day N，全程常显）
-  const [usage, setUsage] = useState<{ videos: number; seconds: number; points: number; beans?: number; yuan?: number } | null>(null)
   const [chip, setChip] = useState<Chip>('all')
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -106,25 +101,10 @@ export default function Digital({ role = 'member' }: { role?: string }) {
     setGenAvatar((cur) => (cur != null && c.items.some((x) => x.id === cur) ? cur : c.items[0]?.id ?? null))
   }, [offset, chip, LIMIT])
 
-  const refreshBalance = useCallback(async () => {
-    // 成本口径（服务商豆/¥/凭证）已挪设置页「平台成本」卡；数字人页只看积分
-    try {
-      const c = await api<{ balance: number }>('/credits')
-      setCredits(c.balance)
-    } catch {
-      setCredits(null)
-    }
-    try {
-      setUsage(await api<{ videos: number; seconds: number; points: number; beans?: number; yuan?: number }>('/avatar/usage'))
-    } catch {
-      setUsage(null)
-    }
-  }, [])
 
   useEffect(() => {
     reload().catch((e) => setError(String(e)))
-    refreshBalance()
-  }, [reload, refreshBalance])
+  }, [reload])
 
   useEffect(() => {
     setEstimate(null)
@@ -179,8 +159,7 @@ export default function Digital({ role = 'member' }: { role?: string }) {
       await waitJob(r.job_id, (j) => setBusy(`数字人视频：${j.progress}% ${j.message}`))
       setBusy('')
       await reload()
-      refreshBalance()
-    })
+      })
 
   // 克隆新形象：选出镜视频 → 上传 → API 克隆 → 轮询训练进度 → 回填缩略图/音色
   const startClone = (configId: number) => {
@@ -200,7 +179,6 @@ export default function Digital({ role = 'member' }: { role?: string }) {
         const body = await res.text().catch(() => '')
         let detail = body.slice(0, 160)
         try { detail = (JSON.parse(body) as { detail?: string }).detail || detail } catch { /* 非 JSON 保持原文 */ }
-        if (res.status === 402) throw new Error(`积分不足，无法克隆：${detail}`)
         throw new Error(`HTTP ${res.status}${detail ? `：${detail}` : ''}`)
       }
       const { person_id } = (await res.json()) as { person_id: string }
@@ -254,11 +232,6 @@ export default function Digital({ role = 'member' }: { role?: string }) {
         icon={UserRound}
         title="口播数字人"
         desc="数字人克隆形象 + 配套音色 → 定稿脚本直接出片（分钟级 · 自动字幕）"
-        actions={
-          credits != null ? (
-            <span className="badge bg-slate-100 text-slate-600">积分余额 {credits}</span>
-          ) : undefined
-        }
       />
 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
@@ -283,8 +256,8 @@ export default function Digital({ role = 'member' }: { role?: string }) {
             ))}
           </select>
           <div className="segment shrink-0">
-            <button onClick={() => setQuality(0)} className={`segment-item ${quality === 0 ? 'segment-item-active' : ''}`}>基础版 3 积分/秒</button>
-            <button onClick={() => setQuality(1)} className={`segment-item ${quality === 1 ? 'segment-item-active' : ''}`}>高质版 6 积分/秒</button>
+            <button onClick={() => setQuality(0)} className={`segment-item ${quality === 0 ? 'segment-item-active' : ''}`}>基础版</button>
+            <button onClick={() => setQuality(1)} className={`segment-item ${quality === 1 ? 'segment-item-active' : ''}`}>高质版</button>
           </div>
           <div className="segment shrink-0">
             <button onClick={() => setBigtext(true)} title="左上角栏目角标（租户栏目名 + Day N），全程常显"
@@ -297,13 +270,9 @@ export default function Digital({ role = 'member' }: { role?: string }) {
           </button>
         </div>
         {estimate && (
-          <div className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${estimate.insufficient ? 'bg-red-50 text-red-700' : 'bg-white text-slate-600 border border-slate-100'}`}>
-            预估：{estimate.chars} 字 ≈ <b>{estimate.seconds}s</b> ≈ <b>{estimate.points} 积分</b>
-            （积分余额 {estimate.credits}）{estimate.speed && estimate.speed !== 1 ? ` · 语速 ${estimate.speed}×` : ''}{quality === 1 && ' · 高质版嘴型更精细'}
-            {isPlatform && estimate.beans != null && (
-              <span className="text-slate-400"> · 平台成本 ≈ {estimate.beans} 豆{estimate.yuan != null && ` ≈ ¥${estimate.yuan}`}</span>
-            )}
-            {estimate.insufficient && (isPlatform ? ' —— 积分不足，去「管理后台」给本租户充值' : ' —— 积分不足，请联系管理员充值')}
+          <div className="rounded-lg bg-white px-3 py-2 text-xs leading-relaxed text-slate-600 border border-slate-100">
+            预估：{estimate.chars} 字 ≈ <b>{estimate.seconds}s</b>
+            {estimate.speed && estimate.speed !== 1 ? ` · 语速 ${estimate.speed}×` : ''}{quality === 1 && ' · 高质版嘴型更精细'}
           </div>
         )}
       </div>
@@ -319,7 +288,7 @@ export default function Digital({ role = 'member' }: { role?: string }) {
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-sky-50/40 px-4 py-2.5">
             <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="数字人名称" className="input max-w-48" />
             <button onClick={createConfig} disabled={!newName.trim()} className="btn-accent btn-xs disabled:opacity-40">创建</button>
-            <span className="text-[11px] text-slate-400">创建后点卡片上的「克隆新形象」上传出镜视频{!isPlatform && '（预扣 300 积分，训练失败不退）'}</span>
+            <span className="text-[11px] text-slate-400">创建后点卡片上的「克隆新形象」上传出镜视频</span>
           </div>
         )}
         {configs.length === 0 ? (
@@ -444,11 +413,6 @@ export default function Digital({ role = 'member' }: { role?: string }) {
       <div className="card mt-4 overflow-hidden p-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2.5">
           <span className="mr-1 text-sm font-semibold text-zinc-900">生成记录</span>
-          {usage && (
-            <span className="text-[11px] text-slate-400">
-              累计 {usage.videos} 条 · {Math.round(usage.seconds)} 秒 · 消耗 {usage.points} 积分
-            </span>
-          )}
           {CHIPS.map((x) => (
             <button
               key={x.key}

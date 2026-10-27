@@ -82,15 +82,11 @@ async def _run(ctx: JobContext, video_row_id: int, model: int = 0,
     # 检查点续跑（P4）：run_dir 按视频行确定，重试落同一目录续接已提交/已完成的分段
     run_dir = _AVATAR_DIR / f"v{video_row_id}"
 
-    # 蝉豆计账：前后余额差 = 本次全部消耗（含分段）
-    beans_before = await chanjing.get_balance()
-
     def _stage(stage: float, msg: str) -> None:
         ctx.set_progress(int(max(5, min(95, stage))), msg)
 
     final, info = await chanjing.render_long(person, audio_man, text, run_dir,
                                              on_stage=_stage, model=model, speed=speed, size=size)
-    beans_after = await chanjing.get_balance()
     duration = _video_duration(final)
     bigtext_items: list[dict] = []
     bigtext_note = ""
@@ -136,49 +132,16 @@ async def _run(ctx: JobContext, video_row_id: int, model: int = 0,
         row = s.get(AvatarVideo, video_row_id)
         row.video_path = str(final)
         row.status = "done"
-        row.beans_used = max(0, beans_before - beans_after)
         row.seconds = duration
         row.bigtext = bigtext_items
         if bigtext_note:
             row.notes = bigtext_note
-        beans_used = row.beans_used
+        beans_used = 0  # 蝉豆计账已随积分体系拆除（2026-10-27）
         s.add(row)
         s.commit()
         # 会话已关，本地变量兜住后续要用的值（detached 实例属性不再回读）
         tenant_id = row.tenant_id
         pre_stored = int(row.points_used or 0)
-
-    # 按秒结算租户积分：预扣按预估秒数，成片后多退少补（差额进账本，可对账）
-    points_settled = 0
-    try:
-        from ..credits import avatar_video_points, settle
-
-        pre = pre_points or pre_stored
-        actual = avatar_video_points(duration, model)
-        if pre > 0 and tenant_id:
-            settle(tenant_id, pre, actual, f"数字人视频结算 #{video_row_id}")
-        else:
-            actual = pre or actual  # 老任务没有预扣记录：不结算，只记口径
-        with Session(engine) as s:
-            r2 = s.get(AvatarVideo, video_row_id)
-            if r2 is not None:
-                r2.points_used = actual
-                s.add(r2)
-                s.commit()
-        points_settled = actual
-    except Exception as e:  # noqa: BLE001 结算失败不能让成片丢失
-        print(f"[avatar] 积分结算失败 video#{video_row_id}: {type(e).__name__}: {str(e)[:120]}")
-
-    # 蝉豆流水记账（独立于视频行：删视频不影响消耗统计）
-    try:
-        from ..models import BeanLedger
-
-        with Session(engine) as s:
-            s.add(BeanLedger(video_id=video_row_id, beans=beans_used, points=points_settled,
-                             seconds=duration, model=model))
-            s.commit()
-    except Exception as e:  # noqa: BLE001 记账失败不影响成片
-        print(f"[avatar] 蝉豆流水记账失败: {type(e).__name__}: {str(e)[:100]}")
 
     ctx.set_progress(100, "完成")
     return {"video_id": video_row_id, "video_path": str(final),

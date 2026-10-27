@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
 
@@ -86,19 +86,6 @@ class FailurePattern(TimestampMixin, table=True):
     last_type: str = ""  # 最近一次出现的任务类型
 
 
-class LLMCall(TimestampMixin, table=True):
-    __tablename__ = "llm_calls"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    purpose: str = Field(default="", index=True)
-    model: str = ""
-    tokens_in: int = 0
-    tokens_out: int = 0
-    cost_est: float = 0.0
-    latency_ms: int = 0
-    ok: bool = True
-
-
 class Topic(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "topics"
     tenant_id: int = Field(default=0, index=True)
@@ -142,7 +129,7 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
 
 
 class Tenant(TimestampMixin, table=True):
-    """租户：数据隔离边界。租户内全部成员共享数据与积分池。"""
+    """租户（单用户版退化为「工作室档案」）：承载名称与品牌九字段。credits 字段保留兼容历史数据，产品已无积分概念（2026-10-27）。"""
     __tablename__ = "tenants"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = ""
@@ -175,46 +162,6 @@ class UserSession(TimestampMixin, table=True):
     user_id: int = Field(index=True)
     tenant_id: int = Field(index=True)
     expires_at: datetime = Field(index=True)
-
-
-class TenantMembership(TimestampMixin, table=True):
-    """成员关系：一个用户可归属多个租户（一人多租户），每租户一个角色。
-
-    users.tenant_id 保留为「默认租户」（登录初始落点）；users.role 只承载
-    platform_admin 全局位，本表的 role 才是租户内的实际角色。"""
-    __tablename__ = "tenant_memberships"
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(index=True)
-    tenant_id: int = Field(index=True)
-    role: str = Field(default="member")  # tenant_admin | member（platform_admin 不入此列）
-    __table_args__ = (UniqueConstraint("user_id", "tenant_id", name="uq_membership_user_tenant"),)
-
-
-class CreditTransaction(TimestampMixin, table=True):
-    """积分流水：充值/消耗/管理员调整，全量可审计。"""
-    __tablename__ = "credit_transactions"
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(index=True)
-    delta: int  # 正=充值/调整增加，负=消耗
-    balance_after: int
-    reason: str = ""
-    kind: str = Field(default="adjust", index=True)  # consume | topup | adjust
-    ref: str = ""
-
-
-class BeanLedger(TimestampMixin, table=True):
-    """蝉豆消耗流水：独立于视频行记账——删除视频/清理记录不影响消耗统计。
-
-    avatar_videos 被删除后其历史消耗无从追溯（旧账已失），自本表启用起，
-    每次成功渲染记一行，设置页蝉豆合计以流水为准。"""
-    __tablename__ = "bean_ledger"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    video_id: int = 0
-    beans: int = 0  # 蝉镜成本口径（平台）
-    points: int = 0  # 租户实际结算积分（按秒：基础 3/秒、高质 6/秒）
-    seconds: float = 0.0
-    model: int = 0  # 画质档：0 基础版 | 1 高质版
 
 
 class RadarTopic(TenantScoped, TimestampMixin, table=True):

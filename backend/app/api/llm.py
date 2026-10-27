@@ -25,50 +25,12 @@ async def ping(body: PingIn) -> dict:
     return {"reply": reply}
 
 
-@router.get("/usage")
-def usage(user: User = Depends(require_user)) -> dict:
-    """LLM 用量汇总。非平台管理员只看本租户且不含金额（成本是平台内部口径）。"""
-    is_platform = user.role == "platform_admin"
-    d = gateway.usage_summary(
-        tenant_id=None if is_platform else user.tenant_id)
-    if not is_platform:
-        d.pop("cost_est", None)
-        for p in d.get("by_purpose", []) or []:
-            p.pop("cost_est", None)
-    return d
 
 
 class SearchProbeIn(BaseModel):
     query: str = "智谱 GLM 最新发布 模型"
 
 
-@router.get("/calls")
-def list_calls(limit: int = 50, offset: int = 0, purpose: str = "",
-               user: User = Depends(require_user)) -> dict:
-    """LLM 调用流水明细（新→旧，含 web_search/生图等计费项）。非平台管理员只看本租户。"""
-    from sqlmodel import Session, func, select
-
-    from ..db import engine
-    from ..models import LLMCall
-
-    with Session(engine) as s:
-        q = select(LLMCall)
-        if user.role != "platform_admin":
-            q = q.where(LLMCall.tenant_id == user.tenant_id)  # type: ignore[attr-defined]
-        if purpose:
-            q = q.where(LLMCall.purpose == purpose)  # type: ignore[attr-defined]
-        rows = s.exec(q.order_by(LLMCall.id.desc()).offset(max(0, offset))
-                      .limit(max(1, min(limit, 200)))).all()
-        total = s.exec(select(func.count(LLMCall.id))).one()
-        is_platform = user.role == "platform_admin"
-        items = []
-        for r in rows:
-            d = r.model_dump()
-            if not is_platform:
-                d.pop("cost_est", None)  # 租户侧不含金额
-            items.append(d)
-        total_n = total[0] if isinstance(total, tuple) else total
-        return {"items": items, "total": int(total_n or 0)}
 
 
 @router.post("/search-probe")

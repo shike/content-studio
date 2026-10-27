@@ -21,29 +21,8 @@ interface AppSettings {
   chanjing_configured: boolean
 }
 
-interface UsageItem {
-  purpose: string
-  calls: number
-  tokens_in: number
-  tokens_out: number
-  cost_est: number
-}
 
-interface Usage {
-  calls: number
-  tokens_in: number
-  tokens_out: number
-  cost_est: number
-  by_purpose?: UsageItem[]
-}
 
-interface AvatarUsage {
-  videos: number
-  seconds: number
-  points: number   // 租户侧按秒结算的积分合计
-  beans?: number   // 蝉镜豆（平台成本口径，仅平台管理员返回）
-  yuan?: number
-}
 
 const MODELS = ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-5.3', 'glm-5.3-flash', 'deepseek-chat', 'deepseek-reasoner']
 const SEARCH_PROVIDERS: { key: string; label: string; desc: string }[] = [
@@ -66,8 +45,6 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     await api('/tenant/brand', { method: 'PUT', body: JSON.stringify(payload) })
   }
   const [conf, setConf] = useState<AppSettings | null>(null)
-  const [usage, setUsage] = useState<Usage | null>(null)
-  const [avatarUsage, setAvatarUsage] = useState<AvatarUsage | null>(null)
   // 抖音采集探针（每 15 分钟自动跑一次；手动可立即探测）
   const [crawl, setCrawl] = useState<{
     last: { status: string; detail?: string; at?: string } | null
@@ -76,12 +53,9 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     recent_failures: number
   } | null>(null)
   const [crawlBusy, setCrawlBusy] = useState(false)
-  // 数字人服务商成本（平台管理员专属）：豆余额/凭证
-  const [svcBalance, setSvcBalance] = useState<number | null>(null)
   const [svcAppId, setSvcAppId] = useState('')
   const [svcSecret, setSvcSecret] = useState('')
   const [svcBusy, setSvcBusy] = useState(false)
-  const [usageAll, setUsageAll] = useState(false)
   const [model, setModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keyMsg, setKeyMsg] = useState('')
@@ -101,27 +75,13 @@ export default function Settings({ role = 'member' }: { role?: string }) {
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
-    const [c, u, a] = await Promise.all([
-      api<AppSettings>('/settings'),
-      api<Usage>('/llm/usage'),
-      api<AvatarUsage>('/avatar/usage').catch(() => null),
-    ])
+    const c = await api<AppSettings>('/settings')
     setConf(c)
-    setUsage(u)
-    setAvatarUsage(a)
     try {
       const c = await api<{ last: { status: string; detail?: string; at?: string } | null; history: { status: string; at: string }[]; label: string; recent_failures: number }>('/crawl/status')
       setCrawl(c)
     } catch {
       setCrawl(null)
-    }
-    if (isPlatform) {
-      try {
-        const b = await api<{ beans: number }>('/avatar/balance')
-        setSvcBalance(b.beans)   // 服务商成本余额（仅平台管理员接口）
-      } catch {
-        setSvcBalance(null)
-      }
     }
     setModel(c.llm_model)
     setSearch(c.search_provider)
@@ -180,7 +140,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
       <PageHeader
         icon={SettingsIcon}
         title="设置"
-        desc="品牌人设 · LLM 通道 · 联网检索 · 用量台账"
+        desc="品牌人设 · LLM 通道 · 联网检索 · 采集状态"
       />
 
       {busy && <div className="mb-3"><Busy text={busy} /></div>}
@@ -336,65 +296,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
             </details>
           </div>
 
-          {/* 用量台账 */}
-          <div className="card space-y-4 p-5">
-            <div className="text-sm font-semibold text-slate-800">LLM 用量台账（本租户累计）</div>
-            {usage && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {[
-                  { label: '调用次数', value: String(usage.calls) },
-                  { label: '输入 tokens', value: usage.tokens_in.toLocaleString() },
-                  { label: '输出 tokens', value: usage.tokens_out.toLocaleString() },
-                  ...(isPlatform ? [{ label: '成本估算', value: `¥${usage.cost_est}` }] : []),
-                ].map((x) => (
-                  <div key={x.label} className="rounded-xl bg-slate-50 px-3.5 py-3">
-                    <div className="text-lg font-bold tabular-nums text-slate-900">{x.value}</div>
-                    <div className="mt-0.5 text-[11px] text-slate-400">{x.label}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {usage?.by_purpose && usage.by_purpose.length > 0 && (
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <div className="text-xs font-semibold text-slate-500">按用途分账（成本降序）</div>
-                  {usage.by_purpose.length > 10 && (
-                    <button
-                      onClick={() => setUsageAll((v) => !v)}
-                      className="text-[11px] text-sky-600 hover:underline"
-                    >
-                      {usageAll ? '收起' : `展开全部 ${usage.by_purpose.length} 项`}
-                    </button>
-                  )}
-                </div>
-                {(usageAll ? usage.by_purpose : usage.by_purpose.slice(0, 10)).map((u) => (
-                  <div key={u.purpose} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-1.5 text-xs">
-                    <span className="w-32 shrink-0 truncate font-medium text-slate-700">{u.purpose}</span>
-                    <span className="tabular-nums text-slate-500">{u.calls} 次</span>
-                    <span className="tabular-nums text-slate-400">{(u.tokens_in + u.tokens_out).toLocaleString()} tok</span>
-                    {isPlatform && <span className="ml-auto tabular-nums font-medium text-slate-700">¥{u.cost_est}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-            {avatarUsage && (
-              <div className="flex items-center gap-3 rounded-lg bg-sky-50/60 px-3 py-1.5 text-xs">
-                <span className="w-32 shrink-0 font-medium text-slate-700">数字人（按秒）</span>
-                <span className="tabular-nums text-slate-500">{avatarUsage.videos} 条成片</span>
-                <span className="tabular-nums text-slate-400">{Math.round(avatarUsage.seconds)}s</span>
-                <span className="ml-auto tabular-nums font-medium text-slate-700">
-                  {isPlatform
-                    ? <>{avatarUsage.beans ?? 0} 豆{avatarUsage.yuan != null && ` ≈ ¥${avatarUsage.yuan}`}<span className="ml-2 text-slate-400">租户侧记 {avatarUsage.points} 积分</span></>
-                    : <>{avatarUsage.points} 积分</>}
-                </span>
-              </div>
-            )}
-            <div className="text-xs leading-relaxed text-slate-400">
-              成本为牌价估算；套餐额度内不实际扣费。
-            </div>
-          </div>
-
-          {/* 数据采集状态：探针 15 分钟一轮 + 手动立即探测 */}
+{/* 数据采集状态：探针 15 分钟一轮 + 手动立即探测 */}
           <div className="card space-y-3 p-5">
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-sm font-semibold text-slate-800">数据采集（抖音）</div>
@@ -456,18 +358,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
           {isPlatform && (
             <div className="card space-y-3 p-5">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold text-slate-800">平台成本 · 数字人</div>
-                <span className="text-[11px] text-slate-400">平台口径，租户不可见</span>
-                {svcBalance != null && (
-                  <span className="badge bg-slate-100 text-slate-600">
-                    成本余额 {svcBalance} 豆{avatarUsage?.yuan != null && ` ≈ ¥${(svcBalance * 0.03).toFixed(2)}`}
-                  </span>
-                )}
-                {avatarUsage && (
-                  <span className="badge bg-slate-100 text-slate-600">
-                    累计 {avatarUsage.videos} 条 · {avatarUsage.beans ?? 0} 豆{avatarUsage.yuan != null && ` ≈ ¥${avatarUsage.yuan}`}
-                  </span>
-                )}
+                <div className="text-sm font-semibold text-slate-800">数字人服务商凭证</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input value={svcAppId} onChange={(e) => setSvcAppId(e.target.value)} placeholder="数字人服务 App ID" className="input max-w-44" />
@@ -482,8 +373,6 @@ export default function Settings({ role = 'member' }: { role?: string }) {
                         body: JSON.stringify({ chanjing_app_id: svcAppId.trim(), chanjing_secret_key: svcSecret.trim() }),
                       })
                       setSvcAppId(''); setSvcSecret('')
-                      const r = await api<{ beans: number }>('/avatar/balance')
-                      setSvcBalance(r.beans)
                     } catch (e) {
                       setError(String(e))
                     } finally {

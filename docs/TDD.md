@@ -17,9 +17,9 @@
 │  浏览器 ──► Content Studio Web 站 (:8100，登录门禁)                   │
 │              │  FastAPI (backend/)     React 构建产物静态托管         │
 │              │    ├─ api/  REST 路由（认证 / 业务 / 管理后台）        │
-│              │    ├─ auth  会话 + 租户上下文（ACTOR）                 │
+│              │    ├─ auth  会话（单管理员，ACTOR 作用域）             │
 │              │    ├─ jobs   进程内异步任务（下载/ASR/渲染/LLM长任务） │
-│              │    ├─ SQLite data/studio.db（单库存一切，租户隔离）    │
+│              │    ├─ SQLite data/studio.db（单库一切）                │
 │              │    └─ data/  上传素材、配图、成片、备份              │
 │              │                                                       │
 │              ├──► GLM API（智谱：生成主通道 + 独立搜索端点）          │
@@ -33,8 +33,8 @@
 关键决策（对应 MRD.md 4.0/4.7 节）：
 
 - **复用边界**：下载/上传走外部服务或浏览器直连（零代码耦合）；ASR 走 pip 库；公众号排版 vendor doocs/md 渲染核心。自研仅为 Web 控制台 + 工作流编排 + 业务 Prompt 库。
-- **进程内任务框架**：不上 celery/redis/message queue，后台任务用进程内 asyncio + 线程池（ASR/FFmpeg 是 CPU 密集），任务状态落 `jobs` 表，前端轮询；heavy 队列跨租户轮转 + 每租户活跃上限（R11.7）。
-- **多租户**：租户/成员/三级角色 + 共享积分池（契约见 §15）；查询层全站租户过滤。
+- **进程内任务框架**：不上 celery/redis/message queue，后台任务用进程内 asyncio + 线程池（ASR/FFmpeg 是 CPU 密集），任务状态落 `jobs` 表，前端轮询。
+- **单管理员**（2026-10-27 拆除多租户/积分，契约见 §15）：登录门禁保留，作用域退化为 tenant_id=1。
 - **发布永远人工**：系统只到"物料包 + 半自动填表"，无任何自动发布代码路径。
 
 ## 2. 技术栈与版本基线
@@ -60,8 +60,7 @@ content-studio/
 │   │   ├── settings.py         # pydantic-settings 读 .env
 │   │   ├── api/                # 路由：auth/admin/health/topics/scripts/media/articles/avatar/publishing/jobs/llm/schedules/radar/watch/style/benchmarks
 │   │   ├── auth.py             # 口令哈希 / 会话 / 租户上下文（ACTOR）
-│   │   ├── credits.py          # 积分池：预扣/充值/流水
-│   │   ├── db.py               # 引擎 + 迁移 + 租户隔离三件套
+│   │   ├── db.py               # 引擎 + 迁移 + 作用域三件套（单用户退化）
 │   │   ├── models/             # SQLModel 表定义（§5）
 │   │   ├── jobs/               # 任务框架：提交/轮询/线程池执行器
 │   │   ├── llm/                # LLM 网关：provider 抽象、用量记录、ping
@@ -112,8 +111,8 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 ## 5. 数据模型（SQLite）
 
 通用约定：`id` 自增主键；`created_at/updated_at` 自动；JSON 字段用 TEXT 存 JSON；
-业务表带 `tenant_id`（租户隔离边界，查询层全站过滤——见 §15）；
-`jobs`/`llm_calls`/`bean_ledger`/`credit_transactions` 等账务表按各自口径带租户或系统归属。
+业务表带 `tenant_id`（单用户版恒为 1，作用域机制保留见 §15）；
+积分/账本类表（`llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`）已随 2026-10-27 拆除 DROP。
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
@@ -128,12 +127,9 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
 | `media_assets` | kind(footage/broll/bgm/sticker/intro/outro), tags(JSON), path, duration, meta(JSON) | 素材库 |
 | `articles` | topic_id?(FK), script_id?(FK), md, html, status(draft/edited/rendered/published) | 公众号文章 |
-| `tenant_memberships` | user_id, tenant_id, role(tenant_admin/member)，unique(user_id,tenant_id) | 一人多租户归属（R11；users.tenant_id 降级为「默认租户」落点，活跃租户存会话） |
-| `tenants` | name, credits, status(active/disabled) | 租户；共享积分池（R11.4） |
+| `tenants` | name, credits(历史保留), status, brand(JSON 九字段) | 工作室档案（单用户版恒 1 行；R11.2） |
 | `users` | tenant_id(FK), username(全局唯一), password_hash(scrypt), role(platform_admin/tenant_admin/member), display_name, status, must_change_password | 租户成员 |
 | `user_sessions` | token_hash(唯一), user_id, tenant_id, expires_at | 服务端会话（Cookie 只带明文 token） |
-| `credit_transactions` | tenant_id, delta, balance_after, reason, kind(consume/topup/adjust), ref | 积分流水，全程审计 |
-| `bean_ledger` | tenant_id, video_id, beans, seconds, model | 蝉豆消耗流水（独立于视频行，删记录不丢账） |
 | `radar_topics` | tenant_id, ch_id(全局唯一), enabled, notify, seen_ids/recent/hits(JSON), last_checked_at | 话题雷达监控项 |
 | `failure_patterns` | fp(唯一), kind, fail_class, label, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
 | `schedules` | key, label, enabled, hour 覆盖, last/next_run_at, last_status, run_count | 统一调度中心运行态 |
@@ -144,7 +140,6 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `dismissals` | scope, ref_id | 「不做」永久出口（可恢复） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded；parked 已退役→failed), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light/external/scheduled), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
-| `llm_calls` | tenant_id, purpose, model, tokens_in/out, cost_est, latency_ms, ok | 用量与成本台账（tenant_id=0 为系统调用） |
 
 **内容资产状态机**（串联各表的状态流转）：
 
@@ -160,31 +155,20 @@ article:    draft ──► edited ──► rendered ──► published（由 
 约定：JSON in/out；异步操作统一返回 `202 {job_id, ...}`，前端轮询 `GET /api/jobs/{id}`；错误返回 `{"detail": "..."}` + 恰当状态码。
 
 ### 认证（/api/auth，全站门禁）
-- `POST /api/auth/login` `{username, password}` → Cookie 会话；停用用户 401、停用租户 403
+- `POST /api/auth/login` `{username, password}` → Cookie 会话；停用用户 401；响应含 tenant_name（工作室名）
 - `POST /api/auth/logout` / `GET /api/auth/me` / `POST /api/auth/change-password` `{old_password, new_password}`
 - 未登录访问业务接口一律 401；`/api/health` 与登录接口豁免
 
-### 管理后台（/api/admin）
-- 权限：租户/用户管理类仅 platform_admin；成员读列表与租户流水/用量放宽至 tenant_admin（限本租户）
-- `GET /api/admin/tenants` → 含 credits/member_count/cost30/active_members30；`POST` `{name, credits, admin_username?}` → 建租户（返回一次性密码）
-- `POST /api/admin/tenants/{id}/topup` `{points, reason?}`（正充负扣）/ `POST .../status` `{status}`（停用清全部成员会话）
-- `GET /api/credits` → 当前租户积分余额 + 各计量任务价目（租户自查用；此前余额只在管理后台可见）
-- `GET /api/admin/tenants/{id}/transactions` → 积分流水；`GET .../usage?days=` → 用量看板（LLM 台账/任务统计/蝉豆/积分/成员排行）
-- `GET /api/admin/tenants/{id}/brand` → 读租户品牌（覆盖键+中性默认解析后返回）；`PUT` 九字段全量可选（label_line1/2、signature、persona、accent、primary、asr_vocab、cover_slogan、audience_note）→ 只持久化非空覆盖键、保存并即时生效（tenant_brand.py，注入角标/头图/图表/生成 prompt/ASR 词表/头图口号）。**默认策略（2026-10-02）**：未配置租户回落中性默认（通用人设/通用词表/口号不渲染）；创始租户（id=1）由 `seed_founder_brand()` 启动时一次性写入 FDE 全套（幂等），存量行为不变。受众域口径 `audience_note` 注入 idea_research_report/idea_research_struct/benchmark_analyze 三处 prompt（替代写死的行业语义；audience 枚举 boss/fde/both 的键保留，语义解释走配置）。
-- `GET /api/admin/tenants/{id}/export` → 全业务表 JSON 下载；`DELETE /api/admin/tenants/{id}?confirm_name=租户名` → 物理删除（自动先备份；有活跃任务拒绝）
-- `GET /api/admin/users`（platform 全平台 / tenant_admin 本租户）/ `POST`（一次性密码只显示一次）
-- `POST /api/admin/users/{id}/role`（platform）/ `POST .../status` / `POST .../reset-password`（重置即踢下线+首登强制改密）
-- `GET /api/admin/overview` → 平台总览（KPI/14 天趋势/租户成本排行/最近动态）
+### 管理后台（已拆除）
+- 2026-10-27 用户裁定拆除：租户/成员/积分/充值/用量看板/导出等管理端点全部下线；
+  品牌自助读写移至 `GET|PUT /api/tenant/brand`（设置页）。
 
 ### 基础
 - `GET /api/health` → `{status:"ok", app, version, db:true, llm:{provider, model, configured}, deps:{ffmpeg,docker,playwright}}`
 - `POST /api/llm/ping` `{prompt}` → `{reply}`（最小真实调用，验收用）
-- `GET /api/llm/usage` → `{calls, tokens_in, tokens_out, cost_est, by_purpose:[...]}`（按用途分账，R8.3；
-  非平台管理员只看本租户且响应不含金额字段——R11.6）
-- `GET /api/llm/calls?limit=&offset=&purpose=` → 流水明细（非平台管理员同上剔除金额）
 - `GET /api/jobs?status=&type=&limit=&offset=&tenant_id=` → `{items, total, counts{...}}`（运行中置顶、排队带 queue_position；
   列表不含 result、不含已归档行；非平台管理员强制按本租户过滤，tenant_id 参数仅平台管理员可用）
-- `POST /api/jobs/{id}/retry` → 202 `{job_id}`（人工重试：原记录标 superseded、清零自动重试计数、实体先回在途态；计量任务重新预扣积分）
+- `POST /api/jobs/{id}/retry` → 202 `{job_id}`（人工重试：原记录标 superseded、清零自动重试计数、实体先回在途态）
 - `POST /api/jobs/retry-failed {type?}` → 202 `{requeued:n}`（批量重试，跳过 deterministic 与已归档）
 - `DELETE /api/jobs/{id}` → 归档任务记录（archived=1，不物理删；running 拒绝 400）
 - `POST /api/jobs/clear` `{status: failed|superseded|succeeded}` → `{archived:n}`（批量归档终态记录）
@@ -352,7 +336,6 @@ article:    draft ──► edited ──► rendered ──► published（由 
   - **数字人视频按秒计费**（2026-09-27 用户拍板）：`avatar_video_points(seconds, model)` = ceil(秒 × 费率)，
     费率基础 3 积分/秒、高质 6 积分/秒（= 蝉镜成本 1 豆/秒、2 豆/秒 ×3 积分/豆，1 豆 = ¥0.03）；
     提交时按 `estimate()` 预估秒数预扣，成片后 `settle()` 按实际秒数多退少补（差额各记一笔流水）。
-- **蝉豆流水（bean_ledger）**：每次成功渲染记一行（video_id/beans/seconds/model），独立于视频行——删视频/清记录不影响消耗统计；`GET /api/avatar/usage` 优先读流水（空则回退 avatar_videos 老口径），返回 `{videos, seconds, beans, yuan?}`（yuan 仅平台管理员）。
 - **按形象原生尺寸渲染**（2026-09-28 修）：`chanjing.person_size(person_id)` 从 `person_detail`
   读形象原生 width/height，`create_video_tts` 按它设 person 框 / screen / `_scaled_subtitle(w)`
   （字幕字号与 y 以 1080 为基准等比缩放）；短标 `render_label_png(text, path, frame)` 按成片
@@ -393,7 +376,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
 
 - `provider` 抽象：`complete(messages, json_schema=None, purpose="")`；GLM 默认，DeepSeek 备选（`LLM_PROVIDER` 切换）。
 - 结构化输出：传 `json_schema` 时解析+校验，失败自动带错误重试 1 次。
-- 每次调用写 `llm_calls` 台账（tenant_id 随 ACTOR/purpose/model/tokens/成本估算/时延），Web 设置页展示按用途分账——验收点之一；金额字段仅平台管理员视图（R11.6）。
+- ~~调用写 `llm_calls` 台账~~（2026-10-27 拆除 2B：不再记录成本，表已 DROP；gateway 只做调用与重试）。
 - 搜索：独立智谱 `/web_search` 端点（按量计费，落台账 purpose=web_search）优先，DDG 兜底（全局限流闸：最小间隔+每小时配额）；通道三选 auto/glm/ddg 运行时切换。
 - Prompt 全部放 `backend/app/prompts/*.md`，文件头含 `version` 与 `purpose`，代码加载；迭代 Prompt 不改代码。
 - 关键 Prompt 与输出 schema：
@@ -539,7 +522,12 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
 7. 媒体文件按租户分目录仅覆盖生成配图；历史下载/成片文件名空间共享（文件名不可猜测，随租户删除按归属行清理）。
 
 
-## 15. 认证与多租户隔离（实现契约）
+## 15. 认证与工作室作用域（实现契约；2026-10-27 单管理员定版）
+
+> **拆除裁定（2026-10-27 用户定，1A+2B）**：多租户/成员/积分/成本台账从产品面拆除；
+> `tenant_memberships`/`credit_transactions`/`bean_ledger`/`llm_calls` 四表已 DROP；
+> 作用域机制保留（tenant_id 列恒为 1=工作室档案，平台管理员豁免过滤=全量视角），
+> 供历史数据兼容与未来可能的多人化回接。
 
 - **定时调度审计修复（2026-10-07 第二轮）**：
   ①**钟点覆盖 bug**——watch_discover_daily 注册 2 点但 hour_from_settings=True 使全局
@@ -571,16 +559,7 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
   硬超时 30min。
 - **上下文（auth.ACTOR）**：`ContextVar[(tenant_id, user_id, role)]`，`require_user`（async 依赖）在请求上下文设值；
   系统上下文 = `(0, 0, "")`；`role=platform_admin` 时豁免租户过滤。
-- **一人多租户归属（2026-10-03）**：`tenant_memberships(user_id, tenant_id, role)` 多对多，unique(user_id, tenant_id)；
-  `users.tenant_id`=默认租户（登录落点），`users.role` 仅承载 platform_admin 全局位（member/tenant_admin 语义在 membership）。
-  `require_user` 返回 `CurrentUser`（User 兼容形态）：`tenant_id`=会话活跃租户（UserSession.tenant_id 状态位，校验归属+租户
-  active，失效自动回落可用归属并回写会话，无可回落 403）；`role`=有效角色（platform_admin 全局位恒定，否则=活跃归属的
-  membership.role）。登录响应与 `/api/auth/me` 扩展 `tenant_name` + `tenants[]`；`POST /api/auth/switch-tenant` 切活跃租户
-  （校验归属+active，改会话行，cookie 不变）。管理后台：users 列表行内嵌 memberships 与 manageable_tenants；
-  `POST /admin/users/{id}/memberships`（upsert 改角色）/`DELETE .../memberships/{tenant_id}`（至少保留一个归属；默认租户
-  自动迁移）；全局角色端点只收 platform_admin/member；租户删除级联归属（唯一归属用户连删，多归属保留并迁移默认租户）。
-  存量迁移：membership 表空时按 users.tenant_id 全量回填（tenant_admin→tenant_admin，其余→member）。
-- **隔离三件套（`db.install_tenant_scope()`，进程级一次接入）**：
+- **作用域三件套（`db.install_tenant_scope()`，进程级一次接入；单用户版恒为 tenant_id=1，过滤被平台管理员豁免=全量视角，保留机制兼容历史与回接）**：
   ①`do_orm_execute` 事件——所有 ORM select 按语句实体自动追加 `tenant_id == 当前租户` 条件
   （用具体实体+具体条件构造，平台管理员/系统上下文跳过）；
   ②`Session.get` 补丁——get 不走 do_orm_execute，命中他租户行返回 None（端点自然 404）；
@@ -589,10 +568,10 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
   从任务行恢复 ACTOR（finally 复位）→ 执行器内查询/实体/LLM 台账随任务租户；
   同步执行器必须经 `asyncio.to_thread`（contextvars 传播；`run_in_executor` 会丢）；
   调度产生的实体（扫描入库等）从父实体显式继承租户；人工重试继承原任务归属。
-- **豁免与系统口径**：平台管理员查询不过滤（跨租户管理）；租户 0 = 系统任务与系统调用
-  （调度、自动重试、ping），不计入租户用量与排行。
-- **会话**：随机 token 走 HttpOnly Cookie，库存 sha256(token) + 过期时间；停用用户/停用租户即清会话
-  且登录被拒；重置密码即踢下线。
+- **豁免与系统口径**：唯一管理员 role=platform_admin，查询不过滤；租户 0 = 系统任务与系统调用
+  （调度、自动重试、ping）。
+- **会话**：随机 token 走 HttpOnly Cookie，库存 sha256(token) + 过期时间；登出即服务端失效；
+  改密即全端重登（作废全部旧会话并补发新会话）。
 - **一次性密码**：建号/重置生成随机口令，仅当次响应返回，明文不落库；首登强制改密。
 - **抖音抓取出口与指纹（云部署实证）**：抓取 UA 由 `browser.ua()` 按运行平台生成
   （UA 与 navigator.platform 不一致会被抖音挑战）；浏览器用完整版 Chromium

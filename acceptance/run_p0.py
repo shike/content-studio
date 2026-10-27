@@ -53,9 +53,7 @@ else:
                         body={"prompt": "只回复两个字：就绪"}, timeout=90)
     check("LLM 真实调用返回", status == 200 and bool(r.get("reply")),
           f"status={status}, {str(r)[:120]}")
-    status, usage = request("GET", "/api/llm/usage")
-    check("LLM 用量台账有记录", status == 200 and usage.get("calls", 0) >= 1,
-          f"status={status}, {str(usage)[:120]}")
+
 
 section("P0 · 设置接口")
 status, conf = request("GET", "/api/settings")

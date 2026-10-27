@@ -15,7 +15,7 @@ from ..articles.renderer import render_wechat_html, sanitize_html
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Article, User, LLMCall
+from ..models import Article, User
 from ..settings import settings
 
 router = APIRouter(prefix="/api/articles")
@@ -39,8 +39,6 @@ class RenderIn(BaseModel):
 
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict:
-    from ..credits import job_points, require_points
-    require_points(user.tenant_id, job_points("article_generate"), "长文生成")
     if body.topic_id is None and body.script_id is None:
         raise HTTPException(status_code=400, detail="topic_id 与 script_id 至少传一个")
     if body.length not in ("feed", "deep"):
@@ -65,8 +63,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
         article_id = article.id
     job = await runner.submit("article_generate",
                               {"article_id": article_id, "style": body.style,
-                               "length": body.length},
-                              points=job_points("article_generate"))
+                               "length": body.length})
     return {"article_id": article_id, "job_id": job.id}
 
 
@@ -134,13 +131,6 @@ async def generate_image(body: GenImageIn) -> dict:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"生图失败: {str(e)[:120]}")
-    try:
-        with Session(engine) as s:
-            s.add(LLMCall(purpose="image_gen", model="cogview-3-flash",
-                          tokens_in=0, tokens_out=0, cost_est=0.06))
-            s.commit()
-    except Exception:  # noqa: BLE001 台账失败不影响生图
-        pass
     return r
 
 

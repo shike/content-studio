@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..auth import require_user
-from ..credits import job_points, require_points
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import AvatarVideo, Article, Script, ScriptTemplate, Topic, User
@@ -36,7 +35,6 @@ class TemplateIn(BaseModel):
 
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("script_generate"), "脚本生成")
     with Session(engine) as s:
         topic = s.get(Topic, body.topic_id)
         if topic is None:
@@ -67,8 +65,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
     job = await runner.submit("script_generate",
                               {"script_id": script_id, "length": body.length,
                                "use_style": body.use_style, "angles": angles,
-                               "template_id": body.template_id},
-                              points=job_points("script_generate"))
+                               "template_id": body.template_id})
     return {"script_id": script_id, "job_id": job.id}
 
 
@@ -118,7 +115,6 @@ def get_script(script_id: int) -> dict:
 @router.post("/{script_id}/polish", status_code=202)
 async def polish(script_id: int, body: PolishIn | None = None,
                  user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("script_polish"), "脚本打磨")
     use_style = body.use_style if body else True
     with Session(engine) as s:
         script = s.get(Script, script_id)
@@ -129,15 +125,13 @@ async def polish(script_id: int, body: PolishIn | None = None,
         script.status = "polishing"
         s.add(script)
         s.commit()
-    job = await runner.submit("script_polish", {"script_id": script_id, "use_style": use_style},
-                              points=job_points("script_polish"))
+    job = await runner.submit("script_polish", {"script_id": script_id, "use_style": use_style})
     return {"job_id": job.id}
 
 
 @router.post("/{script_id}/finalize", status_code=202)
 async def finalize(script_id: int, body: FinalizeIn | None = None,
                    user: User = Depends(require_user)) -> dict:
-    require_points(user.tenant_id, job_points("script_finalize"), "脚本定稿")
     index = body.version_index if body else 0
     with Session(engine) as s:
         script = s.get(Script, script_id)
@@ -147,8 +141,7 @@ async def finalize(script_id: int, body: FinalizeIn | None = None,
             raise HTTPException(status_code=400, detail="脚本还没有版本，先生成")
     job = await runner.submit("script_finalize",
                               {"script_id": script_id, "version_index": index},
-                              dedup_key=f"finalize:{script_id}",
-                              points=job_points("script_finalize"))
+                              dedup_key=f"finalize:{script_id}")
     return {"job_id": job.id}
 
 

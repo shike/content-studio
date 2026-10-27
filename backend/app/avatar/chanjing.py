@@ -120,11 +120,6 @@ async def _call(method: str, path: str, *, params: dict | None = None,
     return body.get("data") or {}
 
 
-async def get_balance() -> int:
-    d = await _call("GET", "/user_duration")
-    return int(d.get("resi_total_bean") or 0)
-
-
 def estimate(text: str, model: int = MODEL, speed: float = 1.0) -> dict:
     """按实测语速估算时长与豆消耗（纯计算，不调 API）。
 

@@ -242,13 +242,12 @@ class JobRunner:
     async def submit(self, job_type: str, payload: Optional[dict] = None,
                      dedup_key: str = "", retry_of: int = 0,
                      actor: Optional[tuple[int, int, str]] = None,
-                     points: int = 0) -> Job:
+                     ) -> Job:
         """提交任务。dedup_key 相同的活跃任务（queued/running）幂等返回原任务。
 
         归属：默认读 ACTOR contextvar（require_user 在请求上下文设值）；
         人工重试/复活传 actor=原任务归属；系统调度与自动重试为 (0,0,"")。
-        points>0 且归属租户时在任务落库后预扣积分（幂等命中/合并跳过不扣，
-        失败不退是既定口径）；余额闸在 API 层 require_points 把守。"""
+"""
         if not self._started:
             raise RuntimeError("JobRunner 未启动")
         from ..auth import ACTOR
@@ -297,12 +296,8 @@ class JobRunner:
                 return Job(id=merged, type=job_type, status="superseded",
                            message=skip_msg)
             self._inflight[job_type] = job.id
-            if points > 0 and tenant_id:
-                _deduct(tenant_id, points, job.id, job_type)
             asyncio.create_task(self._run_light(job.id, job_type))
             return job
-        if points > 0 and tenant_id:
-            _deduct(tenant_id, points, job.id, job_type)
         self._put(tenant_id, job.id)
         return job
 
@@ -640,13 +635,6 @@ def scrub_paths(text: str) -> str:
     return _re.sub(r"/(?:Users|home)/[\w.-]+", "<server>", out)
 
 
-def _deduct(tenant_id: int, points: int, job_id: int, job_type: str) -> None:
-    """预扣积分。记账失败不拦任务，但必须响亮报出来（except 静默=账目黑洞）。"""
-    try:
-        from ..credits import deduct
-        deduct(tenant_id, points, reason=f"{job_type} 预扣积分", ref=str(job_id))
-    except Exception as e:  # noqa: BLE001
-        print(f"[credits] 预扣失败 job#{job_id} {points} 分: {type(e).__name__}: {e}")
 
 
 def _payload_of(job_id: int) -> dict:

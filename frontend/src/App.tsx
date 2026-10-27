@@ -10,7 +10,6 @@ import {
   Scissors,
   Send,
   Settings,
-  ShieldCheck,
   UserRound,
   Wand2,
 } from 'lucide-react'
@@ -28,7 +27,6 @@ import Watch from './pages/Watch'
 import Style from './pages/Style'
 import Digital from './pages/Digital'
 import Tasks from './pages/Tasks'
-import Admin from './pages/Admin'
 import { fetchMenuStats, menuBadges } from './counts'
 import Login from './pages/Login'
 import ForceChangePassword from './pages/ForceChangePassword'
@@ -36,7 +34,7 @@ import ForceChangePassword from './pages/ForceChangePassword'
 export type SectionKey =
   | 'dashboard' | 'topics' | 'scripts' | 'watch' | 'style' | 'benchmarks'
   | 'digital' | 'articles' | 'publishing' | 'posters' | 'tasks' | 'settings'
-  | 'radar' | 'admin'
+  | 'radar'
 
 interface SectionDef {
   key: SectionKey
@@ -85,7 +83,7 @@ export default function App() {
           setMe({
             role: d.role, user_id: d.user_id, display_name: d.display_name,
             must_change_password: d.must_change_password,
-            tenant_id: d.tenant_id, tenant_name: d.tenant_name, tenants: d.tenants ?? [],
+            tenant_id: d.tenant_id, tenant_name: d.tenant_name,
           })
         } else setAuthed(false)
       })
@@ -165,8 +163,6 @@ export default function App() {
     return <ForceChangePassword username={me.display_name} onDone={() => probe()} />
   }
 
-  const isAdmin = !!me && (me.role === 'platform_admin' || me.role === 'tenant_admin')
-  const ADMIN_ITEM: SectionDef = { key: 'admin', label: '管理后台', icon: ShieldCheck }
 
   return (
     <div className="flex h-full">
@@ -191,7 +187,6 @@ export default function App() {
         </nav>
 
         <div className="border-t border-[rgba(240,233,213,0.1)] px-3 py-3">
-          {isAdmin && renderItem(ADMIN_ITEM)}
           {me?.role === 'platform_admin' && renderItem(SYSTEM[1])}
           {SYSTEM.slice(0, 1).map(renderItem)}
           {me && <UserBlock me={me} onLogout={() => { setMe(null); setAuthed(false) }} />}
@@ -214,9 +209,6 @@ export default function App() {
           {active === 'posters' && <PosterPrompts />}
           {active === 'tasks' && <Tasks />}
           {active === 'settings' && <SettingsPage role={me?.role ?? 'member'} />}
-          {active === 'admin' && isAdmin && (
-            <Admin key={me?.user_id ?? 'admin'} role={me!.role} selfId={me!.user_id} onNavigate={setActive} />
-          )}
         </div>
       </main>
     </div>
@@ -225,11 +217,10 @@ export default function App() {
 
 const ROLE_LABEL: Record<string, string> = {
   platform_admin: '平台管理员',
-  tenant_admin: '租户管理员',
   member: '成员',
 }
 
-/** 会话口径：/auth/me 返回的用户上下文（含活跃租户与可切换租户列表） */
+/** 会话口径：/auth/me 返回的用户上下文（单管理员版） */
 interface MeInfo {
   role: string
   user_id: number
@@ -237,10 +228,9 @@ interface MeInfo {
   must_change_password?: boolean
   tenant_id: number
   tenant_name: string
-  tenants: { tenant_id: number; tenant_name: string; role: string }[]
 }
 
-/** 侧栏用户块：当前用户 + 活跃租户（多归属可切换）+ 行内改密 + 退出登录（全角色可见） */
+/** 侧栏用户块：当前用户 + 行内改密 + 退出登录 */
 function UserBlock({ me, onLogout }: {
   me: MeInfo
   onLogout: () => void
@@ -251,31 +241,9 @@ function UserBlock({ me, onLogout }: {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [tenantsOpen, setTenantsOpen] = useState(false)
-  const [switching, setSwitching] = useState<number | null>(null)
-  const [switchErr, setSwitchErr] = useState('')
-
   const logout = async () => {
     try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* 忽略 */ }
     onLogout()
-  }
-
-  const switchTenant = async (tenantId: number) => {
-    setSwitching(tenantId); setSwitchErr('')
-    try {
-      const r = await fetch('/api/auth/switch-tenant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenant_id: tenantId }),
-      })
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}))
-        throw new Error(d.detail || `HTTP ${r.status}`)
-      }
-      window.location.reload()  // 整页刷新：所有页面 state 按新活跃租户重取
-    } catch (e) {
-      setSwitchErr(String(e)); setSwitching(null)
-    }
   }
 
   const changePwd = async () => {
@@ -298,7 +266,6 @@ function UserBlock({ me, onLogout }: {
     }
   }
 
-  const multiTenant = (me.tenants?.length ?? 0) > 1
 
   return (
     <div className="mt-2 rounded-xl border border-[rgba(232,201,127,0.14)] bg-[rgba(240,233,213,0.06)] p-2.5">
@@ -315,36 +282,7 @@ function UserBlock({ me, onLogout }: {
           退出
         </button>
       </div>
-      {/* 活跃租户行：多归属时可展开切换（切换后整页刷新） */}
-      {multiTenant ? (
-        <button className="mt-1 flex w-full items-center gap-1 text-left text-[10px] text-[#9dbba9]/90 hover:text-[#f0e9d5]"
-          onClick={() => { setTenantsOpen((v) => !v); setSwitchErr('') }}>
-          <span className="truncate">租户：{me.tenant_name || me.tenant_id}</span>
-          <span className="shrink-0 text-[#e8c97f]/80">{tenantsOpen ? '收起' : '切换'}</span>
-        </button>
-      ) : (
-        me.tenant_name && <div className="mt-1 truncate text-[10px] text-[#9dbba9]/60">租户：{me.tenant_name}</div>
-      )}
-      {tenantsOpen && multiTenant && (
-        <div className="mt-1.5 space-y-0.5">
-          {me.tenants.map((t) => {
-            const cur = t.tenant_id === me.tenant_id
-            return (
-              <button key={t.tenant_id} disabled={cur || switching !== null}
-                onClick={() => switchTenant(t.tenant_id)}
-                className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[11px] transition ${
-                  cur ? 'bg-[rgba(232,201,127,0.12)] text-[#e8c97f]'
-                    : 'text-[#9dbba9] hover:bg-[rgba(240,233,213,0.08)] hover:text-[#f0e9d5]'
-                } disabled:opacity-60`}>
-                <span className="truncate">{t.tenant_name || `租户 ${t.tenant_id}`}</span>
-                <span className="shrink-0 pl-2 text-[9px] opacity-70">
-                  {switching === t.tenant_id ? '切换中…' : cur ? '当前' : ROLE_LABEL[t.role] ?? t.role}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+      {me.tenant_name && <div className="mt-1 truncate text-[10px] text-[#9dbba9]/60">{me.tenant_name}</div>}
       <button className="mt-1 text-[10px] text-[#9dbba9]/80 hover:text-[#f0e9d5]"
         onClick={() => { setPwdOpen((v) => !v); setMsg(''); setErr('') }}>
         {pwdOpen ? '收起' : '修改密码'}
@@ -363,7 +301,6 @@ function UserBlock({ me, onLogout }: {
       )}
       {msg && <div className="mt-1 text-[10px] text-[#8ff7d2]">{msg}</div>}
       {err && <div className="mt-1 text-[10px] text-[#ff9b8f]">{err}</div>}
-      {switchErr && <div className="mt-1 text-[10px] text-[#ff9b8f]">{switchErr}</div>}
     </div>
   )
 }

@@ -29,12 +29,8 @@ async def trending_topics(user: User = Depends(require_user)) -> dict:
     """今日热点选题提炼（R1.4）：站内对标议题+联网今日热点 × 租户画像 → 3 个切角落选题库。
 
     轻活走队列（LLM 一次调用），产出 source_type=trending 的 draft 选题，前端轮询展示。"""
-    from ..credits import job_points, require_points
-    points = job_points("trending_topics")
-    require_points(user.tenant_id, points, "热点选题提炼")
     job = await runner.submit("trending_topics", {"tenant_id": user.tenant_id},
-                              dedup_key=f"{user.tenant_id}:trending_topics:daily",
-                              points=points)
+                              dedup_key=f"{user.tenant_id}:trending_topics:daily")
     return {"job_id": job.id}
 
 
@@ -87,8 +83,6 @@ def _topic_out(s: Session, topic: Topic, with_report: bool = False) -> dict:
 
 @router.post("/ideas", status_code=202)
 async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
-    from ..credits import job_points, require_points
-    require_points(user.tenant_id, job_points("idea_research"), "选题深研")
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="idea 不能为空")
@@ -106,8 +100,7 @@ async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
         if (j.payload or {}).get("text") == text:
             raise HTTPException(status_code=409, detail="相同选题正在深研中，请等完成")
     job = await runner.submit("idea_research",
-                              {"topic_id": topic_id, "text": text},
-                              points=job_points("idea_research"))
+                              {"topic_id": topic_id, "text": text})
     return {"topic_id": topic_id, "job_id": job.id}
 
 

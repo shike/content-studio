@@ -13,8 +13,6 @@ from sqlmodel import Session, select
 
 from ..avatar import chanjing
 from ..auth import require_user
-from ..credits import (CLONE_POINTS, avatar_video_points, get_balance,
-                     require_points)
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import AvatarConfig, AvatarVideo, User
@@ -87,61 +85,12 @@ def delete_config(config_id: int) -> dict:
     return {"deleted": config_id}
 
 
-@router.get("/balance")
-async def balance(user: User = Depends(require_user)) -> dict:
-    """蝉镜豆余额：平台成本口径，仅平台管理员可读（租户侧看积分，见 /api/credits）。"""
-    if user.role != "platform_admin":
-        raise HTTPException(status_code=403, detail="平台成本口径，仅平台管理员可见")
-    ok, why = chanjing.configured()
-    if not ok:
-        raise HTTPException(status_code=400, detail=why)
-    return {"beans": await chanjing.get_balance()}
-
-
-@router.get("/usage")
-def usage(user: User = Depends(require_user)) -> dict:
-    """蝉豆消耗台账（累计）：成片数/总时长/总耗豆。
-
-    金额（yuan）仅平台管理员可见——租户侧只看蝉豆，金额是平台内部口径。
-    数据源=bean_ledger 流水（独立于视频行：删视频/清记录不影响消耗统计）；
-    兼容回退：流水为空时回读 avatar_videos（老数据迁移前口径）。"""
-    from sqlmodel import func
-
-    from ..models import BeanLedger
-
-    with Session(engine) as s:
-        lq = select(func.count(BeanLedger.id), func.coalesce(func.sum(BeanLedger.seconds), 0),
-                    func.coalesce(func.sum(BeanLedger.beans), 0),
-                    func.coalesce(func.sum(BeanLedger.points), 0))
-        if user.role != "platform_admin":  # 台账租户隔离：租户只见自己的流水合计
-            lq = lq.where(BeanLedger.tenant_id == user.tenant_id)  # type: ignore[attr-defined]
-        lrow = s.exec(lq).one()
-        points = 0
-        if int(lrow[0] or 0) > 0:
-            videos, seconds, beans = int(lrow[0]), float(lrow[1] or 0), int(lrow[2] or 0)
-            points = int(lrow[3] or 0)
-        else:
-            row = s.exec(
-                select(func.count(AvatarVideo.id), func.coalesce(func.sum(AvatarVideo.seconds), 0),
-                       func.coalesce(func.sum(AvatarVideo.beans_used), 0),
-                       func.coalesce(func.sum(AvatarVideo.points_used), 0))
-                .where(AvatarVideo.status == "done")  # type: ignore[attr-defined]
-                .where(AvatarVideo.seconds > 0)  # type: ignore[attr-defined]
-            ).one()
-            videos, seconds, beans = int(row[0]), float(row[1] or 0), int(row[2] or 0)
-            points = int(row[3] or 0)
-    # 积分（租户口径）对所有人可见；豆/¥ 是平台成本口径
-    out = {"videos": videos, "seconds": round(seconds, 1), "points": points}
-    if user.role == "platform_admin":
-        out["beans"] = beans
-        out["yuan"] = round(beans * 0.03, 2)
-    return out
 
 
 @router.get("/estimate")
 async def estimate(script_id: int, avatar_id: int = 0, model: int = 0,
                    user: User = Depends(require_user)) -> dict:
-    """生成前成本闸：按实测语速估时长/豆，并核对余额（元仅平台管理员可见）。"""
+    """生成前预估：按实测语速估时长（纯计算）。"""
     ok, why = chanjing.configured()
     if not ok:
         raise HTTPException(status_code=400, detail=why)
@@ -156,17 +105,6 @@ async def estimate(script_id: int, avatar_id: int = 0, model: int = 0,
         speed = chanjing.clamp_speed(cfg.speed_ratio) if cfg else 1.0
         est = chanjing.estimate(script.final_text, model=model, speed=speed)
         est["speed"] = speed
-        # 租户口径：本次扣多少积分（按秒）+ 自己积分池余额；豆/¥ 是平台成本口径
-        est["points"] = avatar_video_points(est["seconds"], model)
-        est["credits"] = get_balance(user.tenant_id)
-        # 闸门口径 = 租户积分（提交时 require_points 卡的就是它）；豆余额只作平台成本展示
-        est["balance"] = await chanjing.get_balance()
-        est["insufficient"] = est["credits"] < est["points"]
-        if user.role != "platform_admin":
-            # 租户侧只留积分口径（points/credits）；豆、¥、蝉镜余额都是平台成本口径
-            est.pop("yuan", None)
-            est.pop("beans", None)
-            est.pop("balance", None)
         return est
 
 
@@ -187,22 +125,17 @@ async def generate(body: dict,
             raise HTTPException(status_code=400, detail="该脚本没有定稿文本，先在脚本工场定稿")
         cfg = s.get(AvatarConfig, int(avatar_id))
         speed = chanjing.clamp_speed(cfg.speed_ratio) if cfg else 1.0
-    # 按秒预扣：用预估秒数先扣（成片后按实际秒数多退少补，见 avatar.service 结算）
-    est_seconds = chanjing.estimate(sc.final_text, model=model, speed=speed)["seconds"]
-    points = avatar_video_points(est_seconds, model)
-    require_points(user.tenant_id, points, "数字人视频")
     with Session(engine) as s:
         row = AvatarVideo(script_id=int(script_id), avatar_id=int(avatar_id), status="generating",
-                          model=model, points_used=points)
+                          model=model)
         s.add(row)
         s.commit()
         s.refresh(row)
         row_id = row.id
     job = await runner.submit("avatar_video",
-                              {"video_row_id": row_id, "model": model, "points": points,
+                              {"video_row_id": row_id, "model": model,
                                "bigtext": bool(body.get("bigtext", True))},
-                              dedup_key=f"avatar:{script_id}",
-                              points=points)
+                              dedup_key=f"avatar:{script_id}")
     return {"avatar_video_id": row_id, "job_id": job.id}
 
 
@@ -213,7 +146,6 @@ async def clone_video(config_id: int, file: UploadFile, name: str = "",
 
     克隆预扣 300 积分（平台实际成本约 240 分=81 豆，训练失败不退）；
     扣减在形象提交成功后执行，提交失败不扣。"""
-    require_points(user.tenant_id, CLONE_POINTS, "数字人克隆")
     ok, why = chanjing.configured()
     if not ok:
         raise HTTPException(status_code=400, detail=why)
@@ -244,8 +176,6 @@ async def clone_video(config_id: int, file: UploadFile, name: str = "",
     file_id = await chanjing.upload_video(src.name, src.read_bytes())
     person_name = (name or f"{config_name}-克隆").strip()
     person_id = await chanjing.create_person(person_name, file_id)
-    from ..credits import deduct
-    deduct(user.tenant_id, CLONE_POINTS, reason="数字人克隆预扣", ref=person_id)
     with Session(engine) as s:
         c = s.get(AvatarConfig, config_id)
         c.chanjing_person_id = person_id
