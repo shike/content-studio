@@ -1,19 +1,22 @@
-"""抖音采集链路探针：主动微型爬取，实时识别"爬虫是否正常"。
+"""抖音采集链路探针：主动微型爬取，多样本表决识别"爬虫是否正常"。
 
 背景（2026-09-28）：拆解/挖话题连环失败才发现出口 IP 被抖音弹登录墙——任务层报错
 "页面未吐出视频数据"与浏览器坏、隧道断难区分，且没任务跑的时候完全盲。
 
-探针 = 用与线上完全相同的 launch() 打开一条真实视频页（轮换用拆解库最近的 approved
-视频，更像真人行为），等 detail XHR / _ROUTER_DATA，按页面形态分类：
-  ok            采集正常
+探针 = 用与线上完全相同的 launch() 连测 SAMPLES 条真实视频页（轮换拆解库 approved，
+毒视频自动冷却），等 detail XHR / _ROUTER_DATA，按页面形态分类，多样本表决：
+  ok            采集正常（≥1 条通过即视为可用；detail 带"过 N/M"比例）
+  captcha       全部样本撞验证码
+  video_gone    全部样本指向已删除/不可见视频
   login_wall    IP 被要求登录（无登录配额用穿，等冷却或本地上传）
-  captcha       验证码挑战
   proxy_down    出口隧道不通（Mac 关机 / home_proxy 挂了）
   browser_error 浏览器启动失败（内核被清等）
   no_data       页面加载了但没吐数据（风控其他形态/结构变化）
 
-结果落 data/crawl_probe.json（最近一次 + 历史 20 条）；状态翻转发 macOS 通知
-（服务器上无 osascript 静默跳过）。探测本身零豆，对 IP 配额消耗 ≈ 一次真实浏览。
+毒视频冷却：同 URL 连续 2 次探不通 → 冷却 24h（移出探测池），防止个别被平台
+特殊标记的视频让探针在解封后仍持续误报（2026-10-12 单样本误报教训）。
+结果落 data/crawl_probe.json，附 recent_failures（近 1h 爬取任务真实失败数，
+与主动探针交叉印证）。状态翻转发 macOS 通知（服务器上静默跳过）。
 """
 from __future__ import annotations
 
@@ -30,6 +33,9 @@ _STATE_NAME = "crawl_probe.json"
 HISTORY_MAX = 20
 PROBE_WAIT_MS = 7000
 FALLBACK_URL = "https://www.douyin.com/video/7654890394676743466"
+SAMPLES = 3            # 每次探测的样本数（多样本表决，单条毒视频不再一票否决）
+COOLDOWN_FAILS = 2     # 连续探不通 N 次 → 冷却
+COOLDOWN_HOURS = 24    # 冷却时长
 
 CN_LABEL = {
     "ok": "采集正常",
@@ -38,6 +44,8 @@ CN_LABEL = {
     "proxy_down": "出口隧道不通",
     "browser_error": "浏览器启动失败",
     "no_data": "页面无数据（风控其他形态）",
+    "video_gone": "视频已删除或不可见",
+    "network_error": "网络错误",
 }
 
 
@@ -68,8 +76,19 @@ def _notify(text: str) -> None:
         pass
 
 
-def _pick_probe_url() -> tuple[str, str]:
-    """轮换选一条拆解库 approved 视频的 douyin 链接 → (url, 来源说明)；库空用兜底。"""
+def _cooldown_map(state: dict) -> dict:
+    """URL 冷却表：{url: {"n": 连续失败数, "until": 冷却截止 ISO}}。"""
+    return state.get("url_cooldown") or {}
+
+
+def _in_cooldown(url: str, cooldown: dict, now: datetime) -> bool:
+    ent = cooldown.get(url) or {}
+    until = ent.get("until") or ""
+    return bool(until) and until > now.strftime("%Y-%m-%d %H:%M")
+
+
+def _pick_probe_urls(count: int = SAMPLES) -> tuple[list[str], str]:
+    """选 N 条拆解库 approved 视频链接（轮换+跳过冷却中的毒视频）；不足补兜底。"""
     from sqlmodel import Session, select
 
     from .db import engine
@@ -86,13 +105,17 @@ def _pick_probe_url() -> tuple[str, str]:
                 if v.url and "douyin.com" in v.url][:20]
     except Exception:  # noqa: BLE001 库不可读就用兜底
         urls = []
-    if not urls:
-        return FALLBACK_URL, "兜底探测页"
     state = read_state()
-    last_url = (state.get("last") or {}).get("url")
-    # 轮换：避开上次用过的那条
-    pool = [u for u in urls if u != last_url] or urls
-    return pool[0], f"拆解库视频（最近 20 条轮换）"
+    cooldown = _cooldown_map(state)
+    now = datetime.now(timezone(timedelta(hours=8)))
+    recent = [(h.get("url")) for h in (state.get("history") or [])[:count]]
+    pool = [u for u in urls if u not in recent and not _in_cooldown(u, cooldown, now)]
+    if len(pool) < count:  # 轮换不够时放开"最近用过"，仍避开冷却
+        pool += [u for u in urls if u not in pool and not _in_cooldown(u, cooldown, now)]
+    if not pool:
+        return [FALLBACK_URL] * count, "兜底探测页"
+    picks = (pool * count)[:count]
+    return picks, f"拆解库视频（最近 20 条轮换）"
 
 
 async def _proxy_alive(proxy: str) -> bool:
@@ -116,22 +139,60 @@ def _classify_page(page) -> str:
         return "login_wall"
     if "captcha_container" in html or "captcha_verify" in html:
         return "captcha"
+    if "视频不存在" in html or "视频不见了" in html or "作品不见" in html:
+        return "video_gone"
     return "no_data"
 
 
 async def probe() -> dict:
-    """跑一次探针并落盘。返回本次结果 dict。"""
+    """跑一次探针（多样本表决）并落盘。返回本次结果 dict。"""
     proxy = (settings.douyin_proxy or "").strip()
     prev = (read_state().get("last") or {}).get("status")
 
     if proxy and not await _proxy_alive(proxy):
         result = {"status": "proxy_down", "detail": f"出口隧道不通（{proxy}）", "url": ""}
     else:
-        url, src = _pick_probe_url()
-        result = await asyncio.to_thread(_probe_browser, url, src, bool(proxy))
-    result["at"] = datetime.now(timezone(timedelta(hours=8))).strftime("%Y/%m/%d %H:%M")
+        urls, src = _pick_probe_urls(SAMPLES)
+        results = []
+        for u in urls:  # 顺序轻探测（每条 ~10s，与真人浏览密度相当）
+            r = await asyncio.to_thread(_probe_browser, u, src, bool(proxy))
+            r["url"] = u
+            results.append(r)
+        ok_n = sum(1 for r in results if r["status"] == "ok")
+        # 表决：≥1 条通过 = 采集可用（detail 带比例）；0 通过按主要失败形态定性
+        if ok_n >= 1:
+            result = {"status": "ok",
+                      "detail": f"样本通过 {ok_n}/{len(results)}（{src}）", "url": urls[0]}
+        else:
+            bad = results[0]["status"]
+            result = {"status": bad if bad != "ok" else "no_data",
+                      "detail": f"全部 {len(results)} 条样本未通过（{src}）", "url": urls[0] if urls else ""}
+        result["samples"] = [
+            {"url": r.get("url", ""), "status": r["status"]} for r in results]
 
+    result["at"] = datetime.now(timezone(timedelta(hours=8))).strftime("%Y/%m/%d %H:%M")
+    result["recent_failures"] = recent_failure_count(60)  # 被动信号交叉印证
+
+    # 毒视频冷却：非 ok 的 URL 连续 COOLDOWN_FAILS 次 → 冷却 24h；ok 的清零
     state = read_state()
+    cooldown = _cooldown_map(state)
+    now_iso = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    for smp in (result.get("samples") or []):
+        u, st = smp.get("url") or "", smp.get("status")
+        if not u:
+            continue
+        ent = cooldown.get(u) or {"n": 0}
+        if st == "ok":
+            cooldown.pop(u, None)
+            continue
+        ent["n"] = int(ent.get("n") or 0) + 1
+        if ent["n"] >= COOLDOWN_FAILS:
+            until = (datetime.now(timezone(timedelta(hours=8)))
+                     + timedelta(hours=COOLDOWN_HOURS)).strftime("%Y-%m-%d %H:%M")
+            ent["until"] = until
+        cooldown[u] = ent
+    state["url_cooldown"] = cooldown
+
     state["last"] = result
     state["history"] = ([result] + state.get("history", []))[:HISTORY_MAX]
     _write_state(state)

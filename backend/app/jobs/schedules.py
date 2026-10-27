@@ -251,7 +251,11 @@ def _run_crawl_probe() -> Awaitable[str]:
         from ..crawler_probe import CN_LABEL, probe
 
         r = await probe()
-        return f"采集探针：{CN_LABEL.get(r['status'], r['status'])}"
+        base = CN_LABEL.get(r["status"], r["status"])
+        samples = r.get("detail") or ""
+        rf = r.get("recent_failures")
+        extra = f"｜近1h爬取失败 {rf}" if rf is not None else ""
+        return f"采集探针：{base}（{samples}{extra}）"
     return _go()
 
 
