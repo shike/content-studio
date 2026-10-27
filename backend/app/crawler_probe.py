@@ -206,15 +206,35 @@ async def probe() -> dict:
 def _probe_browser(url: str, src: str, via_proxy: bool) -> dict:
     from playwright.sync_api import sync_playwright
 
-    from .browser import launch, ua
+    from .browser import launch
 
     detail: dict = {}
     try:
         with sync_playwright() as p:
             browser = launch(p)
             try:
-                ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
-                                          viewport={"width": 1280, "height": 900})
+                from ..browser import mac_spoof_context
+
+                # 探针测的就是任务要走的路：同款 Mac 指纹+登录态
+                cookie = ""
+                try:
+                    from .models import BenchmarkVideo  # noqa
+                except Exception:
+                    pass
+                try:
+                    import sqlite3 as _sq
+
+                    from ..settings import settings as _st
+
+                    _conn = _sq.connect(_st.db_path)
+                    _row = _conn.execute(
+                        "SELECT creator_cookie FROM watch_accounts "
+                        "WHERE kind='self' AND creator_cookie != '' LIMIT 1").fetchone()
+                    cookie = (_row[0] or "").strip() if _row else ""
+                    _conn.close()
+                except Exception:  # noqa: BLE001
+                    cookie = ""
+                ctx = mac_spoof_context(browser, cookie)
                 page = ctx.new_page()
 
                 def on_response(resp):

@@ -63,6 +63,37 @@ def launch(p, *, mobile: bool = False):
     )
 
 
+MAC_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+_MAC_INIT = (
+    "Object.defineProperty(navigator, 'platform', {get: () => 'MacIntel'});"
+    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+    "Object.defineProperty(navigator, 'vendor', {get: () => 'Apple Computer, Inc.'});"
+)
+
+
+def mac_spoof_context(browser, cookie: str = ""):
+    """Mac 设备指纹上下文（UA+platform+vendor+webdriver 四件套 + 可选登录态）。
+
+    2026-10-12：Linux 服务器 chromium 的设备指纹被抖音点名限流（页面开、数据扣留），
+    伪装 Mac 身份后立即恢复——配合登录态 cookie 使用效果最佳（登录身份不受匿名限流）。
+    本机 Mac 上伪装即原生，无副作用。"""
+    ctx = browser.new_context(user_agent=MAC_UA, locale="zh-CN",
+                              viewport={"width": 1280, "height": 800})
+    if cookie.strip():
+        cookies = []
+        for part in cookie.replace("\n", "").split(";"):
+            if "=" in part:
+                k, _, v = part.strip().partition("=")
+                if k.strip():
+                    cookies.append({"name": k.strip(), "value": v.strip(),
+                                    "domain": ".douyin.com", "path": "/"})
+        if cookies:
+            ctx.add_cookies(cookies)
+    ctx.add_init_script(_MAC_INIT)
+    return ctx
+
+
 def httpx_proxy() -> str | None:
     """给 httpx 用的代理参数（None=直连）。"""
     proxy = (settings.douyin_proxy or "").strip()
