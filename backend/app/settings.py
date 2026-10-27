@@ -44,7 +44,6 @@ class Settings(BaseSettings):
 
     watch_scan_enabled: bool = True   # 定时同行扫描（PRD R3.4c）
     creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
-    daily_analyze_limit: int = 6      # 每日拆解配额（防抖音 IP 惩罚窗复发，2026-10-12；0=不限）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
     watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）

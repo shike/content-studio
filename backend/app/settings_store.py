@@ -31,7 +31,6 @@ MANAGED: dict[str, str] = {
     "douyin_ua": "str",
     "watch_scan_enabled": "bool",
     "creator_data_enabled": "bool",
-    "daily_analyze_limit": "int",
     "watch_scan_hour": "int",
     "watch_discover_keywords": "str",
     "chanjing_app_id": "str",
