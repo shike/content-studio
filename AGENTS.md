@@ -45,7 +45,7 @@
 - 搜索页/话题页/推荐流全部登录墙，按昵称反查 sec_uid 无解——新对标号只能用户在 App 贴视频链接，或 DDG 挖具体 `/video/` 链接。
 - **出境**：机房 IP 直连被拦，唯一出口=家里宽带（本机 `scripts/home-proxy.sh install`：SOCKS5 + SSH 反向隧道，launchd 自愈；服务器 `DOUYIN_PROXY=socks5://127.0.0.1:11080`）。Mac 关机时任务报「出口代理不通」自动重试。**登录态红线：创作者中心 cookie 只用于自有账号数据回流，永不参与对他人内容的爬取。**
 - **DDG**：境内全断，唯一通路=经住宅隧道 + 本机 7890 出海；限流是 IP 级惩罚窗，每查询 ≤2 发（html 202 即换 lite）+ 调用方长周期重试；GLM 搜索不吃 site: 且不索引抖音（带限定符查询强制走 DDG），Bing 中国站无视 site: 不可作备胎。
-- playwright 浏览器在项目根 `.ms-playwright/`（仅 Mac；**别手动删**，删了 `PLAYWRIGHT_BROWSERS_PATH=$PWD/.ms-playwright backend/.venv/bin/playwright install chromium` 重装）。Python 依赖 av 钉 `<19`（19 移除 faster-whisper 在用的参数，会打断转写）。
+- 本地实例已退役（2026-10-27 用户裁定）：本机无 data/、无 .ms-playwright/，本地跑验收属临时行为——需要 Playwright 时 `PLAYWRIGHT_BROWSERS_PATH=$PWD/.ms-playwright backend/.venv/bin/playwright install chromium` 一键重建；ASR 模型同法重下（small 优先）。生产服务器浏览器在服务器自己的缓存，与本机无关。Python 依赖 av 钉 `<19`（19 移除 faster-whisper 在用的参数，会打断转写）。
 - 视频号无公开网页接口，只支持本地上传拆解。
 
 ## 其他红线
