@@ -4,13 +4,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
+from datetime import datetime
+
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from ..auth import require_user
 from ..credits import job_points, require_points
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import BenchmarkVideo, ScriptTemplate, Topic, User
+from ..models import BenchmarkVideo, Job, ScriptTemplate, Topic, User
 from ..settings import settings
 
 router = APIRouter()
@@ -20,6 +23,20 @@ _MAX_UPLOAD = 2 * 1024 * 1024 * 1024  # 2GB
 
 class AnalyzeIn(BaseModel):
     url: str
+
+
+def _analyze_quota_left(s) -> int:
+    """今日拆解配额余量（防抖音 IP 惩罚窗复发：所有提交口统一限流；0=不限）。"""
+    from ..settings import settings as _st
+
+    limit = int(_st.daily_analyze_limit or 0)
+    if limit <= 0:
+        return 999
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    n = s.exec(select(func.count()).select_from(Job).where(  # type: ignore[attr-defined]
+        Job.type == "benchmark_analyze",  # type: ignore[attr-defined]
+        Job.created_at >= today)).one()  # type: ignore[union-attr]
+    return max(limit - int(n or 0), 0)
 
 
 @router.post("/api/analyze/video", status_code=202)
@@ -40,6 +57,10 @@ async def analyze_video(body: AnalyzeIn,
             s.commit()
             s.refresh(b)
         benchmark_id = b.id
+    with Session(engine) as s:
+        if _analyze_quota_left(s) <= 0:
+            raise HTTPException(status_code=429, detail=(
+                f"今日拆解配额已满（{settings.daily_analyze_limit}/天，防抖音风控）——明天再试或拆解本地视频"))
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
                               dedup_key=f"bm:{benchmark_id}",
                               points=job_points("benchmark_analyze"))
@@ -194,6 +215,11 @@ async def resolve_benchmark(benchmark_id: int, body: ResolveIn,
         s.add(b)
         s.commit()
     if body.action == "approve":
+        with Session(engine) as s:
+            if _analyze_quota_left(s) <= 0:
+                raise HTTPException(status_code=429, detail=(
+                    f"今日拆解配额已满（{settings.daily_analyze_limit}/天，防抖音风控）"
+                    "——视频已标记批准，明天重新批准即可入队"))
         job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
                                   dedup_key=f"bm:{benchmark_id}")
         return {"status": "approved", "job_id": job.id}
@@ -220,13 +246,21 @@ async def resolve_pending(body: ResolveIn,
             s.add(b)
             resolved += 1
         s.commit()
+        left = _analyze_quota_left(s) if body.action == "approve" else 999
+        submitted = 0
         if body.action == "approve":
             for b in rows:
+                if submitted >= left:
+                    b.scan_status = "pending"  # 配额满：保持待定夺，明天再批
+                    s.add(b)
+                    continue
                 job = await runner.submit("benchmark_analyze", {"benchmark_id": b.id},
                                           dedup_key=f"bm:{b.id}",
                                           points=job_points("benchmark_analyze"))
                 job_ids.append(job.id)
-    return {"resolved": resolved, "job_ids": job_ids}
+                submitted += 1
+    return {"resolved": resolved, "job_ids": job_ids,
+            "quota_deferred": max(resolved - len(job_ids), 0) if body.action == "approve" else 0}
 
 
 @router.get("/api/benchmarks/{benchmark_id}")
