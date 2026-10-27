@@ -206,18 +206,17 @@ async def probe() -> dict:
 def _probe_browser(url: str, src: str, via_proxy: bool) -> dict:
     from playwright.sync_api import sync_playwright
 
-    from .browser import launch
+    from .browser import launch, ua
 
     detail: dict = {}
     try:
         with sync_playwright() as p:
             browser = launch(p)
             try:
-                from ..browser import mac_spoof_context
-
-                # 探针测的就是任务要走的路：同款 Mac 指纹、匿名身份
-                # （2026-10-27 用户裁定：登录态不参与对他人内容的爬取）
-                ctx = mac_spoof_context(browser, "")
+                # 平台一致指纹（2026-10-27 定论）：Mac UA 跑 Linux=不一致指纹，
+                # 正是数据被扣的原因——探针必须与任务同款平台原生身份
+                ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                          viewport={"width": 1280, "height": 800})
                 page = ctx.new_page()
 
                 def on_response(resp):

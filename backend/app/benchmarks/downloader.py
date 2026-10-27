@@ -14,6 +14,7 @@ from typing import Optional
 import httpx
 
 from ..browser import httpx_proxy, launch, ua
+from ..jobs.errors import TransientError
 from ..settings import settings
 
 _NO_WATERMARK_KEYS = ("nwm_video_url", "no_watermark_url", "nwm_video_url_h264",
@@ -46,6 +47,12 @@ def download_video(url: str, out_dir: Path) -> str:
     hint = ""
     if settings.douyin_proxy:  # 有代理配置仍失败：提示出口可能断了（本机未开机/隧道断）
         hint = f"（经出口代理 {settings.douyin_proxy}）"
+    # 代理层失败要显式区分（2026-10-27 教训：ERR_PROXY_CONNECTION_FAILED 曾被上游
+    # 当成"验证码"进熔断，2 次断连把整队下载任务打成"风控窗"连环失败）
+    if pw_error and any(k in pw_error for k in (
+            "ERR_PROXY_CONNECTION_FAILED", "Proxy Server could not connect",
+            "Host unreachable", "SOCKS5", "tunnel")):
+        raise TransientError(f"出口代理不通{hint}：{str(pw_error)[:120]}（家里 Mac 关机或隧道断了，稍后自动重试）")
     raise RuntimeError(
         f"自动下载失败{hint}（浏览器路线：{pw_error or '未启用'}）。"
         "可手工下载视频后走「本地视频拆解」上传。"
@@ -118,8 +125,10 @@ def _download_mp4(video_url: str, out_dir: Path) -> Optional[str]:
 
 def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[str]]:
     """真浏览器路线：打开视频页，拦页面自身发出的 aweme/detail（自带合法签名与访客身份）。
-    匿名 + Mac 设备指纹（2026-10-27 用户裁定：登录态只用于自有账号数据回流，
-    不参与对他人内容的爬取；此前带登录态下载的路线作废）。"""
+
+    2026-10-27 定论：必须用**与运行平台一致**的指纹——Mac UA 跑在 Linux 上=不一致指纹，
+    才是数据被扣的原因；平台一致（服务器 Linux UA）+住宅出口+匿名实测可拿 detail 与直链。
+    此前两轮弯路：跨平台伪装（297f026）、登录态注入（297f026，已撤）都已被本结论替代。"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -133,10 +142,10 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
     with sync_playwright() as p:
         browser = launch(p)  # 统一出口（含可选代理）
         try:
-            from ..browser import mac_spoof_context
+            from ..browser import ua
 
-            # Mac 设备指纹（2026-10-27 起匿名身份，不带任何登录态）
-            ctx = mac_spoof_context(browser, "")
+            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                      viewport={"width": 1280, "height": 800})
             page = ctx.new_page()
 
             def on_response(resp):
@@ -148,8 +157,13 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
 
             page.on("response", on_response)
             page.goto(target, timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(6000)
+            # 轮询等 detail（固定 sleep 会在慢加载时误报"页面未吐出"）
+            for _ in range(8):
+                if detail:
+                    break
+                page.wait_for_timeout(1500)
             # 页面可能不发 detail XHR（缓存），兜底读 _ROUTER_DATA
+            html = ""
             if not detail:
                 html = page.content()
                 m = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.+?\})\s*</script>",
@@ -166,7 +180,17 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
 
     video_url = _find_video_url(detail)
     if not video_url:
-        return None, "页面未吐出视频数据（可能触发验证码，可重试或本地上传）"
+        # 失败原因要分清（2026-10-27 教训：毒视频/真验证码/慢加载全被标成"验证码"
+        # 喂进熔断，2 次就把整队下载打成"风控窗"）——按页面实际说了什么归类
+        if not html:
+            pass  # detail 有但无直链：走最下面的通用报错
+        elif re.search(r"视频不见了吗|视频不存在|已被删除|审核中|暂无内容|内容暂时无法", html):
+            return None, "视频已删除或不可见（毒视频，人工在 App 确认后可忽略）"
+        elif re.search(r"验证码|captcha|安全验证", html, re.I):
+            return None, "页面吐出验证码（IP 级惩罚窗，低频等待可解）"
+        else:
+            return None, "页面未吐出视频数据（非验证码页：慢加载或软限流，稍后重试）"
+        return None, "页面无直链（数据骨架化，稍后重试）"
     try:
         return _download_mp4(video_url, out_dir), None
     except Exception as e:  # noqa: BLE001
