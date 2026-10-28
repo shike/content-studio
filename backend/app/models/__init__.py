@@ -197,6 +197,7 @@ class Script(TenantScoped, TimestampMixin, table=True):
     storyboard: list = Field(default_factory=list, sa_column=Column(JSON))
     title_candidates: list = Field(default_factory=list, sa_column=Column(JSON))
     status: str = "generating"  # generating | polishing | final
+    account_type: str = Field(default="persona")  # persona | leadgen（两类号：内容看板过滤/风格分叉）
 
 
 class ScriptTemplate(TimestampMixin, table=True):

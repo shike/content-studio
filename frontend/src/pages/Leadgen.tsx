@@ -16,7 +16,7 @@ export default function Leadgen({ onNavigate }: { onNavigate: (k: SectionKey) =>
     <div>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">获客号 · 内容产线</h2>
-        <span className="text-xs text-slate-400">简单粗暴获客 · 引导话术内置 · 合规红线仍约束</span>
+        <span className="text-xs text-slate-400">获客内容 · 引导设计已内置 · 表述合规受控</span>
       </div>
       <div className="mb-3 flex gap-1.5">
         {([

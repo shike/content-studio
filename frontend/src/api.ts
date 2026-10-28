@@ -88,6 +88,7 @@ export interface Script {
   storyboard: { shot: string; broll_keywords: string[]; subtitle_hint: string }[]
   title_candidates: { platform: string; title: string }[]
   status: string
+  account_type?: string
   created_at?: string
 }
 

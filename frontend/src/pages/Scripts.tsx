@@ -37,7 +37,7 @@ interface Template {
   usage_count?: number
 }
 
-export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
+export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
   const [scripts, setScripts] = useState<Script[]>([])
   const [allScripts, setAllScripts] = useState<Script[]>([])
   const [total, setTotal] = useState(0)
@@ -69,7 +69,7 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
   const [useStyle, setUseStyle] = useState(true)
   const [templateId, setTemplateId] = useState(0) // 0=不使用结构模板
   const [selAngles, setSelAngles] = useState<string[]>([]) // 指定打法（空=自动挑 3 种）
-  const [accountType, setAccountType] = useState<'persona' | 'leadgen'>('persona') // 投放账号类型（两类号策略）
+  const [genAccountType, setGenAccountType] = useState<'persona' | 'leadgen'>('persona') // 本次投放账号类型（两类号策略）
   const [anglesOpen, setAnglesOpen] = useState(false)
   const [finalizedView, setFinalizedView] = useState<{ id: number; titles: { platform: string; title: string }[]; teleLen: number } | null>(null)
   const [genProg, setGenProg] = useState<Record<number, { p: number; m: string }>>({})
@@ -166,7 +166,9 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
     (script.topic_id ? topicMap.get(script.topic_id)?.title : '') || `脚本 #${script.id}`
 
   const pendingScripts = useMemo(
-    () => allScripts.filter((s) => s.status === 'generated'),
+    () => allScripts
+      .filter((s) => s.status === 'generated')
+      .filter((s) => !accountType || (s.account_type ?? 'persona') === accountType),
     [scripts],
   )
   const queue = useMemo(
@@ -225,7 +227,7 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
           topic_id: tid, length, use_style: useStyle,
           ...(selAngles.length >= 2 ? { angles: selAngles } : {}),
           ...(templateId > 0 ? { template_id: templateId } : {}),
-          account_type: accountType,
+          account_type: genAccountType,
         }),
       })
       await waitJob(r.job_id, (j) => {
@@ -541,11 +543,11 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
             ))}
           </select>
           <button
-            onClick={() => setAccountType((v) => (v === 'persona' ? 'leadgen' : 'persona'))}
-            title="两类号策略：人设号=高质量内容（禁引导话术）；获客号=简单粗暴获客（要求获客引导）"
+            onClick={() => setGenAccountType((v) => (v === 'persona' ? 'leadgen' : 'persona'))}
+            title="投放账号：人设号内容不带引导；获客号内容自带获客引导设计"
             className={`badge shrink-0 h-9 cursor-pointer px-3 ${accountType === 'leadgen' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-700'}`}
           >
-            {accountType === 'leadgen' ? '投放：获客号' : '投放：人设号'}
+            {genAccountType === 'leadgen' ? '投放：获客号' : '投放：人设号'}
           </button>
           <button
             onClick={() => setUseStyle((v) => !v)}

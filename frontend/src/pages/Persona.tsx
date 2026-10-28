@@ -17,7 +17,7 @@ export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) =>
     <div>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">人设号 · 内容产线</h2>
-        <span className="text-xs text-slate-400">高质量内容 · 禁一切引导话术 · 风格画像 v7 注入</span>
+        <span className="text-xs text-slate-400">高质量内容 · 不带获客引导 · 自动套用你的风格画像</span>
       </div>
       <div className="mb-3 flex gap-1.5">
         {([

@@ -214,6 +214,10 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN published_at VARCHAR DEFAULT ''"))
         if svcols and "duration" not in svcols:
             conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN duration INTEGER DEFAULT 0"))
+        scolsc = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(scripts)"))]
+        if scolsc and "account_type" not in scolsc:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE scripts ADD COLUMN account_type VARCHAR NOT NULL DEFAULT 'persona'"))
         # 引擎统一（2026-10-12）：parked 状态退役 → failed（next_retry_at 保留，沿退避梯子继续）
         jcols2 = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(jobs)"))]
         if jcols2 and "next_retry_at" in jcols2:

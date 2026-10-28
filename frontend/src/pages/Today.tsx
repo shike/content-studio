@@ -128,7 +128,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         {[
           { l: '粉丝（施可号）', v: kpis.fans, d: kpis.fansDelta > 0 ? `+${kpis.fansDelta} 昨日` : '—' },
-          { l: '最新播放', v: kpis.play, d: 'T-1 口径', dim: true },
+          { l: '昨日播放', v: kpis.play, d: '平台 T-1 数据', dim: true },
           { l: '主页访问', v: kpis.profileViews, d: '近 30 天序列', dim: true },
           { l: '本周成片', v: 3, d: '人设 2 · 获客 1', dim: true },
         ].map((x) => (

@@ -153,6 +153,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         script = s.get(Script, script_id)
         script.versions = versions
         script.status = "generated"
+        script.account_type = account_type
         s.add(script)
         if template is not None:  # usage_count 只记真实注入（此前占位符缺失静默失效也在计数——假账已修）
             tpl = s.get(ScriptTemplate, template.id)

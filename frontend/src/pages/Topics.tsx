@@ -358,12 +358,18 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
                   <span className={`badge ${BADGE_SOURCE[cur.source_type] || BADGE_SOURCE.manual}`}>
                     {SOURCE_LABELS[cur.source_type] || cur.source_type}
                   </span>
-                  {cur.evidence?.account_type === 'leadgen' && (
-                    <span className="badge bg-amber-100 text-amber-800">获客打法</span>
-                  )}
-                  {cur.evidence?.account_type === 'persona' && cur.evidence?.benchmark_quality_score != null && (
-                    <span className="badge bg-sky-50 text-sky-700">人设</span>
-                  )}
+                  <button
+                    onClick={async () => {
+                      const to = cur.evidence?.account_type === 'leadgen' ? 'persona' : 'leadgen'
+                      try {
+                        await api(`/topics/${cur.id}/set-type`, { method: 'POST', body: JSON.stringify({ account_type: to }) })
+                        await reload()
+                      } catch (e) { setError(String(e)) }
+                    }}
+                    title="点击切换：该选题是获客打法还是人设内容（影响脚本风格与产线归属）"
+                    className={`badge cursor-pointer ${cur.evidence?.account_type === 'leadgen' ? 'bg-amber-100 text-amber-800 hover:brightness-95' : 'bg-sky-50 text-sky-700 hover:brightness-95'}`}>
+                    {cur.evidence?.account_type === 'leadgen' ? '获客打法 · 点击改' : '人设 · 点击改'}
+                  </button>
                   {cur.evidence?.benchmark_quality_score != null && (cur.evidence.benchmark_quality_score as number) > 0 && (
                     <span className={`badge tabular-nums ${(cur.evidence.benchmark_quality_score as number) >= 6 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}>
                       热度 {(cur.evidence.benchmark_quality_score as number).toFixed(1)}

@@ -168,7 +168,7 @@ export default function App() {
             <div className="truncate text-sm font-semibold tracking-tight text-[#f0e9d5]">
               跃迁内容工作室
             </div>
-            <div className="text-[10px] text-[#9dbba9]/70">单管理员 · 两类号</div>
+            <div className="text-[10px] text-[#9dbba9]/70">选题 · 内容 · 发布</div>
           </div>
         </div>
 

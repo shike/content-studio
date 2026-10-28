@@ -137,7 +137,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
   const save = () =>
     guard(async () => {
       if (!conf) return
-      setBusy('保存中（运行时生效并写入 .env）…')
+      setBusy('保存中（运行时生效）…')
       const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
@@ -449,7 +449,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
                   className="input max-w-20"
                 />
                 条
-                <span className="text-xs text-slate-400">话题雷达命中同口径共享上限</span>
+                <span className="text-xs text-slate-400">话题雷达命中共享同一上限</span>
               </div>
             </div>
             <div className="space-y-1">

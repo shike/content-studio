@@ -146,6 +146,26 @@ def approve_topic(topic_id: int) -> dict:
     return _set_status(topic_id, "approved")
 
 
+@router.post("/{topic_id}/set-type")
+def set_topic_type(topic_id: int, body: dict,
+                   user: User = Depends(require_user)) -> dict:
+    """手动修正选题的两类号归属（获客/人设），evidence.account_type 即口径。"""
+    t = str((body or {}).get("account_type") or "").strip()
+    if t not in ("persona", "leadgen"):
+        raise HTTPException(status_code=400, detail="account_type 必须是 persona / leadgen")
+    with Session(engine) as s:
+        topic = s.get(Topic, topic_id)
+        if topic is None:
+            raise HTTPException(status_code=404, detail="topic not found")
+        ev = dict(topic.evidence or {})
+        ev["account_type"] = t
+        ev["account_type_manual"] = True
+        topic.evidence = ev
+        s.add(topic)
+        s.commit()
+    return {"id": topic_id, "account_type": t}
+
+
 @router.post("/{topic_id}/reject")
 def reject_topic(topic_id: int) -> dict:
     return _set_status(topic_id, "rejected")
