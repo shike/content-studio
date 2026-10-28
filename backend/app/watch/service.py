@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -100,7 +101,10 @@ def _list_author_videos_via_anchor(url: str) -> tuple[Optional[list], Optional[s
             page.on("response", on_response)
             page.goto(f"https://www.douyin.com/video/{rid}",
                       timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
+            # 先等 detail 到手（隧道下 XHR 实测 22~23s，固定短窗=连环误判"未吐出"）
+            deadline = time.time() + 60
+            while not detail and time.time() < deadline:
+                page.wait_for_timeout(2000)
             # 右栏合集流下滑翻页，多拿几批同作者视频
             for _ in range(3):
                 page.mouse.wheel(0, 3200)
@@ -180,10 +184,12 @@ def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Option
             page.on("response", on_response)
             page.goto(f"https://www.iesdouyin.com/share/user/{sec}",
                       timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(4000)
-            for _ in range(3):
+            # 滚动触发分页加载；deadline 轮询到 60s（住宅隧道实测列表 XHR 晚到，
+            # 固定短窗把正常页误判成风控——2026-10-28 复盘）
+            deadline = time.time() + 60
+            while not raw and time.time() < deadline:
                 page.mouse.wheel(0, 2400)
-                page.wait_for_timeout(2200)
+                page.wait_for_timeout(2000)
         except Exception as e:  # noqa: BLE001
             return None, f"分享页路线失败: {str(e)[:120]}", True
         finally:
@@ -200,7 +206,7 @@ def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Option
                                 "stats": _extract_stats(a)})
     entries = entries[:_LIST_LIMIT]
     if not entries:
-        return None, "分享页未吐出作品列表（可能触发风控，可重试）", True
+        return None, "分享页未吐出作品列表（等待窗内数据未到，可重试）", True
     return entries, None, True
 
 
@@ -425,7 +431,9 @@ def _resolve_author_via_video(url: str) -> tuple[Optional[dict], Optional[str]]:
             page.on("response", on_response)
             page.goto(f"https://www.douyin.com/video/{rid}",
                       timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
+            deadline = time.time() + 60
+            while not detail and time.time() < deadline:
+                page.wait_for_timeout(2000)
         except Exception as e:  # noqa: BLE001
             return None, f"视频页打开失败: {str(e)[:100]}"
         finally:
@@ -599,7 +607,9 @@ def _probe_video_author(rid: str) -> tuple[Optional[dict], Optional[str]]:
             page.on("response", on_response)
             page.goto(f"https://www.douyin.com/video/{rid}",
                       timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
+            deadline = time.time() + 60
+            while not detail and time.time() < deadline:
+                page.wait_for_timeout(2000)
         except Exception as e:  # noqa: BLE001
             return None, f"视频页打开失败: {str(e)[:100]}"
         finally:
@@ -610,7 +620,7 @@ def _probe_video_author(rid: str) -> tuple[Optional[dict], Optional[str]]:
     st = ad.get("statistics") or {}
     sec, name = a.get("sec_uid") or "", (a.get("nickname") or "").strip()
     if not sec or not name:
-        return None, "视频页未吐出作者信息（可能触发风控）"
+        return None, "视频页未吐出作者信息（等待窗内数据未到，可重试）"
     return {
         "name": name,
         "sec_uid": sec,
@@ -764,7 +774,7 @@ async def watch_discover(ctx, payload: dict) -> dict:
         await asyncio.sleep(1.5)  # 轻 pacing 降风控概率
     if not found:
         raise TransientError(
-            f"{len(samples)} 个样本都未反查出作者（大概率触发风控），稍后自动重试或手动重跑")
+            f"{len(samples)} 个样本都未反查出作者（等待窗内数据未到，已放宽等待后仍如此请检查出口延迟），稍后自动重试或手动重跑")
 
     # ③ 粉丝数排序取 Top N → 候选表（已在清单自动标 added；已忽略的尊重「不做」不复活）
     ranked = sorted(found.values(),
