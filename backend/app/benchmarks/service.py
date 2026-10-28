@@ -89,21 +89,27 @@ async def auto_dissect_rows(rows: list, source_tag: str) -> int:
             st = {}
         return content_score(int(st.get("digg") or 0), int(st.get("followers") or 0))
 
-    ranked = sorted(rows, key=_score, reverse=True)
+    # 两类号分口径（2026-10-28）：获客型对标号的新作品豁免热度分门槛——
+    # 它们的价值是打法学习（内容数据通常不高），热度闸只用于人设型内容
+    leadgen_rows = [r for r in rows if r.account_type == "leadgen"]
+    persona_rows = [r for r in rows if r.account_type != "leadgen"]
+    ranked = sorted(persona_rows, key=_score, reverse=True)
+    queue = [(r, None) for r in leadgen_rows] + [(r, _score(r)) for r in ranked]
     approved = 0
-    for r in ranked:
+    for r, score in queue:
         if approved >= budget:
             break
-        score = _score(r)
-        if score < settings.auto_dissect_min_score:
+        if score is not None and score < settings.auto_dissect_min_score:
             continue
         with Session(engine) as s:
             row = s.get(BenchmarkVideo, r.id)
             if row is None or row.scan_status != "pending":
                 continue  # 已被人工处理/重复触发
             row.scan_status = "approved"
-            row.quality_score = score
-            row.notes = f"自动批准（{source_tag}，热度分 {score}：赞粉比×赞数量）"
+            if score is not None:
+                row.quality_score = score
+            mark = f"自动批准（{source_tag}，{'获客打法样本，免热度门槛' if score is None else f'热度分 {score}'}）"
+            row.notes = mark
             s.add(row)
             s.commit()
         await runner.submit("benchmark_analyze", {"benchmark_id": r.id},
