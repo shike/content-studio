@@ -124,6 +124,7 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
     transcript: str = ""
     analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
     media_path: str = ""
+    notes: str = ""  # 自动拆解闸标记等（自动批准原因/雷达来源）
     source: str = "douyin"  # douyin | local
     scan_status: str = Field(default="approved")  # pending(待定夺) | approved(已批准) | ignored(已忽略)
 

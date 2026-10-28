@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
     watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
+    # 全自动拆解闸（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：达标作品自动批准进拆解
+    auto_dissect_enabled: bool = True
+    auto_dissect_min_digg: int = 1000  # 自动批准门槛：点赞数
+    auto_dissect_daily_cap: int = 6    # 每日自动拆解上限（控下载与 LLM 成本）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
 
     @property

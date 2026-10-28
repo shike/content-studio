@@ -18,6 +18,9 @@ interface AppSettings {
   watch_scan_enabled: boolean
   watch_scan_hour: number
   watch_discover_keywords: string
+  auto_dissect_enabled: boolean
+  auto_dissect_min_digg: number
+  auto_dissect_daily_cap: number
   chanjing_configured: boolean
 }
 
@@ -63,6 +66,9 @@ export default function Settings({ role = 'member' }: { role?: string }) {
   const [scanEnabled, setScanEnabled] = useState(true)
   const [scanHour, setScanHour] = useState(1)
   const [discoverKw, setDiscoverKw] = useState('')
+  const [autoDissect, setAutoDissect] = useState(true)
+  const [autoMinDigg, setAutoMinDigg] = useState(1000)
+  const [autoCap, setAutoCap] = useState(6)
   const [pingReply, setPingReply] = useState('')
   const [probe, setProbe] = useState<{
     query: string
@@ -88,6 +94,9 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     setScanEnabled(c.watch_scan_enabled)
     setScanHour(c.watch_scan_hour)
     setDiscoverKw(c.watch_discover_keywords ?? '')
+    setAutoDissect(c.auto_dissect_enabled)
+    setAutoMinDigg(c.auto_dissect_min_digg)
+    setAutoCap(c.auto_dissect_daily_cap)
   }, [isPlatform])
 
   useEffect(() => {
@@ -129,7 +138,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     guard(async () => {
       if (!conf) return
       setBusy('保存中（运行时生效并写入 .env）…')
-      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw }
+      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_digg: autoMinDigg, auto_dissect_daily_cap: autoCap }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
       setPingReply('')
@@ -414,6 +423,35 @@ export default function Settings({ role = 'member' }: { role?: string }) {
               </select>
               <span className="text-xs text-slate-400">失败后 1 小时自动重试，最多 3 次</span>
             </div>
+            <div className="space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={autoDissect}
+                  onChange={(e) => setAutoDissect(e.target.checked)}
+                  className="size-4 accent-sky-500"
+                />
+                质量闸自动拆解：扫描发现的高赞新作品自动批准拆解，选题候选直接进选题库
+              </label>
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                门槛（点赞≥）
+                <input
+                  type="number"
+                  value={autoMinDigg}
+                  onChange={(e) => setAutoMinDigg(Number(e.target.value) || 0)}
+                  className="input max-w-28"
+                />
+                每日上限
+                <input
+                  type="number"
+                  value={autoCap}
+                  onChange={(e) => setAutoCap(Number(e.target.value) || 0)}
+                  className="input max-w-20"
+                />
+                条
+                <span className="text-xs text-slate-400">话题雷达命中同口径共享上限</span>
+              </div>
+            </div>
             <div className="space-y-1">
               <label className="block text-sm text-slate-700">每日发现的关键词池</label>
               <input
@@ -434,7 +472,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
 
       {/* 保存条 */}
       <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
-        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour) && (
+        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour || autoDissect !== conf.auto_dissect_enabled || autoMinDigg !== conf.auto_dissect_min_digg || autoCap !== conf.auto_dissect_daily_cap) && (
           <div className="flex items-center gap-3 rounded-2xl bg-slate-900 px-5 py-3 text-sm text-slate-100 shadow-xl">
             <span>
               待保存：<b className="text-sky-400">{model}</b>

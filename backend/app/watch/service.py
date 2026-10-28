@@ -321,6 +321,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
             continue
 
         created = 0
+        new_row_ids: list[int] = []
         for e in entries:
             vid = str(e.get("id") or "")
             stats = e.get("stats") or {}
@@ -353,6 +354,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
                 s.add(b)
                 s.commit()
                 known_ids[vid] = b.id
+                new_row_ids.append(b.id)
             known.add(f"douyin:{vid}")
             created += 1
             queued += 1
@@ -366,12 +368,28 @@ async def watch_scan(ctx, payload: dict) -> dict:
         notes.append(f"{acc.name}：新入库 {created} 条（待定夺，批准后进拆解队列）"
                      + (f"，回填互动数 {backfilled} 条" if backfilled else ""))
 
+    # 质量闸自动拆解（2026-10-28 全自动化裁定）：达标新作品自动批准进拆解队列，
+    # 其余保持待定夺。人的角色后移到选题库定审，拆解库日常不用看。
+    if new_row_ids:
+        try:
+            from ..benchmarks import service as bms
+
+            rows = []
+            with Session(engine) as s:
+                rows = [s.get(BenchmarkVideo, i) for i in new_row_ids]
+            rows = [r for r in rows if r is not None]
+            n_auto = await bms.auto_dissect_rows(rows, "同行扫描")
+            if n_auto:
+                notes.append(f"质量闸自动拆解 {n_auto} 条（达标自动批准，超出门槛的其余保留待定夺）")
+        except Exception as e:  # noqa: BLE001 自动拆解失败不影响扫描本身
+            notes.append(f"质量闸自动拆解失败：{type(e).__name__}: {str(e)[:80]}")
+
     channels_count = sum(1 for a in accounts if a.platform == "channels")
     if channels_count:
         notes.append("视频号无公开网页接口，不支持自动扫描：请在 App 等外部渠道发现视频后"
                      "「本地视频拆解」上传")
 
-    ctx.set_progress(100, f"完成：新发现 {queued} 条（已入待定夺清单）")
+    ctx.set_progress(100, f"完成：新发现 {queued} 条")
     return {"queued": queued, "backfilled": backfilled, "notes": notes}
 
 

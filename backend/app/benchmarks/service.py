@@ -6,22 +6,23 @@ import json
 import os
 from pathlib import Path
 
-from sqlmodel import Session
+import asyncio
+import json
+import os
+from pathlib import Path
+
+from sqlmodel import Session, select
 
 from ..asr import transcribe
 from ..db import engine
-from ..jobs.runner import JobContext, register_executor, register_owed
+from ..settings import settings
+from ..jobs.runner import JobContext, register_executor, register_owed, runner
 from ..llm import gateway
 from ..models import BenchmarkVideo, Topic
 from ..prompts import load, render
-from ..settings import settings
 from ..jobs.errors import CaptchaError
 from . import downloader
 
-
-# 下载熔断（2026-10-07）：批量拆解连续下载会持续触发验证码（家宽出口 IP 高频抓取），
-# 队列里后来的任务会继续一头撞墙。30 分钟内 ≥2 次 captcha 失败 → 后续下载直接快速失败
-# 进 30min 退避重试，让 IP 惩罚窗自然冷却。
 import time as _time
 
 _CAPTCHA_FAILS: list[float] = []
@@ -46,6 +47,65 @@ def _captcha_breaker() -> None:
             f"约 {wait_min} 分钟后自动重试")
 
 _BENCHMARK_DIR = settings.data_dir / "benchmarks"
+
+
+
+_BENCHMARK_DIR = settings.data_dir / "benchmarks"
+
+async def auto_dissect_rows(rows: list, source_tag: str) -> int:
+    """质量闸自动拆解（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：
+    达标行自动批准并提交拆解，其余保持待定夺。
+
+    - 门槛：stats.digg ≥ settings.auto_dissect_min_digg（点赞是比播放更稳的早期热度信号）
+    - 上限：今日已自动批准数 < settings.auto_dissect_daily_cap（控下载与 LLM 成本，
+      计数口径=notes 带自动批准标记且 created_at 为今天的行）
+    - 同批按点赞降序取优；未达标/超限行原样保留待定夺（人不看也不碍事，想捞随时可批）。
+    返回本次自动批准条数。"""
+    import json as _json
+
+    if not settings.auto_dissect_enabled or not rows:
+        return 0
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with Session(engine) as s:
+        already = sum(
+            1 for r in s.exec(
+                select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                    BenchmarkVideo.notes.like("%自动批准%")  # type: ignore[attr-defined]
+                )).all()
+            if (r.created_at or "")[:10] == today)
+    budget = max(0, settings.auto_dissect_daily_cap - already)
+    if budget <= 0:
+        return 0
+
+    def _digg(r):
+        try:
+            return int((_json.loads(r.stats) if isinstance(r.stats, str) else (r.stats or {})).get("digg") or 0)
+        except Exception:  # noqa: BLE001 stats 缺损按 0 分
+            return 0
+
+    ranked = sorted(rows, key=_digg, reverse=True)
+    approved = 0
+    for r in ranked:
+        if approved >= budget:
+            break
+        digg = _digg(r)
+        if digg < settings.auto_dissect_min_digg:
+            continue
+        with Session(engine) as s:
+            row = s.get(BenchmarkVideo, r.id)
+            if row is None or row.scan_status != "pending":
+                continue  # 已被人工处理/重复触发
+            row.scan_status = "approved"
+            row.notes = f"自动批准（{source_tag}，赞 {digg}）"
+            s.add(row)
+            s.commit()
+        await runner.submit("benchmark_analyze", {"benchmark_id": r.id},
+                            dedup_key=f"bm:{r.id}")
+        approved += 1
+    return approved
+
 
 
 def cleanup_completed_media() -> int:
@@ -97,7 +157,7 @@ def owed_benchmarks() -> list[tuple[dict, str]]:
     """
     from datetime import datetime, timedelta
 
-    from sqlmodel import Session, select
+    from sqlmodel import Session, select, select
 
     from ..db import engine
     from ..models import BenchmarkVideo, Job

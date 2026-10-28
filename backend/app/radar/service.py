@@ -256,6 +256,36 @@ async def check_topic(row: RadarTopic) -> dict:
         hit_note = (f"，低粉高赞 +{added}（{hit_candidates[0]['desc'][:20]}"
                     f" 赞粉比 {hit_candidates[0]['ratio']}）")
         await asyncio.to_thread(_notify, f"#{name} 发现低粉高赞 {added} 条：{hit_candidates[0]['desc'][:60]}")
+        # 雷达命中自动拆解（2026-10-28 全自动化裁定）：达标命中直接进拆解队列，
+        # 拆完选题候选自动进选题库——人只在选题库定审，雷达页日常不用看。
+        try:
+            from ..benchmarks import service as bms
+            from ..models import BenchmarkVideo
+
+            rows = []
+            with Session(engine) as s:
+                for h in hit_candidates:
+                    url = f"https://www.douyin.com/video/{h['id']}"
+                    if s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                            BenchmarkVideo.url == url)).first() is not None:
+                        continue  # 已在库（历史命中/重复命中），不重复入
+                    b = BenchmarkVideo(tenant_id=row.tenant_id or 1, url=url,
+                                       author=str(h.get("author") or "")[:60],
+                                       title=str(h.get("desc") or "")[:80],
+                                       stats={"digg": int(h.get("digg") or 0),
+                                              "followers": int(h.get("followers") or 0),
+                                              "ratio": h.get("ratio")},
+                                       source="douyin", scan_status="pending")
+                    s.add(b)
+                    s.commit()
+                    s.refresh(b)
+                    rows.append(b)
+            if rows:
+                n_radar = await bms.auto_dissect_rows(rows, f"话题雷达#{name}")
+                if n_radar:
+                    hit_note += f"，自动拆解 {n_radar} 条"
+        except Exception as e:  # noqa: BLE001 自动拆解失败不影响雷达巡检本身
+            hit_note += f"（自动拆解失败：{type(e).__name__}）"
     if spiked:
         titles = "；".join(v["desc"] for v in recent[:2])
         await asyncio.to_thread(_notify, f"#{name} 新增 {row_new if (row_new := len(fresh_ids)) else 0} 条视频：{titles[:80]}")

@@ -186,6 +186,10 @@ def _migrate(engine) -> None:
             if scols and "scan_status" not in scols:
                 conn.execute(sqlalchemy.text(
                     f"ALTER TABLE {table} ADD COLUMN scan_status VARCHAR NOT NULL DEFAULT 'approved'"))
+        bmvcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(benchmark_videos)"))]
+        if bmvcols and "notes" not in bmvcols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE benchmark_videos ADD COLUMN notes VARCHAR DEFAULT ''"))
         svcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(self_videos)"))]
         if svcols and "stats" not in svcols:
             conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN stats JSON DEFAULT '{}'"))

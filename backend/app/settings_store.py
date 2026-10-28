@@ -33,6 +33,9 @@ MANAGED: dict[str, str] = {
     "creator_data_enabled": "bool",
     "watch_scan_hour": "int",
     "watch_discover_keywords": "str",
+    "auto_dissect_enabled": "bool",
+    "auto_dissect_min_digg": "int",
+    "auto_dissect_daily_cap": "int",
     "chanjing_app_id": "str",
     "chanjing_secret_key": "secret",
 }
