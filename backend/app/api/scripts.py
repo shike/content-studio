@@ -18,6 +18,7 @@ class GenerateIn(BaseModel):
     length: str = "short"  # short=240~320字（50~70s 黄金档）| long=600~900字（PRD R2.1 两档，2026-10-09 定档）
     angles: list[str] = []  # 指定三版打法（六打法子集 ≤3 个；空=自动挑）
     template_id: int = 0  # 结构模板（0=不使用，走默认流程）
+    account_type: str = ""  # persona(人设号) | leadgen(获客号)；空=读选题自带
 
 
 class FinalizeIn(BaseModel):
@@ -64,6 +65,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
     # use_style 此前在此处丢失（开关一直是坏的：关了也注入风格画像）——2026-10-10 修
     job = await runner.submit("script_generate",
                               {"script_id": script_id, "length": body.length,
+                               "account_type": body.account_type,
                                "use_style": body.use_style, "angles": angles,
                                "template_id": body.template_id})
     return {"script_id": script_id, "job_id": job.id}

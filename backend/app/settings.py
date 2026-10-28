@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     # 全自动拆解闸（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：达标作品自动批准进拆解
     auto_dissect_enabled: bool = True
-    auto_dissect_min_digg: int = 1000  # 自动批准门槛：点赞数
-    auto_dissect_daily_cap: int = 6    # 每日自动拆解上限（控下载与 LLM 成本）
+    auto_dissect_min_score: float = 6.0  # 放行门槛：内容热度分（赞粉比×赞数量，quality.content_score 0~10）
+    auto_dissect_daily_cap: int = 6      # 每日自动拆解上限（控下载与 LLM 成本）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
 
     @property

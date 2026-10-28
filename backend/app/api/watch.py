@@ -74,6 +74,7 @@ class AccountIn(BaseModel):
     url: str = ""
     note: str = ""
     kind: str = "competitor"  # competitor | self
+    account_type: str = "persona"  # persona(立人设) | leadgen(获客)
     creator_cookie: str = ""  # 创作者中心登录态（仅 self 用；回显只给 has_cookie 不回 cookie）
 
 
@@ -152,6 +153,7 @@ def create_account(body: AccountIn) -> dict:
     with Session(engine) as s:
         acc = WatchAccount(platform=body.platform, name=body.name.strip(),
                            url=body.url.strip(), note=body.note.strip(), kind=body.kind,
+                           account_type=body.account_type if body.account_type in ("persona", "leadgen") else "persona",
                            creator_cookie=body.creator_cookie.strip() if body.kind == "self" else "")
         s.add(acc)
         s.commit()
@@ -308,7 +310,9 @@ def add_candidate(cid: int) -> dict:
         if not dup:
             acc = WatchAccount(
                 platform="douyin", name=c.name, url=c.url, kind="competitor",
-                note=f"发现自关键词「{c.keyword}」· 粉丝 {_fmt_follow(c.follower_count)}")
+                account_type=c.account_type,
+                note=(f"发现自关键词「{c.keyword}」· 粉丝 {_fmt_follow(c.follower_count)}"
+                      + (f" · 求带密度 {c.leadgen_density:.0%}" if c.leadgen_density else "")))
             s.add(acc)
             s.flush()
         c.status = "added"

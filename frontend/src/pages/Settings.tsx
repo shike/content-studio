@@ -19,7 +19,7 @@ interface AppSettings {
   watch_scan_hour: number
   watch_discover_keywords: string
   auto_dissect_enabled: boolean
-  auto_dissect_min_digg: number
+  auto_dissect_min_score: number
   auto_dissect_daily_cap: number
   chanjing_configured: boolean
 }
@@ -67,7 +67,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
   const [scanHour, setScanHour] = useState(1)
   const [discoverKw, setDiscoverKw] = useState('')
   const [autoDissect, setAutoDissect] = useState(true)
-  const [autoMinDigg, setAutoMinDigg] = useState(1000)
+  const [autoMinScore, setAutoMinScore] = useState(6)
   const [autoCap, setAutoCap] = useState(6)
   const [pingReply, setPingReply] = useState('')
   const [probe, setProbe] = useState<{
@@ -95,7 +95,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     setScanHour(c.watch_scan_hour)
     setDiscoverKw(c.watch_discover_keywords ?? '')
     setAutoDissect(c.auto_dissect_enabled)
-    setAutoMinDigg(c.auto_dissect_min_digg)
+    setAutoMinScore(c.auto_dissect_min_score)
     setAutoCap(c.auto_dissect_daily_cap)
   }, [isPlatform])
 
@@ -138,7 +138,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
     guard(async () => {
       if (!conf) return
       setBusy('保存中（运行时生效并写入 .env）…')
-      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_digg: autoMinDigg, auto_dissect_daily_cap: autoCap }
+      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
       setPingReply('')
@@ -431,15 +431,15 @@ export default function Settings({ role = 'member' }: { role?: string }) {
                   onChange={(e) => setAutoDissect(e.target.checked)}
                   className="size-4 accent-sky-500"
                 />
-                质量闸自动拆解：扫描发现的高赞新作品自动批准拆解，选题候选直接进选题库
+                质量闸自动拆解：按内容热度分（赞粉比×赞数量）自动批准同行高热度作品与雷达命中
               </label>
               <div className="flex items-center gap-2 text-sm text-slate-700">
-                门槛（点赞≥）
+                门槛（热度分≥）
                 <input
                   type="number"
-                  value={autoMinDigg}
-                  onChange={(e) => setAutoMinDigg(Number(e.target.value) || 0)}
-                  className="input max-w-28"
+                  value={autoMinScore}
+                  onChange={(e) => setAutoMinScore(Number(e.target.value) || 0)}
+                  className="input max-w-20"
                 />
                 每日上限
                 <input
@@ -472,7 +472,7 @@ export default function Settings({ role = 'member' }: { role?: string }) {
 
       {/* 保存条 */}
       <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
-        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour || autoDissect !== conf.auto_dissect_enabled || autoMinDigg !== conf.auto_dissect_min_digg || autoCap !== conf.auto_dissect_daily_cap) && (
+        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour || autoDissect !== conf.auto_dissect_enabled || autoMinScore !== conf.auto_dissect_min_score || autoCap !== conf.auto_dissect_daily_cap) && (
           <div className="flex items-center gap-3 rounded-2xl bg-slate-900 px-5 py-3 text-sm text-slate-100 shadow-xl">
             <span>
               待保存：<b className="text-sky-400">{model}</b>

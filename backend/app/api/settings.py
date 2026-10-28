@@ -38,7 +38,7 @@ def _status() -> dict:
         "watch_scan_enabled": settings.watch_scan_enabled,
         "watch_scan_hour": settings.watch_scan_hour,
         "auto_dissect_enabled": settings.auto_dissect_enabled,
-        "auto_dissect_min_digg": settings.auto_dissect_min_digg,
+        "auto_dissect_min_score": settings.auto_dissect_min_score,
         "auto_dissect_daily_cap": settings.auto_dissect_daily_cap,
         "chanjing_configured": bool(settings.chanjing_app_id and settings.chanjing_secret_key),
         "managed_keys": sorted(MANAGED),  # 可在本页修改的键（前端按需展示）
@@ -66,7 +66,7 @@ class UpdateIn(BaseModel):
     watch_scan_enabled: bool | None = None
     watch_scan_hour: int | None = None
     auto_dissect_enabled: bool | None = None
-    auto_dissect_min_digg: int | None = None
+    auto_dissect_min_score: float | None = None
     auto_dissect_daily_cap: int | None = None
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
@@ -122,8 +122,8 @@ def update_settings(body: UpdateIn) -> dict:
         values["watch_scan_hour"] = body.watch_scan_hour
     if body.auto_dissect_enabled is not None:
         values["auto_dissect_enabled"] = body.auto_dissect_enabled
-    if body.auto_dissect_min_digg is not None:
-        values["auto_dissect_min_digg"] = max(0, body.auto_dissect_min_digg)
+    if body.auto_dissect_min_score is not None:
+        values["auto_dissect_min_score"] = max(0.0, min(10.0, body.auto_dissect_min_score))
     if body.auto_dissect_daily_cap is not None:
         values["auto_dissect_daily_cap"] = max(0, body.auto_dissect_daily_cap)
     # 密钥项：空串=清除

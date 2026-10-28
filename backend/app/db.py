@@ -190,6 +190,23 @@ def _migrate(engine) -> None:
         if bmvcols and "notes" not in bmvcols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE benchmark_videos ADD COLUMN notes VARCHAR DEFAULT ''"))
+        if bmvcols and "quality_score" not in bmvcols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE benchmark_videos ADD COLUMN quality_score REAL DEFAULT 0"))
+        if bmvcols and "account_type" not in bmvcols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE benchmark_videos ADD COLUMN account_type VARCHAR NOT NULL DEFAULT 'persona'"))
+        wacols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_accounts)"))]
+        if wacols and "account_type" not in wacols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_accounts ADD COLUMN account_type VARCHAR NOT NULL DEFAULT 'persona'"))
+        wccols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_candidates)"))]
+        if wccols and "account_type" not in wccols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_candidates ADD COLUMN account_type VARCHAR NOT NULL DEFAULT 'persona'"))
+        if wccols and "leadgen_density" not in wccols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_candidates ADD COLUMN leadgen_density REAL DEFAULT 0"))
         svcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(self_videos)"))]
         if svcols and "stats" not in svcols:
             conn.execute(sqlalchemy.text("ALTER TABLE self_videos ADD COLUMN stats JSON DEFAULT '{}'"))

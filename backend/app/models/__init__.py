@@ -124,6 +124,8 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
     transcript: str = ""
     analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
     media_path: str = ""
+    quality_score: float = 0.0  # 内容热度分 0~10（赞粉比×赞数量，2026-10-28 评分口径）
+    account_type: str = Field(default="persona")  # persona(人设) | leadgen(获客)——拆解 prompt 分叉依据
     notes: str = ""  # 自动拆解闸标记等（自动批准原因/雷达来源）
     source: str = "douyin"  # douyin | local
     scan_status: str = Field(default="approved")  # pending(待定夺) | approved(已批准) | ignored(已忽略)
@@ -235,6 +237,7 @@ class WatchAccount(TenantScoped, TimestampMixin, table=True):
     kind: str = Field(default="competitor")  # competitor | self（我的账号，走自我研究链）
     creator_cookie: str = Field(default="")  # 创作者中心登录态（仅 self；有它全量抓播放/点赞，无它公开路线）
     note: str = ""
+    account_type: str = Field(default="persona")  # persona(立人设) | leadgen(获客)（2026-10-28 两类号策略）
     last_scan_at: Optional[datetime] = None
 
 
@@ -253,6 +256,8 @@ class WatchCandidate(TenantScoped, TimestampMixin, table=True):
     sample_video_id: str = ""
     sample_title: str = ""
     sample_stats: str = ""  # JSON：digg/comment/share/collect
+    account_type: str = Field(default="persona")  # persona | leadgen（评论区求带密度判定）
+    leadgen_density: float = 0.0  # 评论区求带密度 0~1（获客信号，2026-10-28）
     status: str = Field(default="open", index=True)  # open 待定夺 | added 已加入 | dismissed 已忽略
 
 

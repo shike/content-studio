@@ -56,10 +56,11 @@ async def auto_dissect_rows(rows: list, source_tag: str) -> int:
     """质量闸自动拆解（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：
     达标行自动批准并提交拆解，其余保持待定夺。
 
-    - 门槛：stats.digg ≥ settings.auto_dissect_min_digg（点赞是比播放更稳的早期热度信号）
+    - 评分口径 = content_score（赞粉比×赞数量结合，0~10），门槛 settings.auto_dissect_min_score
     - 上限：今日已自动批准数 < settings.auto_dissect_daily_cap（控下载与 LLM 成本，
       计数口径=notes 带自动批准标记且 created_at 为今天的行）
-    - 同批按点赞降序取优；未达标/超限行原样保留待定夺（人不看也不碍事，想捞随时可批）。
+    - 同批按分数降序取优；未达标/超限行原样保留待定夺（人不看也不碍事，想捞随时可批），
+      分数落行（quality_score）供选题库排序。
     返回本次自动批准条数。"""
     import json as _json
 
@@ -79,26 +80,30 @@ async def auto_dissect_rows(rows: list, source_tag: str) -> int:
     if budget <= 0:
         return 0
 
-    def _digg(r):
-        try:
-            return int((_json.loads(r.stats) if isinstance(r.stats, str) else (r.stats or {})).get("digg") or 0)
-        except Exception:  # noqa: BLE001 stats 缺损按 0 分
-            return 0
+    from ..quality import content_score
 
-    ranked = sorted(rows, key=_digg, reverse=True)
+    def _score(r):
+        try:
+            st = _json.loads(r.stats) if isinstance(r.stats, str) else (r.stats or {})
+        except Exception:  # noqa: BLE001 stats 缺损按 0 分
+            st = {}
+        return content_score(int(st.get("digg") or 0), int(st.get("followers") or 0))
+
+    ranked = sorted(rows, key=_score, reverse=True)
     approved = 0
     for r in ranked:
         if approved >= budget:
             break
-        digg = _digg(r)
-        if digg < settings.auto_dissect_min_digg:
+        score = _score(r)
+        if score < settings.auto_dissect_min_score:
             continue
         with Session(engine) as s:
             row = s.get(BenchmarkVideo, r.id)
             if row is None or row.scan_status != "pending":
                 continue  # 已被人工处理/重复触发
             row.scan_status = "approved"
-            row.notes = f"自动批准（{source_tag}，赞 {digg}）"
+            row.quality_score = score
+            row.notes = f"自动批准（{source_tag}，热度分 {score}：赞粉比×赞数量）"
             s.add(row)
             s.commit()
         await runner.submit("benchmark_analyze", {"benchmark_id": r.id},
@@ -215,6 +220,8 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         from ..topics.service import is_similar_title, recent_topic_titles
 
         persona_text = brand_of(tenant_id)["persona"]
+        b_row = s.get(BenchmarkVideo, benchmark_id)
+        account_type = (b_row.account_type if b_row is not None else "") or "persona"
 
     if not media_path:
         if source != "douyin" or not url:
@@ -289,9 +296,10 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     if stats:
         # R3.4b 数据归因：把赞/评/转带给 LLM，分析"为什么这条（没）爆"
         llm_input += f"\n\n互动数据（做数据归因用）：{json.dumps(stats, ensure_ascii=False)}"
+    prompt_name = "benchmark_analyze_leadgen" if account_type == "leadgen" else "benchmark_analyze"
     analysis = await gateway.complete_json(
         [{"role": "system", "content": render(
-            "benchmark_analyze", PERSONA=persona_text,
+            prompt_name, PERSONA=persona_text,
             RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(14))
             or "（近 14 天无出题记录）")},
          {"role": "user", "content": llm_input}],
@@ -323,6 +331,8 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                     "summary": analysis.get("summary", ""),
                     "replicable_points": analysis.get("replicable_points") or [],
                     "hook": analysis.get("hook") or {},
+                    "account_type": account_type,
+                    "benchmark_quality_score": b_row.quality_score if b_row is not None else 0,
                 },
             )
             if (topic.score or 0) < 7.0:

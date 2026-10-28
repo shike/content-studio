@@ -69,6 +69,7 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
   const [useStyle, setUseStyle] = useState(true)
   const [templateId, setTemplateId] = useState(0) // 0=不使用结构模板
   const [selAngles, setSelAngles] = useState<string[]>([]) // 指定打法（空=自动挑 3 种）
+  const [accountType, setAccountType] = useState<'persona' | 'leadgen'>('persona') // 投放账号类型（两类号策略）
   const [anglesOpen, setAnglesOpen] = useState(false)
   const [finalizedView, setFinalizedView] = useState<{ id: number; titles: { platform: string; title: string }[]; teleLen: number } | null>(null)
   const [genProg, setGenProg] = useState<Record<number, { p: number; m: string }>>({})
@@ -224,6 +225,7 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
           topic_id: tid, length, use_style: useStyle,
           ...(selAngles.length >= 2 ? { angles: selAngles } : {}),
           ...(templateId > 0 ? { template_id: templateId } : {}),
+          account_type: accountType,
         }),
       })
       await waitJob(r.job_id, (j) => {
@@ -538,6 +540,13 @@ export default function Scripts({ onNavigate }: { onNavigate?: (k: SectionKey) =
               <option key={t.id} value={t.id}>{t.name}（{t.structure.length} 步）</option>
             ))}
           </select>
+          <button
+            onClick={() => setAccountType((v) => (v === 'persona' ? 'leadgen' : 'persona'))}
+            title="两类号策略：人设号=高质量内容（禁引导话术）；获客号=简单粗暴获客（要求获客引导）"
+            className={`badge shrink-0 h-9 cursor-pointer px-3 ${accountType === 'leadgen' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-700'}`}
+          >
+            {accountType === 'leadgen' ? '投放：获客号' : '投放：人设号'}
+          </button>
           <button
             onClick={() => setUseStyle((v) => !v)}
             title="开启后生成会注入「我的风格画像」，使脚本贴近本人说话方式（画像在「我的风格」页）"

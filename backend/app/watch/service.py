@@ -349,6 +349,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
                     title=str(e.get("title") or "")[:80],
                     stats=stats,
                     source="douyin",
+                    account_type=acc.account_type,  # 两类号策略：拆解 prompt 按账号类型分叉
                     scan_status="pending",  # 只发现不拆解，人工定夺后入队
                 )
                 s.add(b)
@@ -632,7 +633,60 @@ def _fmt_follow(n: int) -> str:
 
 
 register_concurrent("watch_discover")
+# ---------- 获客信号：评论区「求带密度」（2026-10-28 两类号策略） ----------
+# 高质量获客号的硬信号不在粉丝数，在评论区：一堆"怎么报名/求带/私信怎么弄"。
+# 视频页的评论 XHR（comment/list）免登录可拦，取首屏评论文本算求带占比。
+
+_LEADGEN_KEYWORDS = ("求带", "报名", "怎么报名", "怎么学", "哪里学", "求教程", "私信",
+                     "扣1", "扣个1", "怎么做", "怎么弄", "带带我", "想学", "请教", "怎么联系")
+LEADGEN_DENSITY_MIN = 0.08  # 求带密度 ≥8% 判获客型
+_LEADGEN_PROBE_CAP = 3      # 每轮发现最多探测 3 条样本（控时长 ~1 分钟）
+
+
+def _probe_leadgen_signal(video_id: str) -> dict:
+    """打开视频页拦评论 XHR，返回 {comments, leadgen, density}。失败抛 RuntimeError。"""
+    from playwright.sync_api import sync_playwright
+
+    from .browser import launch, ua
+
+    comments: list[str] = []
+    try:
+        with sync_playwright() as p:
+            browser = launch(p)
+            try:
+                ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                          viewport={"width": 1280, "height": 900})
+                page = ctx.new_page()
+
+                def on_response(resp):
+                    try:
+                        if "aweme/v1/web/comment/list/" in resp.url and len(comments) < 60:
+                            d = resp.json()
+                            for c in (d.get("comments") or [])[:40]:
+                                t = (c.get("text") or "").strip()
+                                if t:
+                                    comments.append(t)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                page.on("response", on_response)
+                page.goto(f"https://www.douyin.com/video/{video_id}",
+                          timeout=45000, wait_until="domcontentloaded")
+                page.wait_for_timeout(6000)
+                ctx.close()
+            finally:
+                browser.close()
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"评论页打开失败: {str(e)[:80]}")
+    if not comments:
+        raise RuntimeError("未拦到评论（新视频评论少或接口未触发）")
+    leadgen = sum(1 for t in comments if any(k in t for k in _LEADGEN_KEYWORDS))
+    density = round(leadgen / len(comments), 2)
+    return {"comments": len(comments), "leadgen": leadgen, "density": density}
+
+
 @register_executor("watch_discover_daily")
+
 async def watch_discover_daily(ctx, payload: dict) -> dict:
     """每日发现清单外同行：关键词按天轮换（省 DDG 配额），产出进候选表待人工定夺。"""
     day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
@@ -714,6 +768,20 @@ async def watch_discover(ctx, payload: dict) -> dict:
     # ③ 粉丝数排序取 Top N → 候选表（已在清单自动标 added；已忽略的尊重「不做」不复活）
     ranked = sorted(found.values(),
                     key=lambda d: d["follower_count"], reverse=True)[:_DISCOVER_TOP_N]
+    # 获客信号：点赞 Top3 探评论区求带密度——高密度=高质量获客号（两类号策略 2026-10-28）
+    for d in sorted(ranked, key=lambda x: x["digg"], reverse=True)[:_LEADGEN_PROBE_CAP]:
+        try:
+            sig = await asyncio.to_thread(_probe_leadgen_signal, d["video_id"])
+            d["leadgen_density"] = sig["density"]
+            if sig["density"] >= LEADGEN_DENSITY_MIN:
+                d["account_type"] = "leadgen"
+                notes.append(f"{d['name']}：求带密度 {sig['density']:.0%}"
+                             f"（{sig['leadgen']}/{sig['comments']} 条）——判获客型")
+        except Exception as e:  # noqa: BLE001 探测失败不挡发现
+            notes.append(f"{d['name']}：获客信号探测跳过（{str(e)[:50]}）")
+    ranked.sort(key=lambda d: (d.get("account_type") == "leadgen",
+                               d.get("leadgen_density", 0),
+                               d["follower_count"]), reverse=True)
     now = datetime.now(timezone.utc)
     new_cnt = added_cnt = 0
     with Session(engine) as s:
@@ -748,6 +816,8 @@ async def watch_discover(ctx, payload: dict) -> dict:
                 open_row.signature = d["signature"]
                 open_row.sample_video_id, open_row.sample_title = d["video_id"], d["title"]
                 open_row.sample_stats = stats_json
+                open_row.account_type = d.get("account_type", "persona")
+                open_row.leadgen_density = d.get("leadgen_density", 0)
                 open_row.updated_at = now
                 s.add(open_row)
             else:
@@ -757,7 +827,9 @@ async def watch_discover(ctx, payload: dict) -> dict:
                     url=f"https://www.iesdouyin.com/share/user/{d['sec_uid']}",
                     signature=d["signature"], follower_count=d["follower_count"],
                     sample_video_id=d["video_id"], sample_title=d["title"],
-                    sample_stats=stats_json))
+                    sample_stats=stats_json,
+                    account_type=d.get("account_type", "persona"),
+                    leadgen_density=d.get("leadgen_density", 0)))
             new_cnt += 1
         s.commit()
 

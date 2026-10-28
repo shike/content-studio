@@ -114,10 +114,16 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             for st in (template.structure or []) if st.get("step"))
     else:
         structure_text = "（未选用结构模板：按上方「口播结构」硬规则组织——判断开场、单判断推进、可转述判断收尾）"
+    # 两类号策略（2026-10-28）：账号模式决定内容风格——人设号禁引导，获客号要求获客引导
+    account_type = str(payload.get("account_type")
+                       or (topic.evidence or {}).get("account_type") if topic is not None else ""
+                       ) or "persona"
+    account_mode = ("——本条面向【获客号】：结尾必须切获客引导" if account_type == "leadgen" else "")
     prompt = render("script_generate", LENGTH=length_spec,
                     MY_STYLE=build_my_style(use_style),
                     ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
-                    PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"])
+                    PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
+                    ACCOUNT_MODE=account_mode)
     versions: list[dict] = []
     for attempt in range(2):  # 不足 3 版时补一轮
         ctx.set_progress(10 + attempt * 20, f"生成 3 版脚本（第 {attempt + 1} 次）")
@@ -137,7 +143,11 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     # 新契约（PRD R2.3）：生成后自动批判打磨一轮
     ctx.set_progress(60, "自动批判打磨一轮（约 3~8 分钟，慢是正常的）")
     versions = await _polish_core(versions, use_style=bool(payload.get("use_style", True)),
-                                  length=length)
+                                  length=length,
+                                  cta_rule=("保留并强化获客引导（这是获客号内容，引导是核心交付；"
+                                            "但不得承诺收益/包就业等合规红线）")
+                                  if account_type == "leadgen"
+                                  else "全删，这是他的红线")
 
     with Session(engine) as s:
         script = s.get(Script, script_id)
@@ -156,13 +166,13 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
 
 
 async def _polish_core(versions: list[dict], use_style: bool = True,
-                       length: str = "short") -> list[dict]:
+                       length: str = "short", cta_rule: str = "全删，这是他的红线") -> list[dict]:
     """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。"""
     length_spec = ("600~900 字（2~3 分钟长版）" if length == "long"
                    else "240~320 字（50~70 秒黄金档）")
     data = await gateway.complete_json(
         [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style),
-                                              LENGTH=length_spec)},
+                                              LENGTH=length_spec, CTA_RULE=cta_rule)},
          {"role": "user", "content": json.dumps(versions, ensure_ascii=False)}],
         purpose="script_polish", max_tokens=20000)  # 同上，v5 动刀清单变长
     polished = _normalize_versions(data.get("versions") or [])

@@ -34,7 +34,7 @@ MANAGED: dict[str, str] = {
     "watch_scan_hour": "int",
     "watch_discover_keywords": "str",
     "auto_dissect_enabled": "bool",
-    "auto_dissect_min_digg": "int",
+    "auto_dissect_min_score": "float",
     "auto_dissect_daily_cap": "int",
     "chanjing_app_id": "str",
     "chanjing_secret_key": "secret",
@@ -48,6 +48,8 @@ def _coerce(kind: str, raw: str):
         return bool(v)
     if kind == "int":
         return int(v)
+    if kind == "float":
+        return float(v)
     return str(v)
 
 
