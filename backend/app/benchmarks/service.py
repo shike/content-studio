@@ -296,10 +296,11 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     if stats:
         # R3.4b 数据归因：把赞/评/转带给 LLM，分析"为什么这条（没）爆"
         llm_input += f"\n\n互动数据（做数据归因用）：{json.dumps(stats, ensure_ascii=False)}"
-    prompt_name = "benchmark_analyze_leadgen" if account_type == "leadgen" else "benchmark_analyze"
+    # 双模式判定式拆解（2026-10-28 两类号策略修正）：类型是内容本身的属性，
+    # 拆解时由 LLM 判定（content_type），账号类型只作先验记录——判定结果回写样本行
     analysis = await gateway.complete_json(
         [{"role": "system", "content": render(
-            prompt_name, PERSONA=persona_text,
+            "benchmark_analyze", PERSONA=persona_text,
             RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(14))
             or "（近 14 天无出题记录）")},
          {"role": "user", "content": llm_input}],
@@ -308,6 +309,9 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     with Session(engine) as s:
         b = s.get(BenchmarkVideo, benchmark_id)
         b.analysis = analysis
+        judged = str(analysis.get("content_type") or "").strip()
+        if judged in ("persona", "leadgen") and judged != b.account_type:
+            b.account_type = judged  # LLM 判定覆盖先验（账号类型只是初始猜测）
         if not b.title and analysis.get("summary"):
             b.title = analysis["summary"][:80]
         s.add(b)
@@ -331,7 +335,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                     "summary": analysis.get("summary", ""),
                     "replicable_points": analysis.get("replicable_points") or [],
                     "hook": analysis.get("hook") or {},
-                    "account_type": account_type,
+                    "account_type": analysis.get("content_type") or account_type,
                     "benchmark_quality_score": b_row.quality_score if b_row is not None else 0,
                 },
             )
