@@ -259,6 +259,7 @@ def scan_history(limit: int = 8) -> dict:
 # ---------- 关键词发现对标账号 ----------
 
 class DiscoverIn(BaseModel):
+    rank_by: str = "followers"
     keyword: str
     direction: str = ""
 

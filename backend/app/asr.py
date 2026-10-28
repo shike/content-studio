@@ -48,12 +48,21 @@ def _is_vocab_overflow(exc: BaseException) -> bool:
     return "Invalid token ID" in str(exc)
 
 
+def _beam() -> int:
+    """转写搜索宽度：2（默认）比 faster-whisper 默认 5 快约 2 倍，拆解转写给 LLM 读
+    质量损失可忽略（2026-10-28 排干加速）；要质量可设 CS_ASR_BEAM=5。"""
+    import os
+
+    return max(1, int(os.environ.get("CS_ASR_BEAM", "2")))
+
+
 def _segments_with_fallback(path: str, vocab: str = "") -> list:
     """转写并物化 segments，词表越界时逐级降级：
     ① 去领域 prompt + 断上文条件重试 → ② small 模型兜底（保证出结果）。"""
     try:
         segments, _info = _get_model().transcribe(
-            path, language="zh", vad_filter=True, initial_prompt=initial_prompt_for(vocab)
+            path, language="zh", vad_filter=True, initial_prompt=initial_prompt_for(vocab),
+            beam_size=_beam(),
         )
         return list(segments)
     except (RuntimeError, ValueError, IndexError) as exc:
@@ -62,14 +71,14 @@ def _segments_with_fallback(path: str, vocab: str = "") -> list:
     try:
         segments, _info = _get_model().transcribe(
             path, language="zh", vad_filter=True,
-            initial_prompt=None, condition_on_previous_text=False,
+            initial_prompt=None, condition_on_previous_text=False, beam_size=_beam(),
         )
         return list(segments)
     except (RuntimeError, ValueError, IndexError) as exc:
         if not _is_vocab_overflow(exc):
             raise
     segments, _info = _get_small_model().transcribe(
-        path, language="zh", vad_filter=True, condition_on_previous_text=False
+        path, language="zh", vad_filter=True, condition_on_previous_text=False, beam_size=_beam()
     )
     return list(segments)
 
