@@ -353,6 +353,17 @@ export default function Topics() {
                   <span className={`badge ${BADGE_SOURCE[cur.source_type] || BADGE_SOURCE.manual}`}>
                     {SOURCE_LABELS[cur.source_type] || cur.source_type}
                   </span>
+                  {cur.evidence?.account_type === 'leadgen' && (
+                    <span className="badge bg-amber-100 text-amber-800">获客打法</span>
+                  )}
+                  {cur.evidence?.account_type === 'persona' && cur.evidence?.benchmark_quality_score != null && (
+                    <span className="badge bg-sky-50 text-sky-700">人设</span>
+                  )}
+                  {cur.evidence?.benchmark_quality_score != null && (cur.evidence.benchmark_quality_score as number) > 0 && (
+                    <span className={`badge tabular-nums ${(cur.evidence.benchmark_quality_score as number) >= 6 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}>
+                      热度 {(cur.evidence.benchmark_quality_score as number).toFixed(1)}
+                    </span>
+                  )}
                   <span className={`badge ${BADGE_AUDIENCE_LABELS[cur.audience] || 'bg-slate-100 text-slate-500'}`}>
                     {AUDIENCE_LABELS[cur.audience] || cur.audience}
                   </span>
@@ -550,6 +561,18 @@ export default function Topics() {
                     <span className={`badge hidden shrink-0 sm:inline-flex ${BADGE_SOURCE[t.source_type] || BADGE_SOURCE.manual}`}>
                       {SOURCE_LABELS[t.source_type] || t.source_type}
                     </span>
+                    {t.evidence?.account_type === 'leadgen' && (
+                      <span className="badge hidden shrink-0 bg-amber-100 text-amber-800 sm:inline-flex">获客打法</span>
+                    )}
+                    {t.evidence?.account_type === 'persona' && t.evidence?.benchmark_quality_score != null && (
+                      <span className="badge hidden shrink-0 bg-sky-50 text-sky-700 sm:inline-flex">人设</span>
+                    )}
+                    {t.evidence?.benchmark_quality_score != null && (t.evidence.benchmark_quality_score as number) > 0 && (
+                      <span className={`badge hidden shrink-0 tabular-nums sm:inline-flex ${(t.evidence.benchmark_quality_score as number) >= 6 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}
+                            title="拆解源的内容热度分（赞粉比×赞数量，0~10）">
+                        热度 {(t.evidence.benchmark_quality_score as number).toFixed(1)}
+                      </span>
+                    )}
                     <span className={`badge shrink-0 ${BADGE_STATUS[t.status] || BADGE_STATUS.draft}`}>
                       {STATUS_LABELS[t.status] || t.status}
                     </span>

@@ -27,6 +27,9 @@ interface Benchmark {
   created_at?: string
   hot?: boolean
   digg?: number | null
+  quality_score?: number
+  account_type?: string
+  notes?: string
 }
 
 const analyzed = (b: Benchmark) =>
@@ -301,6 +304,18 @@ export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey
                     </span>
                     {b.hot && (
                       <span className="badge shrink-0 bg-orange-100 text-orange-700" title="点赞 ≥ 作者中位数×3">🔥 爆款</span>
+                    )}
+                    {b.account_type === 'leadgen' && (
+                      <span className="badge shrink-0 bg-amber-100 text-amber-800">获客打法</span>
+                    )}
+                    {b.account_type === 'persona' && (
+                      <span className="badge shrink-0 bg-sky-50 text-sky-700">人设</span>
+                    )}
+                    {(b.quality_score ?? 0) > 0 && (
+                      <span className={`badge shrink-0 ${(b.quality_score ?? 0) >= 6 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}
+                            title="内容热度分=赞粉比×赞数量（0~10，≥6 自动拆解）">
+                        热度 {b.quality_score}
+                      </span>
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-zinc-900">

@@ -51,6 +51,8 @@ interface WatchCandidate {
   status: string
   created_at: string
   stats: { digg?: number; comment?: number; share?: number; collect?: number }
+  account_type?: string
+  leadgen_density?: number
 }
 
 const fmtFollow = (n: number) =>
@@ -81,7 +83,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [editId, setEditId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({ name: '', url: '', note: '', creator_cookie: '' })
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ platform: 'douyin', name: '', url: '', note: '', kind: 'competitor' })
+  const [form, setForm] = useState({ platform: 'douyin', name: '', url: '', note: '', kind: 'competitor', account_type: 'persona' })
   const [resolveHint, setResolveHint] = useState('')
   const [addMode, setAddMode] = useState<'link' | 'search'>('link')
   const [dform, setDform] = useState({ keyword: '', direction: '' })
@@ -218,7 +220,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         method: 'POST',
         body: JSON.stringify({ ...form, name: form.name.trim(), url: form.url.trim() }),
       })
-      setForm({ platform: 'douyin', name: '', url: '', note: '', kind: 'competitor' })
+      setForm({ platform: 'douyin', name: '', url: '', note: '', kind: 'competitor', account_type: 'persona' })
       setResolveHint('')
       setShowAdd(false)
       await reload()
@@ -386,6 +388,10 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                   placeholder="备注（账号定位，可留空）"
                   className="input min-w-64 flex-1"
                 />
+                <div className="segment">
+                  <button onClick={() => setForm({ ...form, account_type: 'persona' })} className={`segment-item ${(form.account_type || 'persona') === 'persona' ? 'segment-item-active' : ''}`}>人设号</button>
+                  <button onClick={() => setForm({ ...form, account_type: 'leadgen' })} className={`segment-item ${form.account_type === 'leadgen' ? 'segment-item-active' : ''}`}>获客号</button>
+                </div>
                 <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
                   <input
                     type="checkbox"
@@ -539,9 +545,11 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                             </button>
                           </span>
                         )}
-                        <span className="hidden w-16 shrink-0 text-right text-[11px] text-slate-400 md:inline">
-                          {relTime(c.created_at)}
-                        </span>
+                        {c.account_type === 'leadgen' && (
+                          <span className="badge shrink-0 bg-amber-100 text-amber-800" title="评论区求带密度≥8% 判获客型">
+                            获客 · 求带 {Math.round((c.leadgen_density ?? 0) * 100)}%
+                          </span>
+                        )}
                       </div>
                       {expC && (
                         <div className="grid gap-5 border-t border-sky-100 px-5 py-4 text-[13px] md:grid-cols-2">
