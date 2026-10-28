@@ -157,11 +157,12 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
 
             page.on("response", on_response)
             page.goto(target, timeout=45000, wait_until="domcontentloaded")
-            # 轮询等 detail（固定 sleep 会在慢加载时误报"页面未吐出"）
-            for _ in range(8):
-                if detail:
-                    break
-                page.wait_for_timeout(1500)
+            # 轮询等 detail：住宅隧道实测 detail XHR 在 20~25s 才到（2026-10-28 生产
+            # 事故复盘：固定 12s 窗口把慢到达的正常页判成"数据未返回"，128 条任务
+            # 连锁失败——这不是风控，是耐心不够）。60s 上限封顶，到点放行兜底。
+            deadline = time.time() + 60
+            while not detail and time.time() < deadline:
+                page.wait_for_timeout(2000)
             # 页面可能不发 detail XHR（缓存），兜底读 _ROUTER_DATA
             title_text = ""
             html = ""
@@ -186,7 +187,7 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
         # 带"验证码"字样，html 关键词搜出一律误判 captcha 喂熔断——只有标题/专用 DOM
         # 命中才算真验证码；有 detail 无直链=直链被限，不说成验证码）
         if detail:
-            return None, "播放直链被当前出口限流（匿名高频状态），稍后自动重试"
+            return None, "详情数据已返回但未含播放直链（内容形态特殊或数据不完整），稍后自动重试"
         if re.search(r"安全验证|验证码|captcha", title_text, re.I):
             return None, "页面吐出验证码（真验证码，低频等待可解）"
         if re.search(r"视频不见了吗|视频不存在|已被删除|审核中|暂无内容|内容暂时无法", html):
