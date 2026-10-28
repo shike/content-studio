@@ -65,7 +65,7 @@ function isNew(iso?: string) {
   return !Number.isNaN(ms) && ms >= 0 && ms < 24 * 3600 * 1000
 }
 
-export default function Topics() {
+export default function Topics({ accountType }: { accountType?: 'persona' | 'leadgen' } = {}) {
   const [all, setAll] = useState<Topic[]>([])
   const [view, setView] = useState<'queue' | 'table'>('table')
   const [booted, setBooted] = useState(false)
@@ -105,14 +105,19 @@ export default function Topics() {
     if (source) params.set('source', source)
     if (audience) params.set('audience', audience)
     const data = await api<{ items: Topic[]; total: number; counts?: Record<string, number> }>(`/topics?${params}`)
-    setAll(data.items)
-    setTotal(data.total)
+    const scoped = accountType
+      ? data.items.filter((t) => (t.evidence?.account_type ?? 'persona') === accountType)
+      : data.items
+    setAll(scoped)
+    setTotal(accountType ? scoped.length : data.total)
     if (data.counts) setCounts(data.counts)
   }, [offset, status, source, audience, order])
 
   const loadDrafts = useCallback(async () => {
     const d = await api<{ items: Topic[] }>('/topics?status=draft&limit=200')
-    setDrafts(d.items)
+    setDrafts(accountType
+      ? d.items.filter((t) => (t.evidence?.account_type ?? 'persona') === accountType)
+      : d.items)
     return d.items
   }, [])
 

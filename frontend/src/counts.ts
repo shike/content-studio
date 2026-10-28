@@ -60,6 +60,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
  *  过程性数字（生成中/排队）仍不上菜单，需要时去任务页看。 */
 export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
   return {
+    today: s.draftTopics,                           // 今日工作台徽章 = 待审选题（每日动线口径）
     topics: s.draftTopics,                          // 待审选题
     scripts: s.pendingScripts,                      // 待定稿脚本
     articles: s.pendingArticles,                    // 待写长文

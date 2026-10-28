@@ -1,40 +1,43 @@
 import { useEffect, useState } from 'react'
 import {
   Activity,
-  FileText, Flame,
   Fingerprint,
   LayoutDashboard,
-  Lightbulb,
-  PenLine,
+  Magnet,
   Radar,
-  Scissors,
   Send,
   Settings,
-  UserRound,
-  Wand2,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import Articles from './pages/Articles'
-import Benchmarks from './pages/Benchmarks'
-import RadarPage from './pages/Radar'
-import Dashboard from './pages/Dashboard'
-import Publishing from './pages/Publishing'
-import PosterPrompts from './pages/PosterPrompts'
-import Scripts from './pages/Scripts'
-import SettingsPage from './pages/Settings'
-import Topics from './pages/Topics'
-import Watch from './pages/Watch'
-import Style from './pages/Style'
-import Digital from './pages/Digital'
+import Today from './pages/Today'
+import Persona from './pages/Persona'
+import Leadgen from './pages/Leadgen'
+import Intel from './pages/Intel'
+import PublishingHub from './pages/PublishingHub'
 import Tasks from './pages/Tasks'
+import SettingsPage from './pages/Settings'
 import { fetchMenuStats, menuBadges } from './counts'
 import Login from './pages/Login'
 import ForceChangePassword from './pages/ForceChangePassword'
 
+/**
+ * 新页面结构（2026-10-28 用户确认的彻底重构）：
+ * 一级入口 6 个——今日工作台 / 人设号产线 / 获客号产线 / 情报中心 / 发布台 / 任务（设置沉底）。
+ * 旧页面（选题库/脚本工场/数字人/公众号/同行监测/拆解库/话题雷达/我的风格/海报/工作台）
+ * 全部作为容器内容并入：产线页按账号类型过滤，情报中心四流合一，海报并入发布台。
+ * 旧 SectionKey 保留在类型里供内嵌页面的 onNavigate 使用，经 NAVMAP 路由到新分区。
+ */
 export type SectionKey =
+  | 'today' | 'persona' | 'leadgen' | 'intel' | 'publishing' | 'tasks' | 'settings'
   | 'dashboard' | 'topics' | 'scripts' | 'watch' | 'style' | 'benchmarks'
-  | 'digital' | 'articles' | 'publishing' | 'posters' | 'tasks' | 'settings'
-  | 'radar'
+  | 'digital' | 'articles' | 'posters' | 'radar'
+
+/** 旧分区键 → 新分区（内嵌页面 onNavigate 的兼容路由）。 */
+const NAVMAP: Record<string, SectionKey> = {
+  dashboard: 'today', topics: 'today', scripts: 'persona', digital: 'persona',
+  articles: 'persona', posters: 'publishing', watch: 'intel', style: 'persona',
+  benchmarks: 'intel', radar: 'intel',
+}
 
 interface SectionDef {
   key: SectionKey
@@ -42,39 +45,29 @@ interface SectionDef {
   icon: LucideIcon
 }
 
-/** 菜单三组两段：总览 → 流水线（生产顺序）→ 情报（喂选题的输入端）；设置独立沉底。 */
-const OVERVIEW: SectionDef = { key: 'dashboard', label: '工作台', icon: LayoutDashboard }
-const PIPELINE: SectionDef[] = [
-  { key: 'topics', label: '选题库', icon: Lightbulb },
-  { key: 'scripts', label: '脚本工场', icon: PenLine },
-  { key: 'digital', label: '口播数字人', icon: UserRound },
-  { key: 'articles', label: '公众号', icon: FileText },
-  { key: 'publishing', label: '发布台', icon: Send },
-  { key: 'posters', label: '海报提示词', icon: Wand2 },
+const TODAY: SectionDef = { key: 'today', label: '今日工作台', icon: LayoutDashboard }
+const PRODUC: SectionDef[] = [
+  { key: 'persona', label: '人设号', icon: Fingerprint },
+  { key: 'leadgen', label: '获客号', icon: Magnet },
 ]
-const INTEL: SectionDef[] = [
-  { key: 'watch', label: '同行监测', icon: Radar },
-  { key: 'style', label: '我的风格', icon: Fingerprint },
-  { key: 'benchmarks', label: '拆解库', icon: Scissors },
-  { key: 'radar', label: '话题雷达', icon: Flame },
+const AUTO: SectionDef[] = [
+  { key: 'intel', label: '情报中心', icon: Radar },
+  { key: 'publishing', label: '发布台', icon: Send },
 ]
 const SYSTEM: SectionDef[] = [
   { key: 'tasks', label: '任务', icon: Activity },
   { key: 'settings', label: '设置', icon: Settings },
 ]
 
-/** 挂数字徽章的页面：流水线 + 情报 + 任务；0 值弱显。工作台/设置除外。 */
-const BADGED_KEYS = new Set<string>(
-  [...PIPELINE, ...INTEL, { key: 'tasks' }].map((s) => s.key))
+const BADGED_KEYS = new Set<string>(['today', 'tasks'])
 
 export default function App() {
-  const [active, setActive] = useState<SectionKey>('dashboard')
+  const [active, setActive] = useState<SectionKey>('today')
   const [badges, setBadges] = useState<Partial<Record<string, number>>>({})
   const [authed, setAuthed] = useState<boolean | null>(null)  // null=检查中
   const [me, setMe] = useState<MeInfo | null>(null)
 
   const probe = () => {
-    // 启动/登录后探测：未登录则显示登录页；登录态下取角色决定管理入口
     fetch('/api/auth/me').then((r) => {
       if (r.status === 401) { setAuthed(false); setMe(null); return }
       return r.json().then((d) => {
@@ -95,7 +88,7 @@ export default function App() {
     document.title = '跃迁内容工作室'
   }, [])
 
-  // 菜单待办计数：与工作台卡片同源（counts.ts），60s 静默刷新
+  // 菜单待办计数：与今日工作台卡片同源（counts.ts），60s 静默刷新
   useEffect(() => {
     let alive = true
     const load = () =>
@@ -153,20 +146,21 @@ export default function App() {
     </div>
   )
 
+  const navTo = (k: string) => setActive(NAVMAP[k] ?? 'today')
+
   // 未登录：只渲染登录页，不显示侧边栏和任何功能
   if (authed === false) {
     return <Login onLogin={() => probe()} />
   }
 
-  // 首登强制改密（R11.2）：一次性密码登录后全屏拦截，改完才放行
+  // 首登强制改密（R11.1）：一次性密码登录后全屏拦截，改完才放行
   if (authed === true && me?.must_change_password) {
     return <ForceChangePassword username={me.display_name} onDone={() => probe()} />
   }
 
-
   return (
     <div className="flex h-full">
-      {/* 侧边栏（D2 墨绿） */}
+      {/* 侧边栏（moxt 墨绿） */}
       <aside className="flex w-60 shrink-0 flex-col bg-[#0a2f24]">
         <div className="flex items-center gap-3 px-5 py-6">
           <img src="/icon.svg" alt="" className="size-9 shrink-0 rounded-xl" />
@@ -174,21 +168,21 @@ export default function App() {
             <div className="truncate text-sm font-semibold tracking-tight text-[#f0e9d5]">
               跃迁内容工作室
             </div>
-            <div className="text-[10px] text-[#9dbba9]/70">内容生产流水线</div>
+            <div className="text-[10px] text-[#9dbba9]/70">单管理员 · 两类号</div>
           </div>
         </div>
 
         <nav className="nav-scroll flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
-          {renderItem(OVERVIEW)}
-          {renderGroupLabel('流水线')}
-          {PIPELINE.map(renderItem)}
-          {renderGroupLabel('情报')}
-          {INTEL.map(renderItem)}
+          {renderGroupLabel('每日动线')}
+          {renderItem(TODAY)}
+          {renderGroupLabel('内容产线')}
+          {PRODUC.map(renderItem)}
+          {renderGroupLabel('情报 · 自动')}
+          {AUTO.map(renderItem)}
         </nav>
 
         <div className="border-t border-[rgba(240,233,213,0.1)] px-3 py-3">
-          {me?.role === 'platform_admin' && renderItem(SYSTEM[1])}
-          {SYSTEM.slice(0, 1).map(renderItem)}
+          {SYSTEM.map(renderItem)}
           {me && <UserBlock me={me} onLogout={() => { setMe(null); setAuthed(false) }} />}
         </div>
       </aside>
@@ -196,17 +190,11 @@ export default function App() {
       {/* 主区域 */}
       <main className="h-full flex-1 overflow-y-auto">
         <div key={active} className="fade-in mx-auto max-w-7xl px-8 py-8">
-          {active === 'dashboard' && <Dashboard onNavigate={setActive} />}
-          {active === 'topics' && <Topics />}
-          {active === 'scripts' && <Scripts onNavigate={setActive} />}
-          {active === 'watch' && <Watch onNavigate={setActive} />}
-          {active === 'style' && <Style onNavigate={setActive} />}
-          {active === 'articles' && <Articles />}
-          {active === 'benchmarks' && <Benchmarks onNavigate={setActive} />}
-          {active === 'radar' && <RadarPage />}
-          {active === 'digital' && <Digital role={me?.role ?? 'member'} />}
-          {active === 'publishing' && <Publishing />}
-          {active === 'posters' && <PosterPrompts />}
+          {active === 'today' && <Today onNavigate={navTo} />}
+          {active === 'persona' && <Persona onNavigate={navTo} />}
+          {active === 'leadgen' && <Leadgen onNavigate={navTo} />}
+          {active === 'intel' && <Intel onNavigate={navTo} />}
+          {active === 'publishing' && <PublishingHub />}
           {active === 'tasks' && <Tasks />}
           {active === 'settings' && <SettingsPage role={me?.role ?? 'member'} />}
         </div>
@@ -216,7 +204,7 @@ export default function App() {
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  platform_admin: '平台管理员',
+  platform_admin: '管理员',
   member: '成员',
 }
 
@@ -265,7 +253,6 @@ function UserBlock({ me, onLogout }: {
       setBusy(false)
     }
   }
-
 
   return (
     <div className="mt-2 rounded-xl border border-[rgba(232,201,127,0.14)] bg-[rgba(240,233,213,0.06)] p-2.5">
