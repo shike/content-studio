@@ -163,8 +163,10 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
                     break
                 page.wait_for_timeout(1500)
             # 页面可能不发 detail XHR（缓存），兜底读 _ROUTER_DATA
+            title_text = ""
             html = ""
             if not detail:
+                title_text = page.title() or ""
                 html = page.content()
                 m = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.+?\})\s*</script>",
                               html, re.S)
@@ -180,17 +182,16 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
 
     video_url = _find_video_url(detail)
     if not video_url:
-        # 失败原因要分清（2026-10-27 教训：毒视频/真验证码/慢加载全被标成"验证码"
-        # 喂进熔断，2 次就把整队下载打成"风控窗"）——按页面实际说了什么归类
-        if not html:
-            pass  # detail 有但无直链：走最下面的通用报错
-        elif re.search(r"视频不见了吗|视频不存在|已被删除|审核中|暂无内容|内容暂时无法", html):
+        # 失败原因按"可观察事实"归类（2026-10-28 二次修正：页面 HTML 的 JS 里本来就
+        # 带"验证码"字样，html 关键词搜出一律误判 captcha 喂熔断——只有标题/专用 DOM
+        # 命中才算真验证码；有 detail 无直链=直链被限，不说成验证码）
+        if detail:
+            return None, "播放直链被当前出口限流（匿名高频状态），稍后自动重试"
+        if re.search(r"安全验证|验证码|captcha", title_text, re.I):
+            return None, "页面吐出验证码（真验证码，低频等待可解）"
+        if re.search(r"视频不见了吗|视频不存在|已被删除|审核中|暂无内容|内容暂时无法", html):
             return None, "视频已删除或不可见（毒视频，人工在 App 确认后可忽略）"
-        elif re.search(r"验证码|captcha|安全验证", html, re.I):
-            return None, "页面吐出验证码（IP 级惩罚窗，低频等待可解）"
-        else:
-            return None, "页面未吐出视频数据（非验证码页：慢加载或软限流，稍后重试）"
-        return None, "页面无直链（数据骨架化，稍后重试）"
+        return None, "视频数据未返回（慢加载或限流状态，稍后自动重试）"
     try:
         return _download_mp4(video_url, out_dir), None
     except Exception as e:  # noqa: BLE001
