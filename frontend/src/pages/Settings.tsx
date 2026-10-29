@@ -129,12 +129,11 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
         icon={SettingsIcon}
         title="设置"
         desc="全部改动保存后运行时生效"
+        actions={<AccountBar displayName={displayName} role={role} onLogout={onLogout} />}
       />
 
       {busy && <div className="mb-3"><Busy text={busy} /></div>}
       {error && <div className="mb-3"><ErrorLine text={error} /></div>}
-
-      <AccountCard displayName={displayName} role={role} onLogout={onLogout} />
 
       <div className="card mb-4 space-y-3 p-5">
         <div className="text-sm font-semibold text-slate-800">品牌与内容人设</div>
@@ -401,8 +400,8 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   )
 }
 
-/** 账号卡（原侧栏左下用户卡，2026-10-29 收进设置页）：当前用户 + 修改密码 + 退出登录 */
-function AccountCard({ displayName, role, onLogout }: {
+/** 右上角账号簇（原侧栏用户卡→设置页卡片→页头右上，2026-10-29）：头像+身份+改密+退出 */
+function AccountBar({ displayName, role, onLogout }: {
   displayName: string
   role: string
   onLogout?: () => void
@@ -440,13 +439,13 @@ function AccountCard({ displayName, role, onLogout }: {
   }
 
   return (
-    <div className="card mb-4 space-y-3 p-5">
+    <>
       <div className="flex items-center gap-3">
         <div className="grid size-9 shrink-0 place-items-center rounded-full bg-linear-to-br from-[#e8c97f] to-[#c9a25c] text-sm font-semibold text-[#0d3b2d]">
           {(displayName || '?').slice(0, 1)}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-slate-800">{displayName}</div>
+        <div className="min-w-0">
+          <div className="max-w-40 truncate text-sm font-medium text-slate-800">{displayName}</div>
           <div className="text-[11px] text-slate-400">{role === 'platform_admin' ? '管理员' : (role || '')}</div>
         </div>
         <button onClick={logout}
@@ -454,28 +453,27 @@ function AccountCard({ displayName, role, onLogout }: {
           退出登录
         </button>
       </div>
-      <div>
-        <button className="text-xs text-slate-500 transition hover:text-slate-800"
-          onClick={() => { setPwdOpen(v => !v); setMsg(''); setErr('') }}>
-          {pwdOpen ? '收起' : '修改密码'}
+      {pwdOpen ? (
+        <div className="flex w-full basis-full flex-wrap items-center justify-end gap-2">
+          <input type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)}
+            placeholder="原密码"
+            className="w-40 rounded-md border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-emerald-500" />
+          <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)}
+            placeholder="新密码（至少 8 位）"
+            className="w-48 rounded-md border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-emerald-500" />
+          <button disabled={busy || !oldPwd || newPwd.length < 8} onClick={changePwd}
+            className="btn-accent btn-xs disabled:opacity-40">
+            保存新密码
+          </button>
+          {msg && <span className="text-xs text-emerald-600">{msg}</span>}
+          {err && <span className="text-xs text-red-600">{err}</span>}
+          <button onClick={() => setPwdOpen(false)} className="text-xs text-slate-400 hover:text-slate-600">收起</button>
+        </div>
+      ) : (
+        <button className="text-xs text-slate-500 transition hover:text-slate-800" onClick={() => { setPwdOpen(true); setMsg(''); setErr('') }}>
+          修改密码
         </button>
-        {pwdOpen && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)}
-              placeholder="原密码"
-              className="w-40 rounded-md border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-emerald-500" />
-            <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)}
-              placeholder="新密码（至少 8 位）"
-              className="w-48 rounded-md border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-emerald-500" />
-            <button disabled={busy || !oldPwd || newPwd.length < 8} onClick={changePwd}
-              className="btn-accent btn-xs disabled:opacity-40">
-              保存新密码
-            </button>
-            {msg && <span className="text-xs text-emerald-600">{msg}</span>}
-            {err && <span className="text-xs text-red-600">{err}</span>}
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </>
   )
 }
