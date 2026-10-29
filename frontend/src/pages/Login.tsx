@@ -63,7 +63,7 @@ export default function Login({ onLogin }: { onLogin: (username: string) => void
             <span className="text-[#22c55e]">走到可发布的成品</span>
           </div>
           <div className="mt-6 max-w-[430px] text-[13px] leading-[2] text-[#a8b3a9]">
-            · 选题深研 → 三版口播 → 数字人成片 → 公众号长文，一条流水线跑完内容生产全程<br />
+            · 选题深研 → 三版口播 → 公众号长文，一条流水线跑完内容生产全程<br />
             · 同行监控与拆解持续进料：赛道里谁在跑、什么打法有效，台账说话<br />
             · 每一步产出可验收、发布永远人工把关——AI 干活，你把关
           </div>

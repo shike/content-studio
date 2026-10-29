@@ -282,7 +282,6 @@ _ENTITY_LABELS = {
     "script_polish": "脚本打磨失败（无在途任务）",
     "media_align": "字幕对齐失败（无在途任务）",
     "draft_generate": "剪映草稿失败（无在途任务）",
-    "avatar_video": "数字人合成失败（无在途任务）",
 }
 
 
@@ -324,7 +323,7 @@ def _coverage(s: Session) -> dict[int, int]:
 def _id_key_of(job_type: str) -> str:
     return {"article_generate": "article_id", "script_generate": "script_id",
             "script_polish": "script_id", "media_align": "project_id",
-            "draft_generate": "project_id", "avatar_video": "video_row_id",
+            "draft_generate": "project_id",
             "self_analyze": "video_id"}.get(job_type, "")
 
 

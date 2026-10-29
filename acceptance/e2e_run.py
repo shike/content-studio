@@ -129,7 +129,7 @@ def main() -> int:
             page.locator('aside button', has_text=label).first.click(timeout=6000)
             page.wait_for_timeout(900)
 
-        PAGES = ["工作台", "选题库", "脚本工场", "口播数字人", "公众号", "发布台",
+        PAGES = ["工作台", "选题库", "脚本工场", "公众号", "发布台",
                  "海报提示词", "同行监测", "我的风格", "拆解库", "话题雷达", "任务",
                  "设置", "管理后台"]
         for label in PAGES:

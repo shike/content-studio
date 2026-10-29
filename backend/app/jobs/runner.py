@@ -88,7 +88,6 @@ _POLICIES: dict[str, RetryPolicy] = {
     "watch_resolve": RetryPolicy(task_timeout=1800),
     "radar_extract": RetryPolicy(task_timeout=900),
     "watch_discover": RetryPolicy(task_timeout=3600),
-    "avatar_video": RetryPolicy(task_timeout=3600),
     "radar_mine": RetryPolicy(task_timeout=1800),
     "topic_radar": RetryPolicy(task_timeout=1800),
 }

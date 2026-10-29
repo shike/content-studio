@@ -10,14 +10,13 @@ from __future__ import annotations
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import Article, AvatarVideo, Job, Script, SelfVideo
+from ..models import Article, Job, Script, SelfVideo
 
 # job_type → (实体模型, payload 主键字段, 在途状态)
 ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
     "script_generate": (Script, "script_id", "generating"),
     "script_polish": (Script, "script_id", "polishing"),
     "article_generate": (Article, "article_id", "generating"),
-    "avatar_video": (AvatarVideo, "video_row_id", "generating"),
     # SelfVideo 无失败态（分析失败行保持 approved），coverage/孤儿判定需要它的映射
     "self_analyze": (SelfVideo, "video_id", "approved"),
 }
@@ -93,6 +92,4 @@ def _revive_payload(job_type: str, row) -> dict:
         return {"script_id": row.id}
 
         return {"project_id": row.id}
-    if job_type == "avatar_video":
-        return {"video_row_id": row.id}
     return {}

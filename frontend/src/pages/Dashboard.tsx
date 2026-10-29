@@ -141,8 +141,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: SectionKey) 
                 : `今天有 ${todoTotal} 件待办，按队列逐件清。`}
           </div>
           <div className="mt-3 max-w-xl text-[13px] leading-loose text-slate-500">
-            选题（idea 深研 / 同行监控）→ 脚本工场 → 口播数字人 →
-            公众号 → 发布物料包（发布永远人工）。
+            选题（idea 深研 / 同行监控）→ 脚本工场 → 公众号 →
+            发布物料包（发布永远人工）。
           </div>
           <div className="mt-5 flex flex-wrap gap-2.5">
             <button

@@ -23,7 +23,7 @@
 │              │    └─ data/  上传素材、配图、成片、备份              │
 │              │                                                       │
 │              ├──► GLM API（智谱：生成主通道 + 独立搜索端点）          │
-│              ├──► 蝉镜开放 API（数字人引擎）+ 本地引擎 faster-whisper │
+│              ├──► 本地引擎 faster-whisper（转写） │
 │              │    / FFmpeg                                          │
 │              └──► 人工发布（发布永远人工，R6.5）                       │
 │                                                                      │
@@ -58,7 +58,7 @@ content-studio/
 │   ├── app/
 │   │   ├── main.py             # FastAPI 入口 + 静态托管 frontend/dist
 │   │   ├── settings.py         # pydantic-settings 读 .env
-│   │   ├── api/                # 路由：auth/admin/health/topics/scripts/media/articles/avatar/publishing/jobs/llm/schedules/radar/watch/style/benchmarks
+│   │   ├── api/                # 路由：auth/admin/health/topics/scripts/media/articles/publishing/jobs/llm/schedules/radar/watch/style/benchmarks
 │   │   ├── auth.py             # 口令哈希 / 会话 / 租户上下文（ACTOR）
 │   │   ├── db.py               # 引擎 + 迁移 + 作用域三件套（单用户退化）
 │   │   ├── models/             # SQLModel 表定义（§5）
@@ -93,7 +93,6 @@ content-studio/
 | `DEEPSEEK_API_KEY` | — | 备选 |
 | `LLM_MODEL` | glm-5 | 以控制台可用型号为准 |
 | `ASR_MODEL` | large-v3 | faster-whisper 型号 |
-| `CHANJING_APP_ID` / `CHANJING_SECRET_KEY` | — | 蝉镜开放平台凭证（口播数字人引擎） |
 | `SEARCH_PROVIDER` | auto | 检索通道：auto=智谱搜索优先 DDG 兜底 / ddg / glm（按量余额可用；设置页运行时切换） |
 | `ZHIPU_BASE_URL` / `ZHIPU_SEARCH_BASE_URL` | 智谱 | 生成端点与独立搜索端点（`/web_search`）可分账 |
 | `CS_BOOTSTRAP_PASSWORD` | — | 首次启动引导管理员的确定性口令（验收实例必带；不设则随机生成仅日志打印） |
@@ -105,7 +104,7 @@ content-studio/
 **数据库运行时配置（`app_settings`，设置页可改，写入即生效）**：
 `llm_provider / llm_model / zhipu_api_key / deepseek_api_key / zhipu_base_url /
 search_provider / search_enabled / zhipu_search_model / zhipu_search_base_url /
-asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_secret_key`。
+asr_model / scrape_proxy / douyin_proxy / watch_scan_enabled / watch_scan_hour`。
 载入时机=启动时（init_db 之后 `settings_store.load_overrides()`）；改 ASR 模型会清进程内模型缓存。
 
 ## 5. 数据模型（SQLite）
@@ -133,10 +132,8 @@ asr_model / watch_scan_enabled / watch_scan_hour / chanjing_app_id / chanjing_se
 | `radar_topics` | tenant_id, ch_id(全局唯一), enabled, notify, seen_ids/recent/hits(JSON), last_checked_at | 话题雷达监控项 |
 | `failure_patterns` | fp(唯一), kind, fail_class, label, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
 | `schedules` | key, label, enabled, hour 覆盖, last/next_run_at, last_status, run_count | 统一调度中心运行态 |
-| `app_settings` | key(主键), value(JSON) | 平台运行时配置（LLM/检索/ASR/数字人凭证/扫描计划；密钥只写不读） |
+| `app_settings` | key(主键), value(JSON) | 平台运行时配置（LLM/检索/ASR/采集出口；密钥只写不读） |
 | `watch_accounts` | tenant_id, platform, name, url, note, kind(competitor/self), creator_cookie(self 创作者中心登录态), enabled, last_scan_at | 对标/自有账号（R3.1/R9.1；评分口径见 MRD §2.1.1） |
-| `avatar_configs` | tenant_id, name, engine, chanjing_person_id, chanjing_audio_man, chanjing_pic_url, chanjing_preview_url | 数字人配置（克隆形象+配套音色） |
-| `avatar_videos` | tenant_id, avatar_id, script_id, status(generating/done/failed), seconds, beans_used, model(0基础/1高质), audio_path, video_path | 数字人生成记录 |
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `dismissals` | scope, ref_id | 「不做」永久出口（可恢复） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded；parked 已退役→failed), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light/external/scheduled), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
@@ -224,23 +221,9 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - `POST /api/watch/discover/candidates/{id}/dismiss` → 永久忽略（重新发现不复活）
 - `DELETE /api/watch/discover/candidates` → 清掉已处理（added/dismissed），待定夺保留
 
-### 口播数字人（R10，蝉镜引擎）
-- 引擎：蝉镜开放 API（API 克隆形象 + 形象配套音色原生 TTS + 平台自动字幕）；凭证 `CHANJING_APP_ID/CHANJING_SECRET_KEY`
-- `GET /api/avatar/configs` / `POST` `{name, chanjing_person_id?, chanjing_audio_man?}` / `PUT /{id}` / `DELETE /{id}`
-- `POST /api/avatar/configs/{id}/clone_video`（multipart 出镜视频）→ 克隆预扣 300 积分
-- `GET /api/avatar/estimate?script_id=&avatar_id=&model=` → 预估（租户口径 `points`/`credits`；
-  平台侧另返 `beans`/`yuan` 成本口径）；`GET /api/avatar/usage` → 成片数/秒/积分合计（`points` 对所有人，
-  `beans`/`yuan` 仅平台管理员）
-  （余额闸先于凭证校验；形象提交成功后扣减，训练失败不退；R11.4）
-- `GET /api/avatar/persons/{person_id}` → 克隆详情（status/progress/pic_url/audio_man_id）
-- `GET /api/avatar/balance` → `{beans}`；`GET /api/avatar/usage` → 累计消耗台账（yuan 字段仅平台管理员）
-- 配图/成片等媒体文件按租户边界服务（见 §15）；租户侧接口不含引擎品牌与金额（R11.6）
-- `GET /api/avatar/estimate?script_id=&avatar_id=&model=` → 成本预估（秒/豆/余额充足性；yuan 仅平台管理员）
-- `POST /api/avatar/generate` `{script_id, avatar_id, model(0基础|1高质)}` → 202 `{job_id}`
-  （executor：大纲→分节口播脚本同款分段思想不适用于此；蝉镜逐段合成→拼接→检查点续跑；成片入媒体库 kind=avatar）
-- `GET /api/avatar/videos`（分页+筛选，含定稿标题/预览/三件套统计/画质档）；`DELETE /api/avatar/videos/{id}`（生成中不可删）
-- `GET /api/avatar/videos/{id}/file` → 成片文件下载（租户边界随实体归属）
-- 字幕：平台 asr_type=0 自动字幕（白字底部居中）；音频走 wav_url 通道（file_id 通道会静默丢音轨）
+### 口播数字人（原 R10）
+
+- **已退役**（2026-10-29 用户裁定）：全部 `/api/avatar/*` 端点、`avatar_video` 任务类型、`avatar_configs`/`avatar_videos` 表与蝉镜凭证位已移除。
 
 ### 我的风格（自我研究，R9）
 - `GET /api/style/overview` → `{account: WatchAccount|null, profile: 最新画像|null, profile_history:[...], videos:[{id,title,analyzed_at,style_analysis}], stats:{total, analyzed, pending}}`
@@ -285,7 +268,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
 ## 7. 后台任务框架（五要素统一任务体系）
 
 - 一切待处理工作都是任务：`jobs` 表 + 进程内 runner。任务五要素 = 类型（type）+ 去重键（dedup_key）+ 分道（lane）+ 重试策略（RetryPolicy）+ 失败分类（fail_class）。
-- **提交**：`submit(type, payload, dedup_key="", actor=None, points=0)`。dedup_key 非空时，同 type 下活跃任务（queued/running）唯一，重复提交幂等返回原任务（活跃唯一部分索引兜底）。dedup_key 由各提交点按实体给出：拆解=分享链接（实体去重：同链接不建重复行）与 `bm:{id}`；扫描=`scan:{account_id|all}:{YYYYMMDD}`；自我扫描=`selfscan:all:{日期}`；链接识别=提取后的 URL；画像重算=全局 `profile:update`；数字人=`avatar:{script_id}`；自我风格分析=`selfanalyze:{video_id}`。
+- **提交**：`submit(type, payload, dedup_key="", actor=None, points=0)`。dedup_key 非空时，同 type 下活跃任务（queued/running）唯一，重复提交幂等返回原任务（活跃唯一部分索引兜底）。dedup_key 由各提交点按实体给出：拆解=分享链接（实体去重：同链接不建重复行）与 `bm:{id}`；扫描=`scan:{account_id|all}:{YYYYMMDD}`；自我扫描=`selfscan:all:{日期}`；链接识别=提取后的 URL；画像重算=全局 `profile:update`；自我风格分析=`selfanalyze:{video_id}`。
 - **分道**：`heavy`=LLM 长任务串行队列；`light`=扫描/识别类并发池（上限 3，同类执行中后来者合并跳过）；`scheduled`/`external` 预留。定时任务由调度循环到点 submit（带当日 dedup 键，天然防重复触发），调度循环本身不是任务。
 - **异常分类学**（`jobs/errors.py`，`classify()` 对历史 RuntimeError 按消息特征兜底分诊）：
   - `transient`（网络/超时/5xx/LLM 通道抖动）→ 按类型策略自动重试，指数退避 base×2ⁿ 封顶 cap，`next_retry_at` 到点由重试循环（30s）放行；
@@ -321,9 +304,9 @@ article:    draft ──► edited ──► rendered ──► published（由 
   - `GET /api/jobs/failures` → 待处置盘点：失败且无重试排期且未归档的任务按指纹聚类 + **实体孤儿**组（实体 failed 且无活跃任务，合成指纹 `entity:{type}`）；`disposal`=待处置总数（进工作台计数：任务徽章=运行中+排队+待处置，非空=系统带病运行必须可见）。
   - `POST /api/jobs/retry-by-fingerprint {fp}` → 整批复活：重排前先**实体复活**（`jobs/revive.py`：failed 实体按类型拉回在途态，防二次幽灵）；实体孤儿组则直接重提生成任务。`POST /api/jobs/failures/{fp}/resolve {status, note}` → 标记已修复/忽略后移出待处置。
   - 自动重试放行（`_reenqueue`）与人工重试同样先做实体复活，failed 状态不跨重试周期。
-  - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate/avatar_video）已全部迁移，执行器体内不再自带 try/except 回退。
+  - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate）已全部迁移，执行器体内不再自带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
-- **执行器注册表**：`idea_research / benchmark_analyze / script_generate(含自动打磨一轮) / script_polish / script_finalize(定稿+标题候选) / article_generate / watch_scan(payload.account_id 单号扫描，全量仅 competitor) / watch_resolve(自动提取口令全文中的链接) / watch_discover(关键词发现对标账号，light 并发道) / self_scan / self_analyze / self_profile_update / topic_radar(话题雷达：话题下新增视频速度测热度，飙升发 macOS 通知) / avatar_video(蝉镜引擎：脚本文本→克隆形象+配套音色+自动字幕，超长自动分段)`。
+- **执行器注册表**：`idea_research / benchmark_analyze / script_generate(含自动打磨一轮) / script_polish / script_finalize(定稿+标题候选) / article_generate / watch_scan(payload.account_id 单号扫描，全量仅 competitor) / watch_resolve(自动提取口令全文中的链接) / watch_discover(关键词发现对标账号，light 并发道) / self_scan / self_analyze / self_profile_update / topic_radar(话题雷达：话题下新增视频速度测热度，飙升发 macOS 通知))`。
 - **话题雷达**：`radar_topics` 表（ch_id 唯一/seen_ids 防重/recent 最近新视频）。数据源=m.douyin.com challenge/aweme 接口（免登录，无互动统计字段）→ 热度代理=话题下新增视频速度，单次巡检新增 ≥5 条判飙升并发 macOS 通知。`GET/POST/DELETE /api/radar`、`POST /{id}/check`（单话题即时巡检）、`POST /{id}/toggle`（启停）、
 `POST /check-all`（走 topic_radar 任务）、`POST /extract-hashtags` `{url}`（贴视频链接提取话题）、
 `POST /mine`（从拆解库挖话题候选）；空表自动种入 3 个已知泛 AI 话题；每日随定时扫描巡检一次（X10 调度）。
@@ -333,24 +316,6 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - **任务归属（租户链）**：`jobs.tenant_id/user_id` 由 `auth.ACTOR`（(tenant,user,role) contextvar）在提交时自动落库——请求上下文由 `require_user` 设值；执行器运行期由 runner 从任务行恢复上下文（**同步执行器必须经 `asyncio.to_thread` 派发——`run_in_executor` 不传播 contextvars**）；人工重试继承原任务归属，系统调度与自动重试归 0（系统）。执行器内的一切查询、实体创建、LLM 台账随任务租户。
 - **按租户队列**：heavy 消费者跨租户轮转（租户内 FIFO）；每租户活跃任务上限（R11.7）在提交时先查后建（超限 429）。
 - **积分预扣**：`submit(points=N)` 在任务落库后、入队前扣减（幂等命中/合并跳过不扣；扣减失败响亮报错不拦任务）；余额闸（402）在各计量端点提交前把守。
-  - **数字人视频按秒计费**（2026-09-27 用户拍板）：`avatar_video_points(seconds, model)` = ceil(秒 × 费率)，
-    费率基础 3 积分/秒、高质 6 积分/秒（= 蝉镜成本 1 豆/秒、2 豆/秒 ×3 积分/豆，1 豆 = ¥0.03）；
-    提交时按 `estimate()` 预估秒数预扣，成片后 `settle()` 按实际秒数多退少补（差额各记一笔流水）。
-- **按形象原生尺寸渲染**（2026-09-28 修）：`chanjing.person_size(person_id)` 从 `person_detail`
-  读形象原生 width/height，`create_video_tts` 按它设 person 框 / screen / `_scaled_subtitle(w)`
-  （字幕字号与 y 以 1080 为基准等比缩放）；短标 `render_label_png(text, path, frame)` 按成片
-  实际画幅缩放（`_probe_size` 探测）。背景：形象原生 720×1280 曾被硬拉到 1080×1920 渲染——
-  同口径脸区高频能量 32 vs 原生 129~153（4~5 倍细节被上采样吃掉）。
-
-- **左上角栏目角标**（avatar_video 内，`chanjing.render_label_png/burn_label`）：形式=两行栏目名
-  + 暖黄细括号 + 右侧日期与期号（参照罗振宇《视频日记》，2026-09-28 用户选定 B 方案）。
-  平台 `create_video` 无文字层 → 成片后本地叠一张透明 PNG（PIL，字号/坐标以 1080 为基准按画幅缩放）；
-  期号 Day N = 本租户 done 成片数 + 1（查库自算），日期取北京时间当天。**租户化（P0）**：
-  栏目两行=`brand.label_line1/label_line2`（`tenant_brand.label_lines_of`）、强调色=`brand.accent`
-  （`accent_rgb_of`）、字体=`label_font_path(tenant)` 按租户栏目名现做 Noto Sans SC Bold 子集
-  （缓存 `data/label_fonts/`；OFL 免费商用）。全程叠加无 enable 窗口；
-  失败只降级（交付无角标版本 + `avatar_videos.notes` 写明）。开关：`POST /api/avatar/generate {bigtext}`。
-
 - **海报提示词工场**（2026-09-30，`api/poster.py`）：把文章/任意内容转成即梦(Seedream)「图文一体海报」
   的完整生成提示词。出图引擎在系统外（即梦网页版免费额度 / 豆包 / 火山方舟 Seedream API 0.2 元/张），
   系统只产出提示词。`POST /api/articles/{id}/poster-prompt {slot_index, style?}` 单配图位；
@@ -370,48 +335,6 @@ article:    draft ──► edited ──► rendered ──► published（由 
   （失败降级不阻塞成文）；`POST /api/articles/{id}/knowledge-graphic` 手动（重新）生成
   （<200 字正文 400）。前端：文章展开行操作区「生成知识图解」，成功回显缩略图+标题。
 
-- **蝉镜检查点续跑**：`avatar_video` 的 run_dir 按视频行确定（`v{video_row_id}`），`state.json` 记录每段蝉镜任务 id 与产物文件；重试时已完成段复用文件、已提交未收货段只轮询不重复提交（蝉豆不重复扣）。
-
-## 8. LLM 网关
-
-- `provider` 抽象：`complete(messages, json_schema=None, purpose="")`；GLM 默认，DeepSeek 备选（`LLM_PROVIDER` 切换）。
-- 结构化输出：传 `json_schema` 时解析+校验，失败自动带错误重试 1 次。
-- ~~调用写 `llm_calls` 台账~~（2026-10-27 拆除 2B：不再记录成本，表已 DROP；gateway 只做调用与重试）。
-- 搜索：独立智谱 `/web_search` 端点（按量计费，落台账 purpose=web_search）优先，DDG 兜底（全局限流闸：最小间隔+每小时配额）；通道三选 auto/glm/ddg 运行时切换。
-- Prompt 全部放 `backend/app/prompts/*.md`，文件头含 `version` 与 `purpose`，代码加载；迭代 Prompt 不改代码。
-- 关键 Prompt 与输出 schema：
-  - `idea_research`：输出 `{title, angle, audience, pain_points[], hooks[], business_fit{boss,fde}, competitors, score, score_breakdown}`
-  - `benchmark_analyze`：输出 `{hook{type,position_sec,text}, structure[], topic_value, comment_insights[], replicable_points[], score}`
-  - `script_generate`：**结构模板按 template_id 显式选择（0=不使用；2026-10-10 修：此前 prompt 无 {{STRUCTURE}} 占位符注入静默失效、usage_count 记假账——现只有真注入才计数）；三版打法支持指定（angles=六打法子集 ≤3，每版一种，空=自动挑；use_style 此前在 API 层丢失、开关失效已修）**。时长按 2026-10-09 流量诊断重定：六打法（反常识判断/身份定位喊话/行动指令/提问/对比打假/数字落差，观点判断导向）、默认档 240~320 字（50~70 秒黄金档）、前 3 秒甩判断禁铺垫、黑话必须大白话化、每版必含一个可转述的点赞钩子判断；选题链路（idea_research/benchmark_analyze/trending）同步禁纪实类角度与黑话标题——依据：自有账号24 条实测（观点类均播 384 vs 纪实类 56，黑话标题 213 vs 大白话 369，问句标题 479 vs 246）
-  - `script_critique`：输出问题清单 + 定向重写
-  - `style_pick`：长文透镜自动挑选（style=auto 时生成开头小调用，输出 `{style, reason}`，无效回落 deep_dive）
-  - `article_title`+`article_outline`+`article_section`：长文标题组/大纲/逐节写作（深研报告全文注入，
-    thinking 可关闭防空正文）。**双档位（2026-10-02）**：请求体 `length` 二选一，默认 `feed`——
-    `feed`=公众号版（1200~1800 字、3~4 节、开头即答案（ASC，禁铺垫式开场）、判断式小节标题、
-    信息流标题公式（人群+数字+冲突+可带走判断，禁论文对仗腔与悬念钩子腔）、金句收尾，
-    完读率优先——依据：公众号推荐流赛马制下完读率权重 35% 居首、完读率 <30% 推荐终止）；
-    `deep`=深度版（3000~5000 字、5~7 节、铺垫式开头、机制拆解/方法框架/边界条件三件套，
-    判决句式标题（禁论文对仗腔）、全文至少一个可转述的原创判断框架（2026-10-08 卡兹克拆解四条，
-    另含术语类比纪律/数字体感锚/人物年代一句话叙事锚——不破去故事化裁定），
-    风格 `style=auto` 时生成开头先经 style_pick 小调用按素材挑透镜（在精选五透镜 deep_dive/practice/inquiry/anatomy/comparison 里挑，无效回落 deep_dive），
-    专业书面向文体，适合搜一搜长尾与发客户）。规格文本存 `articles/service.py` 的
-    `ARTICLE_LENGTHS`，分别注入三个 prompt 的 `{{TITLE_SPEC}}/{{LENGTH_SPEC}}/{{SECTION_SPEC}}`；
-    缺占位符由 `prompts.render()` 抛错拦截。质量评审尺随档位走（quality.py：feed 尺/长文尺/口播尺）。
-    **大纲节数守卫**：节数低于档位下限（feed 3 / deep 5）时带明确节数要求重试一次大纲（模型偶尔
-    只出 1 节，2026-10-02 实测）。**渲染器剥离 `[CHART]...[/CHART]` 规格块**（renderer.py）：
-    规格块是分节写作的中间产物、成图由流水线以 `(chart:文件)` 图片标记另行插入，不剥则原始 JSON
-    透进公众号 HTML（已发布旧文实测泄漏）。
-    分节合规守卫拦违禁词与刻意转化话术（评论区/私信/关注/扣字/领资料，与 quality.py 同表；
-    编辑守卫另有**元指令防线**：编辑模型偶发把「全文已符合修订标准…原样输出」类流水线自述
-    写进正文，命中标记即弃用编辑稿保留原稿——数字/占位标记校验之外的新增防线，2026-10-02）；
-    分节合规守卫拦违禁词与刻意转化话术（评论区/私信/关注/扣字/领资料，与 quality.py 同表；
-    裸「最好的」已移出程序化表——误杀「千万别挑最好的」反向建议与「最好的线」描述性比较，
-    语义级绝对化由 LLM 评审 compliance 项兜底）。
-    **数据论据国内源优先（2026-10-02 用户硬要求）**：idea_research_report / script_generate /
-    article_outline / article_section / kg_spec 五处 prompt 同约束——优先国内公开数据/行业报告/
-    国内企业实践（注明来源与年份），国外机构数据只在国内无同类时作补充、不作主锚点。
-  - `self_style_extract`（R9.2）：转写 → `{opening_pattern, rhythm, phrases[], tone, argument_habit, closing_style, exemplars[]}`（只提形式特征，不判内容价值）
-  - `self_profile_update`（R9.3）：全部风格标注 + 上一版画像 → `{digest(200~300字), traits[6~10], exemplars[≤6 原句], notes}`（增量演化，保留可复现风格）
 - **风格注入（R9.4）**：`script_generate` / `script_polish` 的「他说话的方式」段为 `{{MY_STYLE}}` 占位符——有画像时注入"摘要+特征标签+代表原句"，无画像回落内置人设文案；`generate` 请求体 `use_style`（默认 true）可按次关闭。
 
 ## 9. 模块设计要点
@@ -474,7 +397,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
   ②**任务纳入租户作用域**（`Job` 挂 TenantScoped）：任务列表/详情/删除/重试一律跨租户 404；
   ③**会话失效语义**：登出即服务端作废该 token；改密作废该用户全部会话并补发新会话（全端重登）；
     `require_user` 每次校验租户状态（停用租户残留会话一律失效）；
-  ④**上传体积上限**：数字人克隆素材 500MB（分块读取，超限 413）、拆解视频 2GB；
+  ④**上传体积上限**：拆解视频 2GB；
   ⑤**登录时序均匀化**：用户不存在时同样执行一次 scrypt（防按响应耗时枚举用户名）；
   ⑥**SSRF 闸门**：服务端会主动请求的用户 URL（贴链接拆解/链接识别/话题提取/监控账号写入）
     一律经 `is_douyin_url()` 校验——仅放行 `*.douyin.com` / `*.iesdouyin.com` 的 http(s)
@@ -506,7 +429,6 @@ article:    draft ──► edited ──► rendered ──► published（由 
 | P1 内容核心 | `run_p1.py` | idea深研→选题入库评分；脚本 3 版+打磨+终稿三产物；公众号长文+改稿+渲染；LLM 用量台账 | 全 PASS |
 | P2 拆解流水线 | `run_p2.py` | 本地视频拆解全链（转写非空+拆解 schema+选题候选）；模板库 CRUD；在线拆解 | 本地链全 PASS；在线拆解未配 `DOUYIN_TEST_URL` 时 SKIP |
 | P4 发布台 | `run_p4.py` | 物料包字段完整+忽略清单；台账/指标回流/sau 移除负向契约（404） | 全 PASS |
-| P5 口播数字人 | `run_p5.py` | 配置 CRUD/克隆契约/余额/预估/生成记录/删除边界 | 全 PASS；真实合成设 `CS_CHANJING_LIVE=1` 才跑 |
 | P6 任务体系 | `run_p6.py` | 去重幂等/失败分类/到期放行/欠任务补队/失败中台（指纹聚类·按指纹复活·实体孤儿） | 全 PASS |
 | P7 多租户隔离 | `run_p7.py` | 双租户可见性/越权 404/归属/任务收窄/积分预扣与余额闸/金额与品牌隐藏/导出/删除/停用租户登录拦截 | 全 PASS |
 

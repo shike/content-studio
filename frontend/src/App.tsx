@@ -23,7 +23,7 @@ import ForceChangePassword from './pages/ForceChangePassword'
 /**
  * 新页面结构（2026-10-28 用户确认的彻底重构）：
  * 一级入口 6 个——今日工作台 / 人设号产线 / 获客号产线 / 情报中心 / 发布台 / 任务（设置沉底）。
- * 旧页面（选题库/脚本工场/数字人/公众号/同行监测/拆解库/话题雷达/我的风格/海报/工作台）
+ * 旧页面（选题库/脚本工场/公众号/同行监测/拆解库/话题雷达/我的风格/海报/工作台）
  * 全部作为容器内容并入：产线页按账号类型过滤，情报中心四流合一，海报并入发布台。
  * 旧 SectionKey 保留在类型里供内嵌页面的 onNavigate 使用，经 NAVMAP 路由到新分区。
  */
@@ -34,7 +34,7 @@ export type SectionKey =
 
 /** 旧分区键 → 新分区（内嵌页面 onNavigate 的兼容路由）。 */
 const NAVMAP: Record<string, SectionKey> = {
-  dashboard: 'today', topics: 'today', scripts: 'persona', digital: 'persona',
+  dashboard: 'today', topics: 'today', scripts: 'persona',
   articles: 'persona', posters: 'publishing', watch: 'intel', style: 'persona',
   benchmarks: 'intel', radar: 'intel',
 }

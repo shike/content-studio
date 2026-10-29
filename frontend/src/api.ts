@@ -42,7 +42,7 @@ export interface Job {
 export async function waitJob(
   jobId: number,
   onStatus?: (j: Job) => void,
-  timeoutMs = 60 * 60 * 1000, // 长任务（分段数字人）上限；超时后任务仍在后台，去「任务」页跟踪
+  timeoutMs = 60 * 60 * 1000, // 长任务上限；超时后任务仍在后台，去「任务」页跟踪
 ): Promise<Job> {
   const deadline = Date.now() + timeoutMs
   for (;;) {

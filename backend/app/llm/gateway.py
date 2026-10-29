@@ -14,7 +14,7 @@ from ..db import engine
 from ..jobs.errors import QuotaExhaustedError, TransientError
 from ..settings import settings
 
-# 元 / 百万 tokens: (输入, 输出)。缺省按 glm-5 计。
+# 元 / 百万 tokens: (输入, 输出)。缺省按 glm-5.3-flash 计。
 # glm-5.3-flash 为估算值（官方未公布牌价，实际走 Coding Plan 套餐额度）
 _PRICES = {
     "glm-5.3-flash": (2, 8),
@@ -42,7 +42,7 @@ def is_configured() -> bool:
 
 def _record(purpose: str, model: str, tokens_in: int, tokens_out: int,
             latency_ms: int, ok: bool) -> None:
-    price = _PRICES.get(model, _PRICES["glm-5"])
+    price = _PRICES.get(model, _PRICES["glm-5.3-flash"])
     cost = (tokens_in * price[0] + tokens_out * price[1]) / 1_000_000
 
 
@@ -119,7 +119,7 @@ async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict, purpo
     _record(purpose, cfg["model"], tokens_in, tokens_out,
             int((time.perf_counter() - started) * 1000), ok)
     if not ok or not content:
-        detail = str(last_err) or "未知错误"
+        detail = str(last_err) or type(last_err).__name__  # ReadTimeout('') 等空串异常必须露出类型名，否则超时被误判 deterministic
         # 任务体系异常分类：额度窗口挂起、通道抖动跨任务重试（P1 骨架）
         if any(k in detail for k in ("1113", "余额不足", "quota")):
             raise QuotaExhaustedError(f"LLM 额度不可用: {detail}")

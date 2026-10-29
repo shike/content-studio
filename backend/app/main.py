@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (articles, auth_api as auth_routes, avatar, benchmarks, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
+from .api import (articles, auth_api as auth_routes, benchmarks, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
                   public_media, publishing, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
@@ -19,7 +19,6 @@ from .version import APP_VERSION
 
 # 导入服务模块以注册任务执行器
 from .articles import service as _article_service  # noqa: F401
-from .avatar import service as _avatar_service  # noqa: F401
 from .benchmarks import service as _benchmark_service  # noqa: F401
 from .publishing import service as _publishing_service  # noqa: F401
 from .radar import service as _radar_service  # noqa: F401
@@ -122,7 +121,6 @@ app.include_router(settings_api.router, dependencies=[Depends(require_admin_dep)
 app.include_router(topics.router, dependencies=[Depends(require_ready_user)])
 app.include_router(scripts.router, dependencies=[Depends(require_ready_user)])
 app.include_router(articles.router, dependencies=[Depends(require_ready_user)])
-app.include_router(avatar.router, dependencies=[Depends(require_ready_user)])
 app.include_router(benchmarks.router, dependencies=[Depends(require_ready_user)])
 app.include_router(publishing.router, dependencies=[Depends(require_ready_user)])
 app.include_router(radar.router, dependencies=[Depends(require_ready_user)])

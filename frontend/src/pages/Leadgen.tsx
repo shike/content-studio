@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { SectionKey } from '../App'
 import Topics from './Topics'
 import Scripts from './Scripts'
-import Digital from './Digital'
 import Benchmarks from './Benchmarks'
 
 type Tab = 'topics' | 'content' | 'playbook'
@@ -10,7 +9,7 @@ type Tab = 'topics' | 'content' | 'playbook'
 /** 获客号产线：选题 → 内容看板（获客脚本/成片）→ 打法卡库。 */
 export default function Leadgen({ onNavigate }: { onNavigate: (k: SectionKey) => void }) {
   const [tab, setTab] = useState<Tab>('playbook')
-  const [sub, setSub] = useState<'scripts' | 'digital'>('scripts')
+  const [sub, setSub] = useState<'scripts'>('scripts')
 
   return (
     <div>
@@ -38,7 +37,6 @@ export default function Leadgen({ onNavigate }: { onNavigate: (k: SectionKey) =>
           <div className="mb-3 flex gap-1.5">
             {([
               ['scripts', '获客脚本'],
-              ['digital', '口播成片'],
             ] as [typeof sub, string][]).map(([k, label]) => (
               <button key={k} onClick={() => setSub(k)}
                 className={`rounded-full px-3.5 py-1.5 text-xs ${sub === k ? 'bg-amber-100 text-amber-800' : 'border border-[#e8ecf0] bg-white text-slate-500'}`}>
@@ -47,7 +45,6 @@ export default function Leadgen({ onNavigate }: { onNavigate: (k: SectionKey) =>
             ))}
           </div>
           {sub === 'scripts' && <Scripts onNavigate={onNavigate} />}
-          {sub === 'digital' && <Digital />}
         </div>
       )}
 

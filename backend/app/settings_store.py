@@ -35,8 +35,6 @@ MANAGED: dict[str, str] = {
     "auto_dissect_enabled": "bool",
     "auto_dissect_min_score": "float",
     "auto_dissect_daily_cap": "int",
-    "chanjing_app_id": "str",
-    "chanjing_secret_key": "secret",
 }
 SECRET_KEYS = {k for k, t in MANAGED.items() if t == "secret"}
 
@@ -108,6 +106,5 @@ def stored_secret_state() -> dict:
         keys = {r.key for r in s.exec(select(AppSetting)).all()}
     return {
         "zhipu_api_key_set": bool(settings.zhipu_api_key),
-        "chanjing_secret_set": bool(settings.chanjing_secret_key),
         "in_db": sorted(k for k in keys if k in MANAGED),
     }

@@ -46,7 +46,6 @@ const TYPE_NAMES: Record<string, string> = {
   script_generate: '脚本生成',
   script_polish: '脚本打磨',
   article_generate: '长文生成',
-  avatar_video: '数字人视频',
   script_finalize: '脚本定稿',
   watch_scan: '同行扫描',
   self_scan: '自我扫描',

@@ -2,16 +2,15 @@ import { useState } from 'react'
 import type { SectionKey } from '../App'
 import Topics from './Topics'
 import Scripts from './Scripts'
-import Digital from './Digital'
 import Articles from './Articles'
 import Style from './Style'
 
 type Tab = 'topics' | 'content' | 'style'
 
-/** 人设号产线：选题 → 内容看板（脚本/数字人/长文）→ 风格画像。 */
+/** 人设号产线：选题 → 内容看板（脚本/长文）→ 风格画像。 */
 export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) => void }) {
   const [tab, setTab] = useState<Tab>('topics')
-  const [sub, setSub] = useState<'scripts' | 'digital' | 'articles'>('scripts')
+  const [sub, setSub] = useState<'scripts' | 'articles'>('scripts')
 
   return (
     <div>
@@ -39,7 +38,6 @@ export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) =>
           <div className="mb-3 flex gap-1.5">
             {([
               ['scripts', '脚本工场'],
-              ['digital', '口播数字人'],
               ['articles', '公众号长文'],
             ] as [typeof sub, string][]).map(([k, label]) => (
               <button key={k} onClick={() => setSub(k)}
@@ -49,7 +47,6 @@ export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) =>
             ))}
           </div>
           {sub === 'scripts' && <Scripts onNavigate={onNavigate} />}
-          {sub === 'digital' && <Digital />}
           {sub === 'articles' && <Articles />}
         </div>
       )}

@@ -174,18 +174,6 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text("ALTER TABLE jobs ADD COLUMN archived INTEGER DEFAULT 0"))
         if jcols and "retry_of" not in jcols:
             conn.execute(sqlalchemy.text("ALTER TABLE jobs ADD COLUMN retry_of INTEGER DEFAULT 0"))
-        acols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(avatar_configs)"))]
-        if acols and "visual_resource_id" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN visual_resource_id VARCHAR DEFAULT ''"))
-        if acols and "performance_prompt" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN performance_prompt VARCHAR DEFAULT ''"))
-        for table in ("benchmark_videos", "self_videos"):
-            scols = [r[1] for r in conn.execute(sqlalchemy.text(f"PRAGMA table_info({table})"))]
-            if scols and "scan_status" not in scols:
-                conn.execute(sqlalchemy.text(
-                    f"ALTER TABLE {table} ADD COLUMN scan_status VARCHAR NOT NULL DEFAULT 'approved'"))
         bmvcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(benchmark_videos)"))]
         if bmvcols and "notes" not in bmvcols:
             conn.execute(sqlalchemy.text(
@@ -233,38 +221,9 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text("ALTER TABLE articles ADD COLUMN title VARCHAR DEFAULT ''"))
         if acols and "title_alts" not in acols:
             conn.execute(sqlalchemy.text("ALTER TABLE articles ADD COLUMN title_alts JSON DEFAULT '[]'"))
-        acols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(avatar_configs)"))]
-        if acols and "engine" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN engine VARCHAR NOT NULL DEFAULT 'chanjing'"))
-        if acols and "chanjing_person_id" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN chanjing_person_id VARCHAR DEFAULT ''"))
-        if acols and "chanjing_audio_man" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN chanjing_audio_man VARCHAR DEFAULT ''"))
-        if acols and "chanjing_pic_url" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN chanjing_pic_url VARCHAR DEFAULT ''"))
-        if acols and "chanjing_preview_url" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE avatar_configs ADD COLUMN chanjing_preview_url VARCHAR DEFAULT ''"))
-        vcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(avatar_videos)"))]
-        if vcols and "beans_used" not in vcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN beans_used INTEGER DEFAULT 0"))
-        if vcols and "seconds" not in vcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN seconds REAL DEFAULT 0"))
-        if vcols and "model" not in vcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN model INTEGER DEFAULT 0"))
-        if vcols and "bigtext" not in vcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN bigtext JSON DEFAULT '[]'"))
-        if vcols and "notes" not in vcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN notes VARCHAR DEFAULT ''"))
         tcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(tenants)"))]
         if tcols and "brand" not in tcols:
             conn.execute(sqlalchemy.text("ALTER TABLE tenants ADD COLUMN brand JSON DEFAULT '{}'"))
-        if vcols and "points_used" not in vcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE avatar_videos ADD COLUMN points_used INTEGER DEFAULT 0"))
         # 任务体系 P1 骨架：五要素列 + 活跃任务去重唯一索引
         jcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(jobs)"))]
         for col, ddl in (
@@ -289,7 +248,7 @@ def _migrate(engine) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_active_dedup ON jobs(tenant_id, type, dedup_key)"
             " WHERE dedup_key <> '' AND status IN ('queued','running','parked')"))
         # 多租户：业务表补 tenant_id（历史数据归租户 1）
-        for table in ("articles", "avatar_configs", "avatar_videos", "benchmark_videos",
+        for table in ("articles", "benchmark_videos",
                       "dismissals", "media_assets", "radar_topics",
                       "research_reports", "scripts", "self_videos", "style_profiles",
                       "topics", "watch_accounts", "watch_candidates"):
@@ -300,6 +259,9 @@ def _migrate(engine) -> None:
             if tcols:
                 conn.execute(sqlalchemy.text(
                     f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant ON {table}(tenant_id)"))
+        # 数字人功能退役（2026-10-29 用户裁定）：两张表整体下线（迁移前快照已自动生成）
+        for dead in ("avatar_configs", "avatar_videos"):
+            conn.execute(sqlalchemy.text(f"DROP TABLE IF EXISTS {dead}"))
         # 拆积分/账本/多租户（2026-10-27 用户裁定 1A+2B）：四张死表退役
         # （删表前启动自动快照已保现场；历史数据如需追溯用 pre-migrate 快照）
         for dead in ("tenant_memberships", "credit_transactions", "bean_ledger", "llm_calls"):

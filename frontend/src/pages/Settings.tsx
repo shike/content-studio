@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BrainCircuit, KeyRound, Radar, RefreshCw, Save, Settings as SettingsIcon } from 'lucide-react'
+import { BrainCircuit, Radar, RefreshCw, Save, Settings as SettingsIcon } from 'lucide-react'
 import { api } from '../api'
 import { BrandForm, type BrandShape } from '../brandForm'
 import { Busy, ErrorLine, PageHeader } from '../components'
@@ -19,7 +19,6 @@ interface AppSettings {
   auto_dissect_enabled: boolean
   auto_dissect_min_score: number
   auto_dissect_daily_cap: number
-  chanjing_configured: boolean
 }
 
 const MODELS = ['glm-5.3-flash', 'glm-5.3']
@@ -52,9 +51,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     recent_failures: number
   } | null>(null)
   const [crawlBusy, setCrawlBusy] = useState(false)
-  const [svcAppId, setSvcAppId] = useState('')
-  const [svcSecret, setSvcSecret] = useState('')
-  const [svcBusy, setSvcBusy] = useState(false)
   const [model, setModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keyMsg, setKeyMsg] = useState('')
@@ -342,41 +338,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
           </div>
         </div>
       )}
-
-      {/* 数字人服务商凭证 */}
-      <div className="card mt-4 space-y-3 p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <KeyRound size={16} className="text-sky-500" /> 数字人服务商凭证
-          </div>
-          {conf?.chanjing_configured && <span className="badge bg-emerald-100 text-emerald-700">已配置</span>}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input value={svcAppId} onChange={(e) => setSvcAppId(e.target.value)} placeholder="数字人服务 App ID" className="input max-w-44" />
-          <input type="password" value={svcSecret} onChange={(e) => setSvcSecret(e.target.value)} placeholder="SecretKey（只写不回显）" className="input max-w-52" />
-          <button
-            onClick={async () => {
-              if (!svcAppId.trim() || !svcSecret.trim()) return
-              setSvcBusy(true)
-              try {
-                await api('/settings', {
-                  method: 'PUT',
-                  body: JSON.stringify({ chanjing_app_id: svcAppId.trim(), chanjing_secret_key: svcSecret.trim() }),
-                })
-                setSvcAppId(''); setSvcSecret('')
-              } catch (e) {
-                setError(String(e))
-              } finally {
-                setSvcBusy(false)
-              }
-            }}
-            disabled={svcBusy || !svcAppId.trim() || !svcSecret.trim()}
-            className="btn-accent btn-xs disabled:opacity-40"
-          >
-            {svcBusy ? '保存中…' : '保存凭证'}
-          </button>
-        </div>
-      </div>
 
       {/* 保存条 */}
       <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">

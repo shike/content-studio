@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     data_dir: Path = _REPO_ROOT / "data"  # 相对 DATA_DIR 也锚定仓库根，不随进程 CWD 漂移
 
     zhipu_api_key: str = ""
-    llm_model: str = "glm-5"
+    llm_model: str = "glm-5.3-flash"
 
     # 联网检索：auto=有智谱key用GLM web_search，否则DDG；可强制 glm|ddg
     search_provider: str = "auto"
@@ -35,9 +35,6 @@ class Settings(BaseSettings):
     scrape_proxy: str = ""
     douyin_proxy: str = ""
     douyin_ua: str = ""  # 覆盖抓取 UA（空=按运行平台自动匹配）
-    # 蝉镜开放 API（数字人主线引擎，2026-09-24 定版）：appid + secretKey，设置页可改
-    chanjing_app_id: str = ""
-    chanjing_secret_key: str = ""
     # 部署与安全（云部署：Nginx 反代 + HTTPS 时启用 Cookie Secure；限流防爆破）
     cookie_secure: bool = False   # COOKIE_SECURE=1：会话 Cookie 只经 HTTPS 传输
     login_max_fails: int = 5      # 同一账号在窗口内允许的登录失败次数（超出即锁）

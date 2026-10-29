@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import AvatarVideo, Article, Script, ScriptTemplate, Topic, User
+from ..models import Article, Script, ScriptTemplate, Topic, User
 from ..scripts import service as script_service
 
 router = APIRouter(prefix="/api/scripts")
@@ -169,9 +169,6 @@ def delete_script(script_id: int) -> dict:
         if script is None:
             raise HTTPException(404, detail="script not found")
         # 解绑引用（置空而非删除，保护下游产物）
-        for vp in s.exec(select(AvatarVideo).where(AvatarVideo.script_id == script_id)).all():
-            vp.script_id = None
-            s.add(vp)
         for art in s.exec(select(Article).where(Article.script_id == script_id)).all():
             art.script_id = None
             s.add(art)

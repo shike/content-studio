@@ -26,20 +26,17 @@ export interface MenuStats extends TodoStats {
   style: number // 待拆解风格视频
   tasks: number // 运行中 + 排队 + 待处置任务（待处置非空 = 系统带病运行，必须可见）
   disposal: number // 待处置条数（失败中台：按指纹聚类的无人认领失败）
-  digital: number // 数字人视频生成中
 }
 
 export async function fetchMenuStats(): Promise<MenuStats> {
-  const [todo, bm, acc, styleOv, jobs, avres, failures] = await Promise.all([
+  const [todo, bm, acc, styleOv, jobs, failures] = await Promise.all([
     fetchTodoStats(),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1'),
     api<{ items: { enabled: boolean }[] }>('/watch/accounts'),
     api<{ stats: { pending: number } }>('/style/overview'),
     api<{ counts: { running: number; queued: number; parked?: number } }>('/jobs?limit=1'),
-    api<{ items: { status: string }[]; counts?: Record<string, number> }>('/avatar/videos'),
     api<{ disposal: number }>('/jobs/failures'),
   ])
-  const av = avres
   return {
     ...todo,
     publishing: todo.finalScripts,
@@ -51,7 +48,6 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     disposal: failures.disposal || 0,
     // 在途任务 = 运行中 + 排队 + 挂起（额度/风控等待自动重试，也是活任务）+ 待处置
     tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.parked || 0) + (failures.disposal || 0),
-    digital: av.counts?.generating ?? av.items.filter((x) => x.status === 'generating').length,
   }
 }
 
