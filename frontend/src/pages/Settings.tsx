@@ -128,7 +128,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
       <PageHeader
         icon={SettingsIcon}
         title="设置"
-        desc="账号 · 品牌人设 · LLM 与检索 · 采集扫描 · 数字人凭证"
+        desc="全部改动保存后运行时生效"
       />
 
       {busy && <div className="mb-3"><Busy text={busy} /></div>}
@@ -137,10 +137,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
       <AccountCard displayName={displayName} role={role} onLogout={onLogout} />
 
       <div className="card mb-4 space-y-3 p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-sm font-semibold text-slate-800">品牌与内容人设</div>
-          <span className="text-[11px] text-slate-400">角标栏目、头图署名/口号、内容人设、受众域、主色与 ASR 词表——保存后新出片/新文章按此渲染</span>
-        </div>
+        <div className="text-sm font-semibold text-slate-800">品牌与内容人设</div>
         {/* 必须等配置取回再渲染表单：BrandForm 的 useState 只在首挂载取初值，
         带 {} 先挂载会停留在空字段（2026-10-03 用户报设置里配置为空的根因） */}
         {ownBrand === null ? <Busy text="品牌配置加载中…" /> : <BrandForm initial={ownBrand} onSave={saveOwnBrand} />}
@@ -166,7 +163,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
             </div>
             <label className="block space-y-1">
               <span className="text-xs text-slate-400">
-                API Key（只写不读回；存数据库，随每日备份）
+                API Key
                 {conf.zhipu_api_key_set
                   ? <span className="badge ml-2 bg-emerald-100 text-emerald-700">已配置</span>
                   : <span className="badge ml-2 bg-amber-100 text-amber-700">未配置</span>}
@@ -176,7 +173,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={conf.zhipu_api_key_set ? '••••••（已设置，粘贴新值可覆盖；留空不修改）' : '粘贴智谱 API Key'}
+                  placeholder={conf.zhipu_api_key_set ? '已设置，粘贴新值可覆盖' : '粘贴智谱 API Key'}
                   className="input flex-1"
                 />
                 <button
@@ -198,7 +195,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
               {keyMsg && <span className="text-[11px] text-emerald-600">{keyMsg}</span>}
             </label>
             <label className="block space-y-1">
-              <span className="text-xs text-slate-400">写作模型（切换立即生效，存入数据库）</span>
+              <span className="text-xs text-slate-400">写作模型</span>
               <select value={model} onChange={(e) => setModel(e.target.value)} className="select w-full">
                 {MODELS.map((m) => (
                   <option key={m} value={m}>{m}</option>
@@ -228,10 +225,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                     }`}
                   >{p.label}</button>
                 ))}
-              </div>
-              <div className="text-[11px] leading-relaxed text-slate-400">
-                {SEARCH_PROVIDERS.find((p) => p.key === search)?.desc}
-                。生成走套餐端点（额度内）；联网检索与其解耦，走智谱搜索端点，DDG 为兜底。
               </div>
             </div>
           </div>
@@ -280,15 +273,11 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                     {h.status === 'ok' ? '✓' : '✗'}
                   </span>
                 ))}
-                <span className="text-[11px] text-slate-400">最近 8 次自动探测（✓ 正常 / ✗ 异常）</span>
               </div>
             )}
             {crawl?.last?.detail && (
               <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">{crawl.last.detail}</div>
             )}
-            <div className="text-xs leading-relaxed text-slate-400">
-              每 15 分钟自动用真实视频页探测一次采集链路（机房直连出口 / 浏览器 / 反爬）；异常时新拆解可能失败，可走「本地视频拆解」上传。
-            </div>
             <div className="space-y-3 border-t border-slate-100 pt-3">
               <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
                 <label className="flex items-center gap-2">
@@ -312,7 +301,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                     ))}
                   </select>
                 </span>
-                <span className="text-xs text-slate-400">失败后 1 小时自动重试，最多 3 次</span>
               </div>
               <div className="space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5">
                 <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -322,7 +310,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                     onChange={(e) => setAutoDissect(e.target.checked)}
                     className="size-4 accent-sky-500"
                   />
-                  质量闸自动拆解：按内容热度分（赞粉比×赞数量）自动批准同行高热度作品与雷达命中
+                  质量闸自动拆解
                 </label>
                 <div className="flex items-center gap-2 text-sm text-slate-700">
                   门槛（热度分≥）
@@ -340,7 +328,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                     className="input max-w-20"
                   />
                   条
-                  <span className="text-xs text-slate-400">话题雷达命中共享同一上限</span>
                 </div>
               </div>
               <div className="space-y-1">
@@ -351,10 +338,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                   placeholder="逗号分隔，如：行业动态, 商业观察, 技术应用（按你的行业填）（留空用平台默认）"
                   className="input w-full"
                 />
-                <span className="text-xs text-slate-400">每日 2 点的「同行发现」按天轮换其中一个去挖清单外高赞同行；改词即日生效（下次轮换用新池）</span>
-              </div>
-              <div className="text-xs leading-relaxed text-slate-400">
-                扫描只入库新作品到拆解库「待定夺」，不会自动消耗拆解额度。
               </div>
             </div>
           </div>
@@ -393,7 +376,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
           >
             {svcBusy ? '保存中…' : '保存凭证'}
           </button>
-          <span className="text-[11px] text-slate-400">数字人服务商控制台获取；保存后运行时生效</span>
         </div>
       </div>
 
