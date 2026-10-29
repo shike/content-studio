@@ -183,7 +183,6 @@ export default function App() {
 
         <div className="border-t border-[rgba(240,233,213,0.1)] px-3 py-3">
           {SYSTEM.map(renderItem)}
-          {me && <UserBlock me={me} onLogout={() => { setMe(null); setAuthed(false) }} />}
         </div>
       </aside>
 
@@ -196,17 +195,14 @@ export default function App() {
           {active === 'intel' && <Intel onNavigate={navTo} />}
           {active === 'publishing' && <PublishingHub />}
           {active === 'tasks' && <Tasks />}
-          {active === 'settings' && <SettingsPage role={me?.role ?? 'member'} />}
+          {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}
+            onLogout={() => { setMe(null); setAuthed(false) }} />}
         </div>
       </main>
     </div>
   )
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  platform_admin: '管理员',
-  member: '成员',
-}
 
 /** 会话口径：/auth/me 返回的用户上下文（单管理员版） */
 interface MeInfo {
@@ -216,77 +212,4 @@ interface MeInfo {
   must_change_password?: boolean
   tenant_id: number
   tenant_name: string
-}
-
-/** 侧栏用户块：当前用户 + 行内改密 + 退出登录 */
-function UserBlock({ me, onLogout }: {
-  me: MeInfo
-  onLogout: () => void
-}) {
-  const [pwdOpen, setPwdOpen] = useState(false)
-  const [oldPwd, setOldPwd] = useState('')
-  const [newPwd, setNewPwd] = useState('')
-  const [msg, setMsg] = useState('')
-  const [err, setErr] = useState('')
-  const [busy, setBusy] = useState(false)
-  const logout = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* 忽略 */ }
-    onLogout()
-  }
-
-  const changePwd = async () => {
-    setBusy(true); setErr(''); setMsg('')
-    try {
-      const r = await fetch('/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }),
-      })
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}))
-        throw new Error(d.detail || `HTTP ${r.status}`)
-      }
-      setMsg('密码已修改'); setOldPwd(''); setNewPwd(''); setPwdOpen(false)
-    } catch (e) {
-      setErr(String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="mt-2 rounded-xl border border-[rgba(232,201,127,0.14)] bg-[rgba(240,233,213,0.06)] p-2.5">
-      <div className="flex items-center gap-2">
-        <div className="grid size-7 shrink-0 place-items-center rounded-full bg-linear-to-br from-[#e8c97f] to-[#c9a25c] text-xs font-semibold text-[#0d3b2d]">
-          {(me.display_name || '?').slice(0, 1)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium text-[#f0e9d5]">{me.display_name}</div>
-          <div className="text-[10px] text-[#9dbba9]/70">{ROLE_LABEL[me.role] ?? me.role}</div>
-        </div>
-        <button title="退出登录" onClick={logout}
-          className="rounded-md px-1.5 py-1 text-[11px] text-[#9dbba9] transition hover:bg-[rgba(240,233,213,0.08)] hover:text-[#f0e9d5]">
-          退出
-        </button>
-      </div>
-      <button className="mt-1 text-[10px] text-[#9dbba9]/80 hover:text-[#f0e9d5]"
-        onClick={() => { setPwdOpen((v) => !v); setMsg(''); setErr('') }}>
-        {pwdOpen ? '收起' : '修改密码'}
-      </button>
-      {pwdOpen && (
-        <div className="mt-1.5 space-y-1.5">
-          <input type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)}
-            placeholder="原密码" className="w-full rounded-md border border-[rgba(240,233,213,0.16)] bg-[rgba(10,47,36,0.6)] px-2 py-1 text-xs text-[#f0e9d5] outline-none placeholder:text-[#7fa695]/60 focus:border-[#e8c97f]" />
-          <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)}
-            placeholder="新密码（至少 8 位）" className="w-full rounded-md border border-[rgba(240,233,213,0.16)] bg-[rgba(10,47,36,0.6)] px-2 py-1 text-xs text-[#f0e9d5] outline-none placeholder:text-[#7fa695]/60 focus:border-[#e8c97f]" />
-          <button disabled={busy || !oldPwd || newPwd.length < 8} onClick={changePwd}
-            className="w-full rounded-full bg-linear-to-br from-[#e8c97f] to-[#c9a25c] px-2 py-1 text-xs font-semibold text-[#0d3b2d] transition hover:brightness-105 disabled:opacity-40">
-            保存新密码
-          </button>
-        </div>
-      )}
-      {msg && <div className="mt-1 text-[10px] text-[#8ff7d2]">{msg}</div>}
-      {err && <div className="mt-1 text-[10px] text-[#ff9b8f]">{err}</div>}
-    </div>
-  )
 }
