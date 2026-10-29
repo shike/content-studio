@@ -269,7 +269,6 @@ function UserBlock({ me, onLogout }: {
           退出
         </button>
       </div>
-      {me.tenant_name && <div className="mt-1 truncate text-[10px] text-[#9dbba9]/60">{me.tenant_name}</div>}
       <button className="mt-1 text-[10px] text-[#9dbba9]/80 hover:text-[#f0e9d5]"
         onClick={() => { setPwdOpen((v) => !v); setMsg(''); setErr('') }}>
         {pwdOpen ? '收起' : '修改密码'}
