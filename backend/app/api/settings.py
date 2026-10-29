@@ -16,15 +16,12 @@ from ..settings_store import MANAGED, save_overrides, stored_secret_state
 
 router = APIRouter(prefix="/api/settings")
 
-_MODELS = ["glm-5", "glm-5-turbo", "glm-4.7", "glm-5.3", "glm-5.3-flash",
-           "deepseek-chat", "deepseek-reasoner"]
+_MODELS = ["glm-5.3-flash", "glm-5.3"]
 _SEARCH_PROVIDERS = ["auto", "glm", "ddg"]
-_LLM_PROVIDERS = ["glm", "deepseek"]
 
 
 def _status() -> dict:
     st = {
-        "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_configured": gateway.is_configured(),
         "zhipu_base_url": settings.zhipu_base_url,
@@ -55,7 +52,6 @@ def get_settings() -> dict:
 
 class UpdateIn(BaseModel):
     # 非密钥项
-    llm_provider: str | None = None
     llm_model: str | None = None
     zhipu_base_url: str | None = None
     search_provider: str | None = None
@@ -72,7 +68,6 @@ class UpdateIn(BaseModel):
     auto_dissect_daily_cap: int | None = None
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
-    deepseek_api_key: str | None = None
     chanjing_app_id: str | None = None
     chanjing_secret_key: str | None = None
 
@@ -81,10 +76,6 @@ class UpdateIn(BaseModel):
 def update_settings(body: UpdateIn) -> dict:
     values: dict = {}
 
-    if body.llm_provider is not None:
-        if body.llm_provider not in _LLM_PROVIDERS:
-            raise HTTPException(400, detail=f"未知 LLM 通道，可选：{'、'.join(_LLM_PROVIDERS)}")
-        values["llm_provider"] = body.llm_provider
     if body.llm_model is not None:
         if body.llm_model not in _MODELS:
             raise HTTPException(400, detail=f"未知模型，可选：{'、'.join(_MODELS)}")
@@ -134,7 +125,7 @@ def update_settings(body: UpdateIn) -> dict:
     if body.auto_dissect_daily_cap is not None:
         values["auto_dissect_daily_cap"] = max(0, body.auto_dissect_daily_cap)
     # 密钥项：空串=清除
-    for key in ("zhipu_api_key", "deepseek_api_key", "chanjing_app_id", "chanjing_secret_key"):
+    for key in ("zhipu_api_key", "chanjing_app_id", "chanjing_secret_key"):
         v = getattr(body, key)
         if v is not None:
             values[key] = v.strip()

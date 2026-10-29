@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BrainCircuit, FlaskConical, Globe, RefreshCw, Save, Settings as SettingsIcon } from 'lucide-react'
+import { BrainCircuit, KeyRound, Radar, RefreshCw, Save, Settings as SettingsIcon } from 'lucide-react'
 import { api } from '../api'
 import { BrandForm, type BrandShape } from '../brandForm'
 import { Busy, ErrorLine, PageHeader } from '../components'
 
 interface AppSettings {
-  llm_provider: string
   llm_model: string
   llm_configured: boolean
   zhipu_api_key_set: boolean
-  deepseek_api_key_set: boolean
   zhipu_base_url: string
   coding_plan: boolean
   search_provider: string
@@ -24,14 +22,11 @@ interface AppSettings {
   chanjing_configured: boolean
 }
 
-
-
-
-const MODELS = ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-5.3', 'glm-5.3-flash', 'deepseek-chat', 'deepseek-reasoner']
+const MODELS = ['glm-5.3-flash', 'glm-5.3']
 const SEARCH_PROVIDERS: { key: string; label: string; desc: string }[] = [
-  { key: 'ddg', label: 'DuckDuckGo', desc: '免费、免 key（有限流，自动缓存+退避）' },
-  { key: 'auto', label: '自动（优先 GLM）', desc: '有智谱按量余额时用 GLM 联网搜索，失败转 DDG' },
+  { key: 'auto', label: '自动（优先 GLM）', desc: '智谱联网搜索优先，失败转 DDG' },
   { key: 'glm', label: '强制 GLM', desc: '仅按量付费通道支持（Coding Plan 套餐不含 web_search）' },
+  { key: 'ddg', label: 'DuckDuckGo', desc: '免费、免 key（有限流，自动缓存+退避）' },
 ]
 
 export default function Settings({ displayName = '', role = 'member', onLogout }: {
@@ -39,7 +34,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   role?: string
   onLogout?: () => void
 }) {
-  const isPlatform = role === 'platform_admin'
+  const [conf, setConf] = useState<AppSettings | null>(null)
   const [ownBrand, setOwnBrand] = useState<Partial<BrandShape> | null>(null)
   useEffect(() => {
     if (role === 'member') return
@@ -47,11 +42,9 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
       .then((d) => setOwnBrand(d.brand ?? {}))
       .catch(() => setOwnBrand({}))
   }, [role])
-  const saveOwnBrand = async (payload: BrandShape) => {
-    await api('/tenant/brand', { method: 'PUT', body: JSON.stringify(payload) })
-  }
-  const [conf, setConf] = useState<AppSettings | null>(null)
-  // 抖音采集探针（每 15 分钟自动跑一次；手动可立即探测）
+  const saveOwnBrand = (payload: Partial<BrandShape>) =>
+    api('/tenant/brand', { method: 'PUT', body: JSON.stringify(payload) })
+
   const [crawl, setCrawl] = useState<{
     last: { status: string; detail?: string; at?: string } | null
     history: { status: string; at: string }[]
@@ -73,13 +66,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   const [autoMinScore, setAutoMinScore] = useState(6)
   const [autoCap, setAutoCap] = useState(6)
   const [pingReply, setPingReply] = useState('')
-  const [probe, setProbe] = useState<{
-    query: string
-    glm: { http?: number; web_search_field?: unknown; content_head?: string; error?: string }
-    glm_verdict: string
-    ddg: { status?: string; results?: { title: string; url: string }[] }
-    ddg_verdict: string
-  } | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -100,7 +86,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     setAutoDissect(c.auto_dissect_enabled)
     setAutoMinScore(c.auto_dissect_min_score)
     setAutoCap(c.auto_dissect_daily_cap)
-  }, [isPlatform])
+  }, [])
 
   useEffect(() => {
     reload().catch((e) => setError(String(e)))
@@ -127,16 +113,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
       setPingReply(r.reply)
     })
 
-  const searchProbe = () =>
-    guard(async () => {
-      setBusy('检索通道实测中（同一查询分别走 GLM 与 DDG）…')
-      const r = await api<NonNullable<typeof probe>>('/llm/search-probe', {
-        method: 'POST',
-        body: JSON.stringify({ query: '智谱 GLM 最新发布 模型' }),
-      })
-      setProbe(r)
-    })
-
   const save = () =>
     guard(async () => {
       if (!conf) return
@@ -152,7 +128,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
       <PageHeader
         icon={SettingsIcon}
         title="设置"
-        desc="品牌人设 · LLM 通道 · 联网检索 · 采集状态"
+        desc="账号 · 品牌人设 · LLM 与检索 · 采集扫描 · 数字人凭证"
       />
 
       {busy && <div className="mb-3"><Busy text={busy} /></div>}
@@ -160,42 +136,32 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
 
       <AccountCard displayName={displayName} role={role} onLogout={onLogout} />
 
-      {role !== 'member' && (
-        <div className="card mb-4 space-y-3 p-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-sm font-semibold text-slate-800">品牌与内容人设</div>
-            <span className="text-[11px] text-slate-400">角标栏目、头图署名/口号、内容人设、受众域、主色与 ASR 词表——保存后新出片/新文章按此渲染</span>
-          </div>
-          {/* 必须等配置取回再渲染表单：BrandForm 的 useState 只在首挂载取初值，
-          带 {} 先挂载会停留在空字段（2026-10-03 用户报设置里配置为空的根因） */}
-          {ownBrand === null ? <Busy text="品牌配置加载中…" /> : <BrandForm initial={ownBrand} onSave={saveOwnBrand} />}
+      <div className="card mb-4 space-y-3 p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold text-slate-800">品牌与内容人设</div>
+          <span className="text-[11px] text-slate-400">角标栏目、头图署名/口号、内容人设、受众域、主色与 ASR 词表——保存后新出片/新文章按此渲染</span>
         </div>
-      )}
+        {/* 必须等配置取回再渲染表单：BrandForm 的 useState 只在首挂载取初值，
+        带 {} 先挂载会停留在空字段（2026-10-03 用户报设置里配置为空的根因） */}
+        {ownBrand === null ? <Busy text="品牌配置加载中…" /> : <BrandForm initial={ownBrand} onSave={saveOwnBrand} />}
+      </div>
 
       {conf && (
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-          {/* LLM 通道 */}
+          {/* LLM 与联网检索（原两张卡合并，2026-10-29 版面收敛） */}
           <div className="card space-y-4 p-5">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <BrainCircuit size={16} className="text-sky-500" /> LLM 通道
+              <BrainCircuit size={16} className="text-sky-500" /> LLM 与联网检索
             </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <div className="text-xs text-slate-400">服务商</div>
-                <div className="mt-0.5 font-medium text-slate-800">
-                  {conf.llm_provider === 'glm' ? '智谱 GLM' : conf.llm_provider}
-                  {conf.llm_configured ? (
-                    <span className="badge ml-2 bg-emerald-100 text-emerald-700">已配置</span>
-                  ) : (
-                    <span className="badge ml-2 bg-red-100 text-red-600">缺密钥</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-400">端点</div>
-                <div className="mt-0.5 truncate font-medium text-slate-800" title={conf.zhipu_base_url}>
-                  {conf.coding_plan ? 'Coding Plan 套餐' : '按量付费 PaaS'}
-                </div>
+            <div>
+              <div className="text-xs text-slate-400">生成端点</div>
+              <div className="mt-0.5 font-medium text-slate-800" title={conf.zhipu_base_url}>
+                {conf.coding_plan ? 'Coding Plan 套餐' : '按量付费 PaaS'}
+                {conf.llm_configured ? (
+                  <span className="badge ml-2 bg-emerald-100 text-emerald-700">已配置</span>
+                ) : (
+                  <span className="badge ml-2 bg-red-100 text-red-600">缺密钥</span>
+                )}
               </div>
             </div>
             <label className="block space-y-1">
@@ -247,72 +213,35 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                 <span className="badge bg-emerald-100 text-emerald-700">真实调用返回：{pingReply.slice(0, 20)}</span>
               )}
             </div>
-            {conf.coding_plan && (
-              <div className="rounded-lg bg-sky-50/70 px-3 py-2 text-xs leading-relaxed text-sky-800">
-                当前 LLM 生成走 Coding Plan 套餐端点（额度内免费）；联网检索与此解耦——
-                {isPlatform ? '走智谱按量搜索端点独立计费（约 0.01 元/次），DDG 为兜底。' : '检索走智谱搜索端点，DDG 为兜底。'}
+            <div className="space-y-2 border-t border-slate-100 pt-3">
+              <div className="text-xs font-medium text-slate-500">联网检索通道（深研/热点/发现共用）</div>
+              <div className="flex flex-wrap gap-2">
+                {SEARCH_PROVIDERS.map((p) => (
+                  <button
+                    key={p.key}
+                    title={p.desc}
+                    onClick={() => setSearch(p.key)}
+                    className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                      search === p.key
+                        ? 'border-sky-400 bg-sky-50/60 font-medium text-sky-700 ring-2 ring-sky-200'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                  >{p.label}</button>
+                ))}
               </div>
-            )}
+              <div className="text-[11px] leading-relaxed text-slate-400">
+                {SEARCH_PROVIDERS.find((p) => p.key === search)?.desc}
+                。生成走套餐端点（额度内）；联网检索与其解耦，走智谱搜索端点，DDG 为兜底。
+              </div>
+            </div>
           </div>
 
-          {/* 联网检索 */}
-          <div className="card space-y-4 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <Globe size={16} className="text-sky-500" /> 联网检索通道
-            </div>
-            <div className="space-y-2">
-              {SEARCH_PROVIDERS.map((p) => (
-                <button
-                  key={p.key}
-                  onClick={() => setSearch(p.key)}
-                  className={`flex w-full flex-col rounded-xl border px-4 py-2.5 text-left transition ${
-                    search === p.key
-                      ? 'border-sky-400 bg-sky-50/50 ring-2 ring-sky-200'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <span className="text-sm font-medium text-slate-800">{p.label}</span>
-                  <span className="mt-0.5 text-xs text-slate-400">{p.desc}</span>
-                </button>
-              ))}
-            </div>
-            <details className="rounded-xl border border-slate-200 px-3.5 py-3">
-              <summary className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500">
-                <FlaskConical size={13} /> 检索 A/B 实测（同一查询分别走 GLM 与 DDG）
-              </summary>
-              <button onClick={searchProbe} className="btn-ghost btn-xs mt-3">开始实测</button>
-              {probe && (
-                <div className="mt-3 space-y-2 text-xs">
-                  <div className="font-medium text-slate-600">查询：{probe.query}</div>
-                  <div className={`rounded-lg px-3 py-2 leading-relaxed ${probe.glm_verdict.includes('有') ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
-                    <b>GLM（{conf?.coding_plan ? '套餐端点' : '按量端点'}）：{probe.glm_verdict}</b>
-                    <div className="mt-1 text-slate-500">web_search 字段：{probe.glm.web_search_field ? JSON.stringify(probe.glm.web_search_field).slice(0, 200) : 'null（响应中无搜索来源）'}</div>
-                    {probe.glm.content_head && (
-                      <details className="mt-1">
-                        <summary className="cursor-pointer text-sky-600">模型回答开头</summary>
-                        <div className="mt-1 text-slate-600">{probe.glm.content_head}</div>
-                      </details>
-                    )}
-                  </div>
-                  <div className={`rounded-lg px-3 py-2 leading-relaxed ${probe.ddg.results?.length ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
-                    <b>DDG：{probe.ddg_verdict}</b>
-                    {probe.ddg.results?.length ? (
-                      <ul className="mt-1 space-y-0.5 text-slate-600">
-                        {probe.ddg.results.slice(0, 3).map((r2) => (
-                          <li key={r2.url}>· {r2.title}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-            </details>
-          </div>
-
-{/* 数据采集状态：探针 15 分钟一轮 + 手动立即探测 */}
+          {/* 数据采集与同行扫描（原两张卡合并，2026-10-29 版面收敛） */}
           <div className="card space-y-3 p-5">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-sm font-semibold text-slate-800">数据采集（抖音）</div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <Radar size={16} className="text-sky-500" /> 数据采集与同行扫描
+              </div>
               {crawl && crawl.last ? (
                 <span className={`badge ${crawl.last.status === 'ok' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
                   {crawl.label}
@@ -320,19 +249,14 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
               ) : (
                 <span className="badge bg-slate-100 text-slate-500">尚未探测</span>
               )}
-              {crawl && crawl.last?.at && <span className="text-[11px] text-slate-400">上次探测 {crawl.last.at}</span>}
-              {crawl && crawl.recent_failures > 0 && (
-                <span className="text-[11px] text-amber-600">近 1 小时爬取失败 {crawl.recent_failures} 次</span>
-              )}
               <button
                 onClick={async () => {
                   setCrawlBusy(true)
                   try {
-                    const r = await api<{ label: string }>('/crawl/probe', { method: 'POST' })
+                    await api('/crawl/probe', { method: 'POST' })
                     const c = await api<{ last: { status: string; detail?: string; at?: string } | null; history: { status: string; at: string }[]; label: string; recent_failures: number }>('/crawl/status')
                     setCrawl(c)
                     setError('')
-                    void r
                   } catch (e) {
                     setError(String(e))
                   } finally {
@@ -363,116 +287,115 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
               <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">{crawl.last.detail}</div>
             )}
             <div className="text-xs leading-relaxed text-slate-400">
-              每 15 分钟自动用真实视频页探测一次采集链路（隧道 / 浏览器 / 风控）；异常时新拆解可能失败，可走「本地视频拆解」上传。
+              每 15 分钟自动用真实视频页探测一次采集链路（机房直连出口 / 浏览器 / 反爬）；异常时新拆解可能失败，可走「本地视频拆解」上传。
+            </div>
+            <div className="space-y-3 border-t border-slate-100 pt-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={scanEnabled}
+                    onChange={(e) => setScanEnabled(e.target.checked)}
+                    className="size-4 accent-sky-500"
+                  />
+                  每天定时扫描同行监测账号（含自我账号）
+                </label>
+                <span className="flex items-center gap-2">
+                  触发时间
+                  <select
+                    value={scanHour}
+                    onChange={(e) => setScanHour(Number(e.target.value))}
+                    className="input max-w-24"
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                    ))}
+                  </select>
+                </span>
+                <span className="text-xs text-slate-400">失败后 1 小时自动重试，最多 3 次</span>
+              </div>
+              <div className="space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={autoDissect}
+                    onChange={(e) => setAutoDissect(e.target.checked)}
+                    className="size-4 accent-sky-500"
+                  />
+                  质量闸自动拆解：按内容热度分（赞粉比×赞数量）自动批准同行高热度作品与雷达命中
+                </label>
+                <div className="flex items-center gap-2 text-sm text-slate-700">
+                  门槛（热度分≥）
+                  <input
+                    type="number"
+                    value={autoMinScore}
+                    onChange={(e) => setAutoMinScore(Number(e.target.value) || 0)}
+                    className="input max-w-20"
+                  />
+                  每日上限
+                  <input
+                    type="number"
+                    value={autoCap}
+                    onChange={(e) => setAutoCap(Number(e.target.value) || 0)}
+                    className="input max-w-20"
+                  />
+                  条
+                  <span className="text-xs text-slate-400">话题雷达命中共享同一上限</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-sm text-slate-700">每日发现的关键词池</label>
+                <input
+                  value={discoverKw}
+                  onChange={(e) => setDiscoverKw(e.target.value)}
+                  placeholder="逗号分隔，如：行业动态, 商业观察, 技术应用（按你的行业填）（留空用平台默认）"
+                  className="input w-full"
+                />
+                <span className="text-xs text-slate-400">每日 2 点的「同行发现」按天轮换其中一个去挖清单外高赞同行；改词即日生效（下次轮换用新池）</span>
+              </div>
+              <div className="text-xs leading-relaxed text-slate-400">
+                扫描只入库新作品到拆解库「待定夺」，不会自动消耗拆解额度。
+              </div>
             </div>
           </div>
-
-          {/* 平台成本 · 数字人服务商（仅平台管理员）：余额/凭证；租户不渲染 */}
-          {isPlatform && (
-            <div className="card space-y-3 p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold text-slate-800">数字人服务商凭证</div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input value={svcAppId} onChange={(e) => setSvcAppId(e.target.value)} placeholder="数字人服务 App ID" className="input max-w-44" />
-                <input type="password" value={svcSecret} onChange={(e) => setSvcSecret(e.target.value)} placeholder="SecretKey（只写不回显）" className="input max-w-52" />
-                <button
-                  onClick={async () => {
-                    if (!svcAppId.trim() || !svcSecret.trim()) return
-                    setSvcBusy(true)
-                    try {
-                      await api('/settings', {
-                        method: 'PUT',
-                        body: JSON.stringify({ chanjing_app_id: svcAppId.trim(), chanjing_secret_key: svcSecret.trim() }),
-                      })
-                      setSvcAppId(''); setSvcSecret('')
-                    } catch (e) {
-                      setError(String(e))
-                    } finally {
-                      setSvcBusy(false)
-                    }
-                  }}
-                  disabled={svcBusy || !svcAppId.trim() || !svcSecret.trim()}
-                  className="btn-accent btn-xs disabled:opacity-40"
-                >
-                  {svcBusy ? '保存中…' : '保存凭证'}
-                </button>
-                <span className="text-[11px] text-slate-400">数字人服务商控制台获取；保存后运行时生效</span>
-              </div>
-            </div>
-          )}
-
-          {/* 同行扫描周期 */}
-          <div className="card space-y-3 p-5">
-            <div className="text-sm font-semibold text-slate-800">同行扫描周期</div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={scanEnabled}
-                onChange={(e) => setScanEnabled(e.target.checked)}
-                className="size-4 accent-sky-500"
-              />
-              每天定时自动扫描同行监测账号（含自我账号）
-            </label>
-            <div className="flex items-center gap-2 text-sm text-slate-700">
-              触发时间
-              <select
-                value={scanHour}
-                onChange={(e) => setScanHour(Number(e.target.value))}
-                className="input max-w-24"
-              >
-                {Array.from({ length: 24 }, (_, h) => (
-                  <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-400">失败后 1 小时自动重试，最多 3 次</span>
-            </div>
-            <div className="space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={autoDissect}
-                  onChange={(e) => setAutoDissect(e.target.checked)}
-                  className="size-4 accent-sky-500"
-                />
-                质量闸自动拆解：按内容热度分（赞粉比×赞数量）自动批准同行高热度作品与雷达命中
-              </label>
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                门槛（热度分≥）
-                <input
-                  type="number"
-                  value={autoMinScore}
-                  onChange={(e) => setAutoMinScore(Number(e.target.value) || 0)}
-                  className="input max-w-20"
-                />
-                每日上限
-                <input
-                  type="number"
-                  value={autoCap}
-                  onChange={(e) => setAutoCap(Number(e.target.value) || 0)}
-                  className="input max-w-20"
-                />
-                条
-                <span className="text-xs text-slate-400">话题雷达命中共享同一上限</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="block text-sm text-slate-700">每日发现的关键词池</label>
-              <input
-                value={discoverKw}
-                onChange={(e) => setDiscoverKw(e.target.value)}
-                placeholder="逗号分隔，如：行业动态, 商业观察, 技术应用（按你的行业填）（留空用平台默认）"
-                className="input w-full"
-              />
-              <span className="text-xs text-slate-400">每日 2 点的「同行发现」按天轮换其中一个去挖清单外高赞同行；改词即日生效（下次轮换用新池）</span>
-            </div>
-            <div className="text-xs leading-relaxed text-slate-400">
-              扫描只入库新作品到拆解库「待定夺」，不会自动消耗拆解额度。
-            </div>
-          </div>
-
         </div>
       )}
+
+      {/* 数字人服务商凭证 */}
+      <div className="card mt-4 space-y-3 p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <KeyRound size={16} className="text-sky-500" /> 数字人服务商凭证
+          </div>
+          {conf?.chanjing_configured && <span className="badge bg-emerald-100 text-emerald-700">已配置</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={svcAppId} onChange={(e) => setSvcAppId(e.target.value)} placeholder="数字人服务 App ID" className="input max-w-44" />
+          <input type="password" value={svcSecret} onChange={(e) => setSvcSecret(e.target.value)} placeholder="SecretKey（只写不回显）" className="input max-w-52" />
+          <button
+            onClick={async () => {
+              if (!svcAppId.trim() || !svcSecret.trim()) return
+              setSvcBusy(true)
+              try {
+                await api('/settings', {
+                  method: 'PUT',
+                  body: JSON.stringify({ chanjing_app_id: svcAppId.trim(), chanjing_secret_key: svcSecret.trim() }),
+                })
+                setSvcAppId(''); setSvcSecret('')
+              } catch (e) {
+                setError(String(e))
+              } finally {
+                setSvcBusy(false)
+              }
+            }}
+            disabled={svcBusy || !svcAppId.trim() || !svcSecret.trim()}
+            className="btn-accent btn-xs disabled:opacity-40"
+          >
+            {svcBusy ? '保存中…' : '保存凭证'}
+          </button>
+          <span className="text-[11px] text-slate-400">数字人服务商控制台获取；保存后运行时生效</span>
+        </div>
+      </div>
 
       {/* 保存条 */}
       <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">

@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     port: int = 8000
     data_dir: Path = _REPO_ROOT / "data"  # 相对 DATA_DIR 也锚定仓库根，不随进程 CWD 漂移
 
-    llm_provider: str = "glm"  # glm | deepseek
     zhipu_api_key: str = ""
-    deepseek_api_key: str = ""
     llm_model: str = "glm-5"
 
     # 联网检索：auto=有智谱key用GLM web_search，否则DDG；可强制 glm|ddg

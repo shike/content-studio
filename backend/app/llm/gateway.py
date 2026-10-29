@@ -17,13 +17,8 @@ from ..settings import settings
 # 元 / 百万 tokens: (输入, 输出)。缺省按 glm-5 计。
 # glm-5.3-flash 为估算值（官方未公布牌价，实际走 Coding Plan 套餐额度）
 _PRICES = {
-    "glm-5": (4, 18),
-    "glm-5-turbo": (5, 22),
-    "glm-4.7": (2, 8),
-    "glm-5.3": (8, 28),
     "glm-5.3-flash": (2, 8),
-    "deepseek-chat": (2, 8),
-    "deepseek-reasoner": (4, 16),
+    "glm-5.3": (8, 28),
 }
 
 
@@ -32,14 +27,7 @@ class LLMError(RuntimeError):
 
 
 def active() -> dict:
-    provider = settings.llm_provider.lower()
-    if provider == "deepseek":
-        return {
-            "provider": "deepseek",
-            "base_url": "https://api.deepseek.com",
-            "key": settings.deepseek_api_key,
-            "model": settings.llm_model if settings.llm_model.startswith("deepseek") else "deepseek-chat",
-        }
+    # 单通道 glm（2026-10-29 用户定版：DeepSeek 备选路径整体移除，不保留开关）
     return {
         "provider": "glm",
         "base_url": settings.zhipu_base_url.rstrip("/"),

@@ -17,10 +17,8 @@ from .settings import settings
 
 # 受管键 → 类型（str/int/bool/secret；secret 只写不读回）
 MANAGED: dict[str, str] = {
-    "llm_provider": "str",
     "llm_model": "str",
     "zhipu_api_key": "secret",
-    "deepseek_api_key": "secret",
     "zhipu_base_url": "str",
     "search_provider": "str",
     "search_enabled": "bool",
@@ -110,7 +108,6 @@ def stored_secret_state() -> dict:
         keys = {r.key for r in s.exec(select(AppSetting)).all()}
     return {
         "zhipu_api_key_set": bool(settings.zhipu_api_key),
-        "deepseek_api_key_set": bool(settings.deepseek_api_key),
         "chanjing_secret_set": bool(settings.chanjing_secret_key),
         "in_db": sorted(k for k in keys if k in MANAGED),
     }
