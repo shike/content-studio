@@ -35,6 +35,7 @@ def _status() -> dict:
         "zhipu_search_model": settings.zhipu_search_model,
         "asr_model": settings.asr_model,
         "douyin_proxy": settings.douyin_proxy,
+        "scrape_proxy": settings.scrape_proxy,
         "watch_scan_enabled": settings.watch_scan_enabled,
         "watch_scan_hour": settings.watch_scan_hour,
         "auto_dissect_enabled": settings.auto_dissect_enabled,
@@ -63,6 +64,7 @@ class UpdateIn(BaseModel):
     zhipu_search_base_url: str | None = None
     asr_model: str | None = None
     douyin_proxy: str | None = None
+    scrape_proxy: str | None = None
     watch_scan_enabled: bool | None = None
     watch_scan_hour: int | None = None
     auto_dissect_enabled: bool | None = None
@@ -114,6 +116,11 @@ def update_settings(body: UpdateIn) -> dict:
         if v and not v.startswith(("socks5://", "socks5h://", "http://", "https://")):
             raise HTTPException(400, detail="代理需为 socks5:// 或 http(s):// 地址（空=直连）")
         values["douyin_proxy"] = v
+    if body.scrape_proxy is not None:
+        v = body.scrape_proxy.strip()
+        if v and not v.startswith(("socks5://", "socks5h://", "http://", "https://")):
+            raise HTTPException(400, detail="采集代理需为 socks5:// 或 http(s):// 地址（空=直连）")
+        values["scrape_proxy"] = v
     if body.watch_scan_enabled is not None:
         values["watch_scan_enabled"] = body.watch_scan_enabled
     if body.watch_scan_hour is not None:

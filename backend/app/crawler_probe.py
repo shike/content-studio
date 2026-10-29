@@ -146,7 +146,7 @@ def _classify_page(page) -> str:
 
 async def probe() -> dict:
     """跑一次探针（多样本表决）并落盘。返回本次结果 dict。"""
-    proxy = (settings.douyin_proxy or "").strip()
+    proxy = (settings.scrape_proxy or "").strip()  # 匿名探针=采集链路（空=直连）
     prev = (read_state().get("last") or {}).get("status")
 
     if proxy and not await _proxy_alive(proxy):

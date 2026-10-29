@@ -28,6 +28,7 @@ MANAGED: dict[str, str] = {
     "zhipu_search_base_url": "str",
     "asr_model": "str",
     "douyin_proxy": "str",
+    "scrape_proxy": "str",
     "douyin_ua": "str",
     "watch_scan_enabled": "bool",
     "creator_data_enabled": "bool",

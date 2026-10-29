@@ -45,8 +45,8 @@ def download_video(url: str, out_dir: Path) -> str:
         return path
 
     hint = ""
-    if settings.douyin_proxy:  # 有代理配置仍失败：提示出口可能断了（本机未开机/隧道断）
-        hint = f"（经出口代理 {settings.douyin_proxy}）"
+    if settings.scrape_proxy:  # 有采集代理仍失败：提示出口可能断了
+        hint = f"（经出口代理 {settings.scrape_proxy}）"
     # 代理层失败要显式区分（2026-10-27 教训：ERR_PROXY_CONNECTION_FAILED 曾被上游
     # 当成"验证码"进熔断，2 次断连把整队下载任务打成"风控窗"连环失败）
     if pw_error and any(k in pw_error for k in (

@@ -54,7 +54,7 @@ def launch(p, *, mobile: bool = False):
     chromium-headless-shell：shell 是精简构建，指纹更易被抖音挑战
     （2026-09-27 实测同环境下 shell 0/5、完整版 4/4）。
     """
-    proxy = (settings.douyin_proxy or "").strip()
+    proxy = (settings.scrape_proxy or "").strip()
     return p.chromium.launch(
         headless=True,
         channel="chromium",  # 完整内核（依赖 playwright install chromium 装的完整包）
@@ -64,6 +64,6 @@ def launch(p, *, mobile: bool = False):
 
 
 def httpx_proxy() -> str | None:
-    """给 httpx 用的代理参数（None=直连）。"""
-    proxy = (settings.douyin_proxy or "").strip()
+    """给 httpx 用的代理参数（None=直连）。匿名采集走 scrape_proxy（空=机房直连）。"""
+    proxy = (settings.scrape_proxy or "").strip()
     return proxy or None

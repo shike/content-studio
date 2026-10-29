@@ -30,7 +30,11 @@ class Settings(BaseSettings):
     zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
 
     asr_model: str = "large-v3"
-    # 抖音抓取出口（机房 IP 被风控时的绕行）：如 socks5://127.0.0.1:11080；空=直连
+    # 抖音抓取出口分两条链路（2026-10-29 拆分）：
+    # scrape_proxy=匿名采集出口（浏览器抓详情/下载直链/探针），空=机房 IP 直连——
+    #   实测直连可用（3/3 含隧道下弹验证码的视频），住宅隧道高抖动才是采集失败主因；
+    # douyin_proxy=DDG 搜索出海 + 创作者中心登录态采集（出口 IP 与账号日常环境一致性）。
+    scrape_proxy: str = ""
     douyin_proxy: str = ""
     douyin_ua: str = ""  # 覆盖抓取 UA（空=按运行平台自动匹配）
     # 蝉镜开放 API（数字人主线引擎，2026-09-24 定版）：appid + secretKey，设置页可改
