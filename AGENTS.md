@@ -15,7 +15,7 @@
 ## 验收纪律（违反 = 白干）
 
 - `acceptance/run_p0.py…run_p8.py`（纯标准库；run_p5 已随数字人退役删除；P6=任务 P7=认证与单管理员）。**任何后端改动后必须重跑受影响套件**。
-- 失败任务处置红线：要么自动恢复、要么进「待处置」带诊断等人修，修完点「标记已修复」再复活重跑；**待处置非空 = 带病运行**，不许静默清掉。
+- 任务失败处置（2026-10-30 用户定版：**失败是异常不是工作流**）：瞬时/风控/额度类失败走退避梯子（30min→2h→6h→24h），梯子尽头转**每日慢巡**（24h 一试直到自愈，30 次硬上限后安静终态）；确定性失败不重试安静终态。界面无失败工作流（指纹聚类/标记已修复/复活整批已移除，后端 failures API 保留）：失败行=红徽章+错误+行内重试，侧栏徽章含失败数。任何失败要么自愈要么安静可见。
 - 隔离实例（别污染工作台）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`；跑套件 `CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 python3 acceptance/run_pX.py`（可加 `CS_REAPER_SEC=5` 加速快巡）。跑完删 `data-acceptance`。
   - 复制后先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`——否则验收任务排在真实队列后面必然超时。
   - 手拨/判读到期的任务一律按 UTC（runner 全线 naive-UTC，SQL 用 `datetime('now')`）。

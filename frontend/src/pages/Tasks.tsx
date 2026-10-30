@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, ChevronLeft, ChevronRight, CircleAlert, Clock, Eraser, PauseCircle, PlayCircle, RefreshCw, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Activity, ChevronLeft, ChevronRight, Clock, Eraser, PauseCircle, PlayCircle, RefreshCw, Trash2 } from 'lucide-react'
 import type { SectionKey } from '../App'
 import { api } from '../api'
 import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
@@ -68,14 +68,18 @@ const STATE_BADGE: Record<UserState, string> = {
   todo: 'bg-red-100 text-red-700',
   done: 'bg-emerald-100 text-emerald-700',
 }
-function stateBadge(t: { status: string; next_retry_at?: string | null; retry_count?: number }): { cls: string; label: string } {
+function stateBadge(t: { status: string; next_retry_at?: string | null; retry_count?: number; max_retries?: number }): { cls: string; label: string } {
   const st = userState(t)
   if (t.status === 'running') return { cls: STATE_BADGE.active, label: '运行中' }
   if (t.status === 'queued') return { cls: STATE_BADGE.active, label: '排队' }
   if (t.status === 'superseded') return { cls: STATE_BADGE.done, label: '已续跑' }
   if (t.status === 'succeeded') return { cls: STATE_BADGE.done, label: '完成' }
-  if (st === 'active') return { cls: STATE_BADGE.active, label: `重试中 ${t.retry_count || 0}/4` }
-  return { cls: STATE_BADGE.todo, label: '需要处理' }
+  if (st === 'active') {
+    return (t.retry_count || 0) > (t.max_retries || 4)
+      ? { cls: STATE_BADGE.active, label: `慢巡中 · 第 ${t.retry_count} 次` }
+      : { cls: STATE_BADGE.active, label: `重试中 ${t.retry_count || 0}/${t.max_retries || 4}` }
+  }
+  return { cls: STATE_BADGE.todo, label: '失败' }
 }
 
 interface ScheduleRow {
@@ -91,20 +95,6 @@ interface ScheduleRow {
   run_count: number
 }
 
-interface FailureGroup {
-  fp: string
-  kind: 'job' | 'entity'
-  count: number
-  label: string
-  root_cause: string
-  pattern_status: string
-  sample_error: string
-  sample_job_id: number
-  last_type: string
-  fail_class: string
-  orphans?: { entity_id: number; title: string }[]
-}
-
 const PAGE_SIZE = 50
 
 function objectLabel(payload: Record<string, any>): string {
@@ -118,7 +108,7 @@ function objectLabel(payload: Record<string, any>): string {
   return ''
 }
 
-type Tab = 'run' | 'disposal' | 'sched' | 'history'
+type Tab = 'run' | 'sched' | 'history'
 
 export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
   const [items, setItems] = useState<TaskRow[]>([])
@@ -128,7 +118,6 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   })
   const [total, setTotal] = useState(0)
   const [tab, setTab] = useState<Tab>('run')
-  const tabTouched = useRef(false)
   const [runFilter, setRunFilter] = useState('active')
   const [page, setPage] = useState(0)
   const [auto, setAuto] = useState(true)
@@ -140,18 +129,12 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const [confirmClear, setConfirmClear] = useState<string | null>(null)
   const [clearMenu, setClearMenu] = useState(false)
-  const [disposal, setDisposal] = useState<FailureGroup[]>([])
-  const [expFp, setExpFp] = useState<string | null>(null)
   const [scheds, setScheds] = useState<ScheduleRow[]>([])
   const [editHour, setEditHour] = useState<string | null>(null)
 
   // 页面按"来这想问什么"分四个标签：运行总览 / 待处置 / 调度中心 / 历史记录（2026-10-30 重构）
   // 落位规则：待处置非空且用户没点过标签 → 自动停在待处置
-  const switchTab = (k: Tab) => { tabTouched.current = true; setTab(k); setPage(0); setExpandedId(null) }
-  const disposalTotal = disposal.reduce((n, g) => n + g.count, 0)
-  useEffect(() => {
-    if (!tabTouched.current && disposal.length > 0) setTab('disposal')
-  }, [disposal])
+  const switchTab = (k: Tab) => { setTab(k); setPage(0); setExpandedId(null) }
 
   // 查询口径随标签走：历史记录固定 done，其余标签由运行总览的 chips 决定
   const effF = tab === 'history' ? 'done' : runFilter
@@ -159,12 +142,6 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const reloadScheds = useCallback(async () => {
     const r = await api<{ items: ScheduleRow[] }>('/schedules')
     setScheds(r.items)
-  }, [])
-
-  // 待处置：失败任务按错误指纹聚类（任务中台），修复根因后一键整批复活
-  const reloadDisposal = useCallback(async () => {
-    const r = await api<{ items: FailureGroup[] }>('/jobs/failures')
-    setDisposal(r.items)
   }, [])
 
   const reload = useCallback(async () => {
@@ -178,9 +155,8 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
 
   useEffect(() => {
     reload().catch((e) => setError(String(e)))
-    reloadDisposal().catch(() => {})
     reloadScheds().catch(() => {})
-  }, [reload, tick, reloadDisposal, reloadScheds])
+  }, [reload, tick, reloadScheds])
 
   // 实时刷新：3s 轻量轮询，可暂停
   useEffect(() => {
@@ -201,38 +177,6 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   }, [expandedId, tick])
 
   const changeRunFilter = (k: string) => { setRunFilter(k); setPage(0) }
-
-  const retryFp = (fp: string) =>
-    (async () => {
-      setError('')
-      try {
-        const r = await api<{ requeued: number }>('/jobs/retry-by-fingerprint', {
-          method: 'POST',
-          body: JSON.stringify({ fp }),
-        })
-        setBusy(`已按指纹复活 ${r.requeued} 条任务（实体已同步回在途态）`)
-        setTimeout(() => setBusy(''), 3000)
-        await Promise.all([reload(), reloadDisposal()])
-      } catch (e) {
-        setError(String(e))
-      }
-    })()
-
-  const resolveFp = (fp: string, status: 'fixed' | 'ignored') =>
-    (async () => {
-      setError('')
-      try {
-        await api(`/jobs/failures/${encodeURIComponent(fp)}/resolve`, {
-          method: 'POST',
-          body: JSON.stringify({ status }),
-        })
-        setBusy(status === 'fixed' ? '已标记已修复（该组移出待处置）' : '已忽略该类失败')
-        setTimeout(() => setBusy(''), 3000)
-        await reloadDisposal()
-      } catch (e) {
-        setError(String(e))
-      }
-    })()
 
   const schedAction = (key: string, action: 'toggle' | 'run', hour?: number) =>
     (async () => {
@@ -289,7 +233,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         })
         setBusy(`已重新入队 ${r.requeued} 个失败任务`)
         setTimeout(() => setBusy(''), 3000)
-        await Promise.all([reload(), reloadDisposal()])
+        await reload()
       } catch (e) {
         setError(String(e))
       }
@@ -318,7 +262,6 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         setBusy(`已归档 ${r.archived} 条${st === 'failed' ? '失败' : st === 'superseded' ? '已续跑' : '已完成'}记录`)
         setTimeout(() => setBusy(''), 3000)
         await reload()
-        await reloadDisposal()
       } catch (e) {
         setError(String(e))
       }
@@ -357,11 +300,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
     </div>
   )
 
-  const tabs: [Tab, string, number | null][] = [
-    ['run', '运行总览', null],
-    ['disposal', '待处置', disposalTotal > 0 ? disposalTotal : null],
-    ['sched', '调度中心', null],
-    ['history', '历史记录', null],
+  const tabs: [Tab, string][] = [
+    ['run', '任务'],
+    ['sched', '调度中心'],
+    ['history', '历史记录'],
   ]
 
   return (
@@ -381,7 +323,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>进行中 <b className="text-sky-600">{counts.summary.active}</b></span>
         <span className="text-xs text-slate-400">（运行中 {counts.running} · 排队 {counts.queued} · 等重试 {counts.failed && counts.summary.active - counts.running - counts.queued >= 0 ? counts.summary.active - counts.running - counts.queued : 0}）</span>
-        <span>需要处理 <b className={counts.summary.todo ? 'text-red-500' : 'text-zinc-900'}>{counts.summary.todo}</b></span>
+        <span>失败 <b className="text-zinc-900">{counts.summary.todo}</b></span>
         <span>完成 <b className="text-zinc-900">{counts.summary.done}</b></span>
         <span className="ml-auto text-[11px] text-slate-400">
           {auto ? `每 3 秒自动刷新 · 最近更新 ${lastUpdate}` : '自动刷新已暂停'}
@@ -393,13 +335,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
 
       {/* 标签导航 */}
       <div className="mb-3 mt-4 flex gap-1.5">
-        {tabs.map(([k, label, n]) => (
+        {tabs.map(([k, label]) => (
           <button key={k} onClick={() => switchTab(k)}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm ${tab === k ? 'bg-zinc-900 text-white' : 'border border-[#e8ecf0] bg-white text-slate-500 hover:bg-slate-50'}`}>
+            className={`rounded-full px-4 py-1.5 text-sm ${tab === k ? 'bg-zinc-900 text-white' : 'border border-[#e8ecf0] bg-white text-slate-500 hover:bg-slate-50'}`}>
             {label}
-            {n != null && (
-              <span className={`rounded-full px-1.5 text-[11px] font-semibold ${tab === k ? 'bg-white/20 text-white' : 'bg-red-100 text-red-600'}`}>{n}</span>
-            )}
           </button>
         ))}
       </div>
@@ -413,7 +352,8 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
               onChange={changeRunFilter}
               chips={[
                 { key: 'active', label: '进行中', count: counts.summary.active },
-                { key: 'todo', label: '需要处理', count: counts.summary.todo },
+                { key: 'todo', label: '失败', count: counts.summary.todo },
+                { key: '', label: '全部', count: counts.summary.active + counts.summary.todo + counts.summary.done },
               ]}
             />
           </div>
@@ -464,7 +404,10 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                               )}
                               {t.status === 'failed' && t.next_retry_at && (
                                 <span className="ml-1.5 text-xs text-sky-600">
-                                  第 {(t.retry_count || 0)}/4 次重试 · {relTime(t.next_retry_at + 'Z')}自动重试
+                                  {(t.retry_count || 0) > (t.max_retries || 4)
+                                    ? `每日慢巡 · 第 ${t.retry_count} 次尝试`
+                                    : `第 ${(t.retry_count || 0)}/${t.max_retries || 4} 次重试`}
+                                  · {relTime(t.next_retry_at + 'Z')}自动重试
                                 </span>
                               )}
                               {t.status === 'succeeded' && (
@@ -665,107 +608,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         </>
       )}
 
-      {/* ── Tab② 待处置（失败中台）── */}
-      {tab === 'disposal' && (
-        <>
-          <div className="mb-3 flex items-center justify-end">
-            {counts.failed > 0 && (
-              confirmClear === 'retry' ? (
-                <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                  重试全部 {counts.failed} 个失败任务（重新入队）？
-                  <button onClick={() => { setConfirmClear(null); retryAllFailed() }} className="btn-danger btn-xs">确认</button>
-                  <button onClick={() => setConfirmClear(null)} className="btn-ghost btn-xs">取消</button>
-                </div>
-              ) : (
-                <button onClick={() => setConfirmClear('retry')} className="btn-ghost text-slate-500" title="全部失败任务重新入队">
-                  <RefreshCw size={14} /> 重试全部失败
-                </button>
-              )
-            )}
-          </div>
-          <div className="card overflow-hidden border-amber-200 bg-amber-50/40 p-0">
-            {disposal.length === 0 ? (
-              <div className="p-6">
-                <EmptyState
-                  icon={CircleAlert}
-                  title="没有待处置的失败"
-                  desc="失败任务会按原因聚类在这里：修复根因后「复活」整批重跑，不许静默消失。"
-                />
-              </div>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2 border-b border-amber-200/70 px-4 py-2.5 text-sm font-semibold text-amber-900">
-                  <CircleAlert size={14} /> 待处置 {disposalTotal} 条 · {disposal.length} 类原因
-                  <span className="text-xs font-normal text-amber-700/80">
-                    修复根因后「复活」整批重跑；标记已修复/忽略后移出本区
-                  </span>
-                </div>
-                <div className="divide-y divide-amber-200/50">
-                  {disposal.map((g) => {
-                    const exp = expFp === g.fp
-                    return (
-                      <div key={g.fp}>
-                        <div
-                          onClick={() => setExpFp(exp ? null : g.fp)}
-                          className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-amber-50/70"
-                        >
-                          <span className={`badge shrink-0 ${g.kind === 'entity' ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-800'}`}>
-                            {g.kind === 'entity' ? '实体孤儿' : g.fail_class === 'deterministic' ? '确定性失败' : g.fail_class === 'quota' ? '额度耗尽' : '瞬时失败'}
-                          </span>
-                          <span className="shrink-0 text-sm font-bold tabular-nums text-amber-700">×{g.count}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-zinc-900">{g.label}</div>
-                            <div className="mt-0.5 truncate text-xs text-slate-500">{g.sample_error}</div>
-                          </div>
-                          <span className="hidden shrink-0 text-[11px] text-slate-400 md:inline">{g.last_type}</span>
-                        </div>
-                        {exp && (
-                          <div className="space-y-2.5 border-t border-amber-200/50 px-5 py-3 text-[13px]">
-                            <div>
-                              <div className="mb-1 text-xs font-semibold text-slate-500">最近错误样本</div>
-                              <pre className="max-h-40 overflow-auto rounded-lg bg-white/80 p-3 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">{g.sample_error || '（无错误信息）'}</pre>
-                            </div>
-                            {g.root_cause && (
-                              <div className="text-slate-600"><span className="mr-2 text-xs font-semibold text-slate-500">根因备注</span>{g.root_cause}</div>
-                            )}
-                            {g.orphans && g.orphans.length > 0 && (
-                              <div>
-                                <div className="mb-1 text-xs font-semibold text-slate-500">受影响实体</div>
-                                <ul className="space-y-0.5 text-slate-600">
-                                  {g.orphans.map((o) => (
-                                    <li key={o.entity_id}>· {o.title}（#{o.entity_id}）</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-                            <div className="flex flex-wrap items-center gap-2 pt-1">
-                              <button onClick={(e) => { e.stopPropagation(); retryFp(g.fp) }} className="btn-accent btn-xs">
-                                <RefreshCw size={12} /> {g.kind === 'entity' ? '重新生成' : '复活这批'}
-                              </button>
-                              {g.kind === 'job' && (
-                                <>
-                                  <button onClick={(e) => { e.stopPropagation(); resolveFp(g.fp, 'fixed') }} className="btn-ghost btn-xs text-slate-500">
-                                    标记已修复
-                                  </button>
-                                  <button onClick={(e) => { e.stopPropagation(); resolveFp(g.fp, 'ignored') }} className="btn-ghost btn-xs text-slate-400">
-                                    忽略此类
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* ── Tab③ 调度中心 ── */}
+      {/* ── Tab② 调度中心 ── */}
       {tab === 'sched' && (
         <div className="card overflow-hidden p-0">
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-zinc-900">
@@ -830,7 +673,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         </div>
       )}
 
-      {/* ── Tab④ 历史记录 ── */}
+      {/* ── Tab③ 历史记录 ── */}
       {tab === 'history' && (
         <>
           <div className="mb-3 flex items-center justify-end">

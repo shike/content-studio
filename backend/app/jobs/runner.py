@@ -39,8 +39,10 @@ _OWNED: dict[str, Callable[[], list[tuple[dict, str]]]] = {}
 class RetryPolicy:
     """按任务类型的策略（2026-10-12 引擎统一）：类型间只剩本质差异——超时阈值。
 
-    重试统一走全局退避梯子 RETRY_LADDER（30min→2h→6h→24h，4 次重试后转终态"需要处理"）；
+    重试统一走全局退避梯子 RETRY_LADDER（30min→2h→6h→24h）；梯子尽头不进人工工作流，
+    转每日慢巡（24h 一试直到自愈，PATROL_CAP 次硬上限后安静终态）——失败是异常不是工作流。
     fail_class 只影响文案（告诉用户撞了什么），不再影响机制。"""
+
 
     max_retries: int = 4  # 梯子跳数（默认 4：初试+4 重试=5 次尝试）
     stuck_after: int = 7200  # running 超过此秒数无更新 → 看门狗判定卡死（transient，走梯子）
@@ -58,6 +60,7 @@ def _ladder_delay(retry_count: int) -> int:
 
 
 _LADDER_STEPS = len(RETRY_LADDER)
+PATROL_CAP = 30  # 慢巡硬上限：累计 30 次尝试仍失败 → 安静终态（约一个月）
 
 
 def _human_delay(seconds: int) -> str:
@@ -567,14 +570,23 @@ class JobRunner:
                         "quota": "平台额度窗口"}.get(fc, fc)
                 job.message = (f"{_why}，自动重试 {count}/{policy.max_retries}"
                                f"（{_human_delay(delay)}后）")
+            elif fc in ("transient", "captcha", "quota") and count < PATROL_CAP:
+                # 每日慢巡（2026-10-30 用户定版：失败是异常不是工作流）——瞬时类失败
+                # 梯子走完后每天自动再试一次，直到自愈；不为人建处置流程
+                job.status = "failed"
+                job.retry_count = count
+                job.next_retry_at = now + timedelta(hours=24)
+                _why = {"transient": "瞬时故障", "captcha": "平台风控",
+                        "quota": "平台额度"}.get(fc, "故障")
+                job.message = f"{_why}进入每日慢巡（累计第 {count} 次尝试，24h 后自动再试）"
             else:
                 job.status = "failed"
                 job.retry_count = count
                 job.next_retry_at = None
                 _why = {"transient": "瞬时故障", "captcha": "平台风控",
                         "quota": "平台额度"}.get(fc, "故障")
-                job.message = (f"{_why}重试 {_LADDER_STEPS} 次未恢复，转「需要处理」——"
-                               "可人工重试，或按错误详情人工处置")
+                job.message = (f"{_why}慢巡 {count} 次仍未恢复，安静终态——"
+                               "如确认环境已恢复可在任务列表手动重试")
             _upsert_failure_pattern(s, fp, fc, job_type, str(e), job_id)
             s.add(job)
             s.commit()

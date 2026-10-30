@@ -24,18 +24,17 @@ export interface MenuStats extends TodoStats {
   benchmarksTodo: number // 其中已批准待拆
   watch: number // 监控中账号数
   style: number // 待拆解风格视频
+  failed: number // 终态失败（安静可见，慢巡自愈中）
   tasks: number // 运行中 + 排队 + 待处置任务（待处置非空 = 系统带病运行，必须可见）
-  disposal: number // 待处置条数（失败中台：按指纹聚类的无人认领失败）
 }
 
 export async function fetchMenuStats(): Promise<MenuStats> {
-  const [todo, bm, acc, styleOv, jobs, failures] = await Promise.all([
+  const [todo, bm, acc, styleOv, jobs] = await Promise.all([
     fetchTodoStats(),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1'),
     api<{ items: { enabled: boolean }[] }>('/watch/accounts'),
     api<{ stats: { pending: number } }>('/style/overview'),
-    api<{ counts: { running: number; queued: number; parked?: number } }>('/jobs?limit=1'),
-    api<{ disposal: number }>('/jobs/failures'),
+    api<{ counts: { running: number; queued: number; parked?: number; failed: number } }>('/jobs?limit=1'),
   ])
   return {
     ...todo,
@@ -45,9 +44,9 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     benchmarks: bm.counts.pending + bm.counts.todo,
     watch: acc.items.filter((a) => a.enabled).length,
     style: styleOv.stats.pending,
-    disposal: failures.disposal || 0,
-    // 在途任务 = 运行中 + 排队 + 挂起（额度/风控等待自动重试，也是活任务）+ 待处置
-    tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.parked || 0) + (failures.disposal || 0),
+    // 在途 + 失败（失败是异常不是工作流：可见但不建流程，瞬时类由每日慢巡自愈）
+    tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.failed || 0),
+    failed: jobs.counts.failed || 0,
   }
 }
 
@@ -64,7 +63,7 @@ export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
     style: s.style,                                 // 风格视频待定夺
     // 任务徽章（2026-10-07 三次调整）：恒显在途数（运行中+排队+挂起）——待处置优先会把它
     // 顶掉、漏掉 parked 会少算风控窗等待的活任务；待处置>0 由 tasks_alert 让徽章变红警示
-    tasks: s.tasks - s.disposal,
-    tasks_alert: s.disposal > 0 ? 1 : 0,
+    tasks: s.tasks,
+    tasks_alert: s.failed > 0 ? 1 : 0,
   }
 }

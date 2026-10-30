@@ -15,7 +15,7 @@ const TYPE_TAG: Record<CandType, { label: string; cls: string }> = {
 
 export default function Today({ onNavigate }: { onNavigate: (k: string) => void }) {
   const [kpis, setKpis] = useState({ fans: 0, fansDelta: 0, play: 0, profileViews: 0 })
-  const [todos, setTodos] = useState({ draft: 0, disposal: 0, retrying: 0 })
+  const [todos, setTodos] = useState({ draft: 0, failed: 0, active: 0 })
   const [drafts, setDrafts] = useState<Topic[]>([])
   const [filter, setFilter] = useState<'all' | CandType>('all')
   const [quick, setQuick] = useState('')
@@ -28,7 +28,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
     try {
       const t = await api<{ items: Topic[] }>('/topics?status=draft&limit=200')
       const s = await fetchMenuStats()
-      setTodos({ draft: s.draftTopics, disposal: s.disposal, retrying: Math.max(0, s.tasks - s.disposal) })
+      setTodos({ draft: s.draftTopics, failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
       const ranked = (t.items || []).slice().sort((a, b) => {
         const qa = Number(a.evidence?.benchmark_quality_score ?? 0)
         const qb = Number(b.evidence?.benchmark_quality_score ?? 0)
@@ -143,9 +143,9 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       <div className="mb-3 flex flex-wrap gap-2 text-xs">
         <span className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5">✏️ 选题待审 <b className="tabular-nums">{todos.draft}</b></span>
         <span className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5">
-          {todos.disposal > 0 ? '⚠️' : '✅'} 异常任务 <b className="tabular-nums">{todos.disposal}</b>
+          {todos.failed > 0 ? '⚠️' : '✅'} 失败任务 <b className="tabular-nums">{todos.failed}</b>
         </span>
-        <span className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5">🔄 重试中 <b className="tabular-nums">{todos.retrying}</b></span>
+        <span className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5">🔄 进行中 <b className="tabular-nums">{todos.active}</b></span>
         <button onClick={() => onNavigate('intel')} className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5 hover:bg-slate-50">
           📡 情报中心
         </button>
