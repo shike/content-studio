@@ -25,3 +25,21 @@ def list_topics(user: User = Depends(require_user)) -> dict:
             "hits": r.hits or [],
             "updated_at": r.updated_at,
         } for r in rows]}
+
+
+@router.post("/topics/{topic_id}/check")
+async def check_topic_now(topic_id: int, user: User = Depends(require_user)) -> dict:
+    """立即拉取该话题下最新视频（免登录），刷新命中快照并按飙升逻辑自动拆解。"""
+    import asyncio
+
+    from ..models import RadarTopic
+    from ..radar.service import check_topic
+
+    with Session(engine) as s:
+        row = s.get(RadarTopic, topic_id)
+        if row is None:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="话题不存在")
+        r = await check_topic(row)
+        await asyncio.sleep(0)
+    return {"name": r["name"], "new": r["new"], "spiked": r["spiked"]}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Radar } from 'lucide-react'
+import { Radar, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, relTime } from '../components'
 
@@ -25,6 +25,28 @@ export default function TopicInsights() {
   const [items, setItems] = useState<TopicRow[]>([])
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
+  const [checking, setChecking] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  const load = () => {
+    api<{ items: TopicRow[] }>('/radar/topics')
+      .then((d) => setItems(d.items || []))
+      .catch((e) => setError(String(e)))
+  }
+
+  const checkNow = (id: number) =>
+    (async () => {
+      setChecking(id)
+      setError('')
+      try {
+        await api(`/radar/topics/${id}/check`, { method: 'POST' })
+        load()
+      } catch (e) {
+        setError(String(e))
+      } finally {
+        setChecking(null)
+      }
+    })()
 
   useEffect(() => {
     api<{ items: TopicRow[] }>('/radar/topics')
@@ -65,10 +87,19 @@ export default function TopicInsights() {
                 <span className="ml-auto text-[11px] text-slate-400">
                   {t.updated_at ? `最近检查 ${relTime(t.updated_at)}` : ''}
                 </span>
+                <button
+                  onClick={() => checkNow(t.id)}
+                  disabled={checking !== null}
+                  className="btn-ghost btn-xs text-sky-600 disabled:opacity-40"
+                  title="立即拉取该话题下最新视频"
+                >
+                  {checking === t.id ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  {checking === t.id ? '拉取中…' : '立即刷新'}
+                </button>
               </div>
               {(t.hits || []).length > 0 ? (
                 <div className="mt-3 space-y-1.5">
-                  {(t.hits || []).slice(0, 5).map((h) => (
+                  {(t.hits || []).slice(0, expanded === t.id ? 20 : 5).map((h) => (
                     <div key={h.id} className="flex items-center gap-2 text-[13px]">
                       <span className="num-serif shrink-0 font-semibold tabular-nums text-orange-600">
                         {Number(h.digg || 0).toLocaleString()} 赞
@@ -90,6 +121,12 @@ export default function TopicInsights() {
                 <div className="mt-2.5 text-xs text-slate-400">
                   暂无命中视频——话题下新增视频增速未达飙升线，持续观察中。
                 </div>
+              )}
+              {(t.hits || []).length > 5 && (
+                <button onClick={() => setExpanded(expanded === t.id ? null : t.id)}
+                  className="mt-2 text-xs text-sky-600 hover:underline">
+                  {expanded === t.id ? '收起' : `展开全部 ${(t.hits || []).length} 条`}
+                </button>
               )}
             </div>
           ))}
