@@ -101,7 +101,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   }
 
   const trending = () => {
-    setBusy('今日热点提炼中（几分钟，完成后自动入库）…')
+    setBusy('热点雷达运行中（话题飙升 + 站外热点，几分钟后自动入库）…')
     guard(async () => {
       await api('/topics/trending', { method: 'POST' })
       setBusy('热点提炼已排队，稍后刷新查看')
@@ -118,8 +118,8 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">今日工作台</h2>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">指标 06:00 · 热点 07:00 已跑</span>
-          <button onClick={trending} className="btn-accent btn-sm">今日热点提炼</button>
+          <span className="text-xs text-slate-400">指标 22:00 · 热点雷达 23:00 已跑</span>
+          <button onClick={trending} className="btn-accent btn-sm">热点雷达</button>
         </div>
       </div>
       {error && <div className="mb-2 text-sm text-red-600">{error}</div>}
@@ -166,7 +166,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
         <b className="text-sm font-semibold text-zinc-900">今日候选</b>
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">人设 {nPersona}</span>
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">获客打法 {nLeadgen}</span>
-        <span>按热度分排序 · 来源：同行自动拆解 + 今日热点</span>
+        <span>按热度分排序 · 来源：同行自动拆解 + 热点雷达</span>
       </div>
       <div className="mb-2 flex flex-wrap gap-1.5">
         {[['all', '全部'], ['persona', '人设'], ['leadgen', '获客打法']].map(([k, label]) => (
@@ -179,7 +179,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
 
       {shown.length === 0 ? (
         <div className="rounded-2xl border border-[#e8ecf0] bg-white p-8 text-center text-sm text-slate-400">
-          今日候选已清零——批准的选题已进入对应产线；明天 07:00 热点提炼会带来新一批。
+          今日候选已清零——批准的选题已进入对应产线；明天 23:00 热点雷达会带来新一批。
         </div>
       ) : (
         shown.map((t) => {

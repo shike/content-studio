@@ -126,6 +126,26 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         persona_text = brand_of(tenant_id)["persona"]
         audience_note = audience_note_of(tenant_id)
 
+    # 热点雷达·抖音话题侧（原 topic_radar 并入，2026-10-30）：先巡检已监测话题，
+    # 飙升命中照旧走质量闸自动拆解入候选；失败不阻塞站外热点提炼
+    radar_notes: list[str] = []
+    try:
+        from ..models import RadarTopic
+        from ..radar.service import check_topic
+        with Session(engine) as s:
+            radar_rows = s.exec(
+                select(RadarTopic).where(RadarTopic.enabled == True)  # noqa: E712
+            ).all()
+        for rrow in radar_rows:
+            try:
+                r = await check_topic(rrow)
+                radar_notes.append(f"#{rrow.name}：新增 {r['new']} 条" + ("（飙升）" if r["spiked"] else ""))
+            except Exception as e:  # noqa: BLE001 单话题失败不拖垮整轮
+                radar_notes.append(f"#{rrow.name}：{type(e).__name__}: {str(e)[:60]}")
+            await asyncio.sleep(3)  # 话题接口 pacing
+    except Exception as e:  # noqa: BLE001 雷达侧整体失败不阻塞
+        radar_notes.append(f"话题巡检失败：{type(e).__name__}: {str(e)[:60]}")
+
     def _norm(t: str) -> str:
         return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-]+", "", str(t)).lower()
 
@@ -303,7 +323,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(100, f"完成：{len(created)} 个切角已入选题库"
                           f"（替代 {len(superseded)} 条当日旧批次）")
-    return {"topic_ids": created, "superseded": superseded,
+    return {"radar_notes": radar_notes, "topic_ids": created, "superseded": superseded,
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "queries": queries, "web": search_metas}}
 

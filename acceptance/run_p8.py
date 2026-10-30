@@ -80,38 +80,11 @@ else:
     check("热点提炼受理 202（无 key 只验契约，不轮询产出）",
           code == 202 and bool(d.get("job_id")), f"code={code}")
 
-section("P8 · 话题雷达（R1.8）")
+section("P8 · 热点雷达整合（2026-10-30：话题雷达并入 trending，独立雷达面退役）")
 code, d = request("GET", "/api/radar")
-items = d.get("items") if isinstance(d, dict) else []
-check("雷达话题列表 200（种子默认空，部署者自行添加）", code == 200 and isinstance(items, list),
-      f"code={code}, 话题数={len(items) if isinstance(items, list) else '?'}")
-import time as _t
-
-ch_id = f"9900{str(int(_t.time()))[-8:]}"
-code, row = request("POST", "/api/radar", body={"name": "P8监控话题", "ch_id": ch_id})
-check("雷达添加监控话题 201", code == 201 and row.get("ch_id") == ch_id, f"code={code}")
-code, d = request("GET", "/api/radar")
-items = d.get("items") if isinstance(d, dict) else []
-check("雷达列表含新添加话题", code == 200 and any(t.get("ch_id") == ch_id for t in items),
-      f"话题数={len(items) if isinstance(items, list) else '?'}")
-code, d = request("POST", "/api/radar", body={"name": "P8监控话题", "ch_id": ch_id})
-check("重复 ch_id 409", code == 409, f"code={code}, {str(d)[:60]}")
-code, d = request("POST", "/api/radar", body={"name": "坏样例", "ch_id": "abc123"})
-check("ch_id 非数字 400", code == 400, f"code={code}")
-code, d = request("POST", "/api/radar/extract-hashtags", body={"url": "https://example.com/video/1"})
-check("非抖音链接提取 400（防任意 URL 抓取）", code == 400, f"code={code}")
+check("独立雷达端点已退役 404（功能并入热点雷达）", code == 404, f"code={code}")
 code, d = request("POST", "/api/radar/mine")
-mine_job = d.get("job_id") if isinstance(d, dict) else None
-check("雷达挖矿受理 202", code == 202 and bool(mine_job), f"code={code}")
-from runner import poll_job
-
-mine_done = poll_job(mine_job, timeout=180)
-mine_res = (mine_done or {}).get("result") or {}
-hashtags = mine_res.get("hashtags")
-check("雷达挖矿空库契约（succeeded + hashtags 列表；真实提取属在线门控）",
-      (mine_done or {}).get("status") == "succeeded" and isinstance(hashtags, list),
-      f"hashtags={str(hashtags)[:60]}")
-
+check("雷达挖矿端点已退役 404", code == 404, f"code={code}")
 section("P8 · 同行监测周报（价值流转）")
 code, d = request("GET", "/api/watch/digest")
 digest_ok = (code == 200 and isinstance(d, dict)

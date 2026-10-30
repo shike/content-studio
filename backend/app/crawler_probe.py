@@ -262,7 +262,7 @@ def recent_failure_count(minutes: int = 60) -> int:
     from .models import Job
 
     scrape_types = {"benchmark_analyze", "watch_scan", "watch_resolve",
-                    "radar_extract", "radar_mine", "self_analyze"}
+                    "self_analyze"}
     since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes)
     try:
         with Session(engine) as s:

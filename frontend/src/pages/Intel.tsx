@@ -3,10 +3,9 @@ import type { SectionKey } from '../App'
 import { api } from '../api'
 import Watch from './Watch'
 import Benchmarks from './Benchmarks'
-import RadarPage from './Radar'
 import Style from './Style'
 
-type Tab = 'stream' | 'bench' | 'accounts' | 'radar' | 'trend'
+type Tab = 'stream' | 'bench' | 'accounts' | 'trend'
 
 interface BenchRow {
   id: number
@@ -20,7 +19,7 @@ interface BenchRow {
   created_at?: string
 }
 
-/** 情报中心：同行监测/拆解库/话题雷达/我的风格 四页合一，自动运转只读流 + 全量管理入口。 */
+/** 情报中心：同行监测/拆解库/获客雷达/我的风格 整合页（话题雷达已并入今日工作台「热点雷达」），自动运转只读流 + 全量管理入口。 */
 export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => void }) {
   const [tab, setTab] = useState<Tab>('stream')
   const [rows, setRows] = useState<BenchRow[]>([])
@@ -48,7 +47,6 @@ export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => v
           ['stream', '同行动态'],
           ['bench', '拆解资料库'],
           ['accounts', '监测账号'],
-          ['radar', '获客雷达'],
           ['trend', '我的账号趋势'],
         ] as [Tab, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
@@ -112,7 +110,6 @@ export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => v
 
       {tab === 'bench' && <Benchmarks onNavigate={onNavigate} />}
       {tab === 'accounts' && <Watch onNavigate={onNavigate} />}
-      {tab === 'radar' && <RadarPage />}
       {tab === 'trend' && <Style onNavigate={onNavigate} />}
     </div>
   )
