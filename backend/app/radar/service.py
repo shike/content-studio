@@ -155,5 +155,84 @@ def _extract_hashtags(vid: str) -> list[dict]:
     return out
 
 
+async def check_topic(row: RadarTopic) -> dict:
+    """巡检单个话题：拉最新视频 → 识别新增（热度速度）→ 刷新最新视频列表 → 飙升通知。
 
+    row 可为脱管实例（调用方会话已关）：merge 回当前会话再改。
+    recent 恒为话题下当前最新视频（每次巡检刷新，带 new 标记）——
+    没有新增时列表不能被清空（用户要始终看得到话题里在发生什么）。"""
+    vids = await asyncio.to_thread(fetch_topic_videos, row.ch_id)
+    seen = set(row.seen_ids or [])
+    fresh_ids = {v["id"] for v in vids if v["id"] not in seen}
+    spiked = False
+    name = row.name
+    recent = [dict(v, new=v["id"] in fresh_ids) for v in vids[:10]]
+    with Session(engine) as s:
+        row = s.merge(row)
+        row.seen_ids = ((row.seen_ids or []) + sorted(fresh_ids))[-SEEN_CAP:]
+        row.new_since_last = len(fresh_ids)
+        row.recent = recent
+        row.last_checked_at = datetime.now(timezone.utc)
+        spiked = bool(row.enabled and row.notify and row.new_since_last >= SPIKE_NEW and seen)
+        s.add(row)
+        s.commit()
+
+    # 低粉高赞探测（小账号爆款信号）：探测话题下最新 5 条，赞粉比 ≥2 且粉丝 <10万 入清单。
+    # 每条 ~10s（playwright detail）；单条失败跳过不阻塞。
+    hit_candidates: list[dict] = []
+    for i, v in enumerate(vids[:PROBE_PER_CHECK]):
+        try:
+            info = await asyncio.to_thread(_probe_video, v["id"])
+            ratio = round(info["digg"] / max(info["followers"], 1), 1)
+            if info["followers"] < LOW_FANS and ratio >= RATIO_MIN:
+                hit_candidates.append({
+                    "id": v["id"], "desc": v["desc"], "author": info["author"],
+                    "digg": info["digg"], "followers": info["followers"], "ratio": ratio,
+                })
+        except Exception as e:  # noqa: BLE001 单条探测失败跳过
+            print(f"[radar] 探测 {v['id']} 失败跳过: {type(e).__name__}: {str(e)[:60]}")
+    hit_note = ""
+    if hit_candidates:
+        with Session(engine) as s:
+            row = s.merge(row)
+            hits, added = _merge_hits(row.hits, hit_candidates)
+            row.hits = hits
+            s.add(row)
+            s.commit()
+        hit_note = (f"，低粉高赞 +{added}（{hit_candidates[0]['desc'][:20]}"
+                    f" 赞粉比 {hit_candidates[0]['ratio']}）")
+        await asyncio.to_thread(_notify, f"#{name} 发现低粉高赞 {added} 条：{hit_candidates[0]['desc'][:60]}")
+        # 雷达命中自动拆解（2026-10-28 全自动化裁定）：达标命中直接进拆解队列，
+        # 拆完选题候选自动进选题库——人只在选题库定审，雷达页日常不用看。
+        try:
+            from ..benchmarks import service as bms
+            from ..models import BenchmarkVideo
+
+            rows = []
+            with Session(engine) as s:
+                for h in hit_candidates:
+                    url = f"https://www.douyin.com/video/{h['id']}"
+                    if s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                            BenchmarkVideo.url == url)).first() is not None:
+                        continue  # 已在库（历史命中/重复命中），不重复入
+                    b = BenchmarkVideo(tenant_id=row.tenant_id or 1, url=url,
+                                       author=str(h.get("author") or "")[:60],
+                                       title=str(h.get("desc") or "")[:80],
+                                       stats={"digg": int(h.get("digg") or 0),
+                                              "followers": int(h.get("followers") or 0),
+                                              "ratio": h.get("ratio")},
+                                       source="douyin", scan_status="pending")
+                    s.add(b)
+                    s.commit()
+                    s.refresh(b)
+                    rows.append(b)
+            if rows:
+                n_radar = await bms.auto_dissect_rows(rows, f"话题雷达#{name}")
+                if n_radar:
+                    hit_note += f"，自动拆解 {n_radar} 条"
+        except Exception as e:  # noqa: BLE001 自动拆解失败不影响雷达巡检本身
+            hit_note += f"（自动拆解失败：{type(e).__name__}）"
+    if spiked:
+        titles = "；".join(v["desc"] for v in recent[:2])
+        await asyncio.to_thread(_notify, f"#{name} 新增 {row_new if (row_new := len(fresh_ids)) else 0} 条视频：{titles[:80]}")
 
