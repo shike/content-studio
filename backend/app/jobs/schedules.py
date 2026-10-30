@@ -250,5 +250,5 @@ def _run_crawl_probe() -> Awaitable[str]:
     return _go()
 
 
-register_schedule(Schedule(key="crawl_probe", label="抖音采集探针（15 分钟）",
-                           interval_hours=0.25, run=_run_crawl_probe))
+register_schedule(Schedule(key="crawl_probe", label="抖音采集探针（2 小时）",
+                           interval_hours=2, run=_run_crawl_probe))
