@@ -31,7 +31,7 @@ from .settings import settings
 
 _STATE_NAME = "crawl_probe.json"
 HISTORY_MAX = 20
-PROBE_WAIT_MS = 7000
+PROBE_DEADLINE_SEC = 60  # detail 等待上限（与下载器同口径；2026-10-29 实测 XHR 可晚至 20s+）
 FALLBACK_URL = "https://www.douyin.com/video/7654890394676743466"
 SAMPLES = 3            # 每次探测的样本数（多样本表决，单条毒视频不再一票否决）
 COOLDOWN_FAILS = 2     # 连续探不通 N 次 → 冷却
@@ -134,11 +134,12 @@ async def _proxy_alive(proxy: str) -> bool:
 
 
 def _classify_page(page) -> str:
-    html = page.content()
-    if "登录后免费畅享" in html or "请先登录" in html:
-        return "login_wall"
-    if "captcha_container" in html or "captcha_verify" in html:
+    """只认可观察事实（2026-10-29 实证：captcha_container 容器在正常页 HTML 常驻，
+    按 DOM 判必误报——与下载器同口径，captcha 仅标题命中才算）。"""
+    title = page.title() or ""
+    if re.search(r"安全验证|验证码", title):
         return "captcha"
+    html = page.content()
     if "视频不存在" in html or "视频不见了" in html or "作品不见" in html:
         return "video_gone"
     return "no_data"
@@ -228,7 +229,9 @@ def _probe_browser(url: str, src: str, via_proxy: bool) -> dict:
 
                 page.on("response", on_response)
                 page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                page.wait_for_timeout(PROBE_WAIT_MS)
+                _t = __import__("time").time()
+                while not detail and __import__("time").time() - _t < PROBE_DEADLINE_SEC:
+                    page.wait_for_timeout(2000)
                 if not detail:
                     m = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.+?\})\s*</script>",
                                   page.content(), re.S)
