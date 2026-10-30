@@ -46,7 +46,7 @@ export function BrandForm({ initial, onSave }: {
   const ta = 'w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono text-[12px] leading-relaxed outline-none focus:border-slate-400 focus:bg-white'
   return (
     <div className="space-y-2.5">
-      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-5">
         <label className="block space-y-1">
           <span className="text-xs text-slate-500">角标 · 第一行</span>
           <input value={brand.label_line1} onChange={(e) => setBrand({ ...brand, label_line1: e.target.value })}
@@ -67,12 +67,12 @@ export function BrandForm({ initial, onSave }: {
           <input value={brand.cover_slogan} onChange={(e) => setBrand({ ...brand, cover_slogan: e.target.value })}
             className="input w-full" placeholder="如：让交付可验收" />
         </label>
+        <label className="block space-y-1">
+          <span className="text-xs text-slate-500">图表主色</span>
+          <input value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })}
+            className="input w-full font-mono" placeholder="#16a34a" />
+        </label>
       </div>
-      <label className="block space-y-1">
-        <span className="text-xs text-slate-500">图表主色</span>
-        <input value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })}
-          className="input w-full max-w-md font-mono" placeholder="#16a34a" />
-      </label>
       <label className="block space-y-1">
         <span className="text-xs text-slate-500">内容人设</span>
         <textarea value={brand.persona} onChange={(e) => setBrand({ ...brand, persona: e.target.value })}
