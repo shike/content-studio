@@ -207,7 +207,7 @@ async def _run_trending_daily() -> str:
 
 
 register_schedule(Schedule(key="trending_daily", label="热点雷达（抖音话题飙升 + 站外热点提炼）",
-                           daily_hour=7, run=_run_trending_daily))
+                           daily_hour=6, run=_run_trending_daily))
 
 
 async def _run_creator_data() -> str:
@@ -218,8 +218,8 @@ async def _run_creator_data() -> str:
     return f"job #{job.id}"
 
 
-register_schedule(Schedule(key="creator_data_daily", label="自有账号日级指标（每日 6 点）",
-                           daily_hour=6, enabled_by="creator_data_enabled",
+register_schedule(Schedule(key="creator_data_daily", label="自有账号日级指标（每日 4 点）",
+                           daily_hour=4, enabled_by="creator_data_enabled",
                            run=_run_creator_data))
 
 
@@ -231,12 +231,12 @@ async def _run_weekly_report() -> str:
     return f"job #{job.id}"
 
 
-register_schedule(Schedule(key="video_weekly_report", label="视频表现周报（每日 7 点自愈，按周幂等）",
-                           daily_hour=7, run=_run_weekly_report))
+register_schedule(Schedule(key="video_weekly_report", label="视频表现周报（每日 5 点自愈，按周幂等）",
+                           daily_hour=5, run=_run_weekly_report))
 register_schedule(Schedule(key="daily_backup", label="业务库每日备份",
-                           daily_hour=4, run=_run_daily_backup))
-register_schedule(Schedule(key="media_cleanup", label="拆解媒体清扫",
-                           interval_hours=6, run=_run_media_cleanup))
+                           daily_hour=3, run=_run_daily_backup))
+register_schedule(Schedule(key="media_cleanup", label="拆解媒体清扫（每日 6 点）",
+                           daily_hour=6, run=_run_media_cleanup))
 def _run_crawl_probe() -> Awaitable[str]:
     async def _go():
         from ..crawler_probe import CN_LABEL, probe

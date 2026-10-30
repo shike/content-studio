@@ -118,7 +118,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">今日工作台</h2>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">指标 22:00 · 热点雷达 23:00 已跑</span>
+          <span className="text-xs text-slate-400">指标 04:00 · 热点雷达 06:00 已跑</span>
           <button onClick={trending} className="btn-accent btn-sm">热点雷达</button>
         </div>
       </div>
@@ -179,7 +179,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
 
       {shown.length === 0 ? (
         <div className="rounded-2xl border border-[#e8ecf0] bg-white p-8 text-center text-sm text-slate-400">
-          今日候选已清零——批准的选题已进入对应产线；明天 23:00 热点雷达会带来新一批。
+          今日候选已清零——批准的选题已进入对应产线；明晨 06:00 热点雷达会带来新一批。
         </div>
       ) : (
         shown.map((t) => {
