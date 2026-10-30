@@ -7,7 +7,6 @@ export interface BrandShape {
   label_line2: string
   signature: string
   persona: string
-  accent: string
   primary: string
   asr_vocab: string
   cover_slogan: string
@@ -23,7 +22,6 @@ export function BrandForm({ initial, onSave }: {
     label_line2: initial.label_line2 ?? '',
     signature: initial.signature ?? '',
     persona: initial.persona ?? '',
-    accent: initial.accent ?? '',
     primary: initial.primary ?? '',
     asr_vocab: initial.asr_vocab ?? '',
     cover_slogan: initial.cover_slogan ?? '',
@@ -70,18 +68,11 @@ export function BrandForm({ initial, onSave }: {
             className="input w-full" placeholder="如：让交付可验收" />
         </label>
       </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        <label className="block space-y-1">
-          <span className="text-xs text-slate-500">点缀色</span>
-          <input value={brand.accent} onChange={(e) => setBrand({ ...brand, accent: e.target.value })}
-            className="input w-full font-mono" placeholder="#F2C14E" />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs text-slate-500">图表主色</span>
-          <input value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })}
-            className="input w-full font-mono" placeholder="#16a34a" />
-        </label>
-      </div>
+      <label className="block space-y-1">
+        <span className="text-xs text-slate-500">图表主色</span>
+        <input value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })}
+          className="input w-full max-w-md font-mono" placeholder="#16a34a" />
+      </label>
       <label className="block space-y-1">
         <span className="text-xs text-slate-500">内容人设</span>
         <textarea value={brand.persona} onChange={(e) => setBrand({ ...brand, persona: e.target.value })}

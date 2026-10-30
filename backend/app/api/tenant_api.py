@@ -18,7 +18,6 @@ class BrandIn(BaseModel):
     label_line2: str = ""
     signature: str = ""
     persona: str = ""
-    accent: str = ""
     primary: str = ""
     asr_vocab: str = ""
     cover_slogan: str = ""
