@@ -95,7 +95,7 @@ interface ScheduleRow {
   run_count: number
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 20
 
 function objectLabel(payload: Record<string, any>): string {
   for (const [key, prefix] of [

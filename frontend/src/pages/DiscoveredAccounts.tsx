@@ -32,6 +32,7 @@ const fmtN = (n?: number) =>
 export default function DiscoveredAccounts() {
   const [cands, setCands] = useState<WatchCandidate[]>([])
   const [candFilter, setCandFilter] = useState('open')
+  const [cpageRaw, setCpage] = useState(0)
   const [expCand, setExpCand] = useState<number | null>(null)
   const [dform, setDform] = useState({ keyword: '', direction: '' })
   const [discoverBusy, setDiscoverBusy] = useState('')
@@ -116,6 +117,10 @@ export default function DiscoveredAccounts() {
     dismissed: cands.filter((c) => c.status === 'dismissed').length,
   }
   const cf = candFilter ? cands.filter((c) => c.status === candFilter) : cands
+  const CPAGE = 20
+  const cpages = Math.max(1, Math.ceil(cf.length / CPAGE))
+  const cpage = Math.min(cpageRaw, cpages - 1)
+  const pagedC = cf.slice(cpage * CPAGE, (cpage + 1) * CPAGE)
 
   return (
     <div>
@@ -190,7 +195,7 @@ export default function DiscoveredAccounts() {
             <div className="px-4 pt-3">
               <ChipRow
                 active={candFilter}
-                onChange={setCandFilter}
+                onChange={(k) => { setCandFilter(k); setCpage(0) }}
                 chips={[
                   { key: 'open', label: '待定夺', count: cc.open },
                   { key: 'added', label: '已加入', count: cc.added },
@@ -203,7 +208,7 @@ export default function DiscoveredAccounts() {
               <div className="px-4 py-4 text-[13px] text-slate-400">该状态下暂无候选。</div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {cf.map((c) => {
+                {pagedC.map((c) => {
                   const expC = expCand === c.id
                   return (
                     <div key={c.id} className={expC ? 'bg-sky-50/40' : ''}>
@@ -287,6 +292,16 @@ export default function DiscoveredAccounts() {
           </>
         )}
       </div>
+      {cf.length > CPAGE && (
+        <div className="mt-3 flex items-center justify-center gap-3 text-[13px] text-slate-500">
+          <button onClick={() => setCpage(Math.max(0, cpage - 1))} disabled={cpage === 0}
+            className="btn-ghost btn-xs disabled:opacity-40">← 上一页</button>
+          <span>第 {cpage * CPAGE + 1}–{Math.min((cpage + 1) * CPAGE, cf.length)} 条 · 共 {cf.length} 条</span>
+          <button onClick={() => setCpage(Math.min(cpages - 1, cpage + 1))} disabled={cpage >= cpages - 1}
+            className="btn-ghost btn-xs disabled:opacity-40">下一页 →</button>
+        </div>
+      )}
     </div>
   )
 }
+

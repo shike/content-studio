@@ -52,6 +52,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [accounts, setAccounts] = useState<WatchAccount[]>([])
   const [history, setHistory] = useState<ScanJob[]>([])
   const [filter, setFilter] = useState('')
+  const [apageRaw, setApage] = useState(0)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [accVideos, setAccVideos] = useState<BenchmarkLite[]>([])
   const [confirmDel, setConfirmDel] = useState<number | null>(null)
@@ -232,6 +233,10 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
     if (filter === 'bad') return Boolean(a.last_scan_at) && isAbnormal(a)
     return true
   })
+  const APAGE = 20
+  const apages = Math.max(1, Math.ceil(filtered.length / APAGE))
+  const apage = Math.min(apageRaw, apages - 1)
+  const pagedAccounts = filtered.slice(apage * APAGE, (apage + 1) * APAGE)
   // 上次扫描取账号级 last_scan_at 的最大值（持久事实，不随任务清理/归档消失）；
   // 扫描任务历史只用于异常判定与展开详情
   const lastScan = accounts.reduce<string | undefined>(
@@ -352,7 +357,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       <div className="mt-4">
         <ChipRow
           active={filter}
-          onChange={setFilter}
+          onChange={(k) => { setFilter(k); setApage(0) }}
           chips={[
             { key: '', label: '全部', count: counts.all },
             { key: 'on', label: '监控中', count: counts.on },
@@ -374,7 +379,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filtered.map((acc) => {
+            {pagedAccounts.map((acc) => {
               const exp = expandedId === acc.id
               const abnormal = Boolean(acc.last_scan_at) && isAbnormal(acc)
               return (
@@ -559,6 +564,16 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           </div>
         )}
       </div>
+      {filtered.length > APAGE && (
+        <div className="border-t border-slate-100 px-4 py-2.5 text-center text-[13px] text-slate-500">
+          <button onClick={() => setApage(Math.max(0, apage - 1))} disabled={apage === 0}
+            className="btn-ghost btn-xs disabled:opacity-40">← 上一页</button>
+          <span className="mx-3">第 {apage * APAGE + 1}–{Math.min((apage + 1) * APAGE, filtered.length)} 条 · 共 {filtered.length} 条</span>
+          <button onClick={() => setApage(Math.min(apages - 1, apage + 1))} disabled={apage >= apages - 1}
+            className="btn-ghost btn-xs disabled:opacity-40">下一页 →</button>
+        </div>
+      )}
     </div>
   )
 }
+
