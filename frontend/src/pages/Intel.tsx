@@ -20,10 +20,9 @@ export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => v
       </div>
       <div className="mb-3 flex gap-1.5">
         {([
-          ['stream', '同行动态'],
           ['bench', '拆解资料库'],
           ['accounts', '监测账号'],
-          ['trend', '我的账号趋势'],
+          ['trend', '账号经营'],
         ] as [Tab, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`rounded-full px-4 py-1.5 text-sm ${tab === k ? 'bg-zinc-900 text-white' : 'border border-[#e8ecf0] bg-white text-slate-500 hover:bg-slate-50'}`}>
