@@ -324,7 +324,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       <PageHeader
         icon={Radar}
         title="同行监测"
-        desc="对标账号管理与扫描监测：扫描自动把新视频入库「待定夺」，批准后进拆解流水线"
+        desc="对标账号管理与扫描监测：扫描自动把新视频入库拆解库「待定夺」，批准后进拆解流水线"
         actions={
           <div className="flex gap-2">
             <button onClick={() => setShowAdd((v) => !v)} className="btn-ghost">
