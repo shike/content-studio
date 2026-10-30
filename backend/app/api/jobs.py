@@ -41,7 +41,9 @@ def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 5
     my_tenant = None if user.role == "platform_admin" else user.tenant_id
     with Session(engine) as s:
         counts = {k: 0 for k in _WEIGHT}
-        cnt_q = select(Job.status, Job.id).where(Job.archived == 0)  # type: ignore[attr-defined]
+        # 第二列必须是 next_retry_at：下面三态循环靠它区分"失败退避中(进行中)"与"失败终态(待处置)"
+        # （此前误选 Job.id——id 永远非 None，导致失败全被算进"进行中"，数字与筛选列表打架）
+        cnt_q = select(Job.status, Job.next_retry_at).where(Job.archived == 0)  # type: ignore[attr-defined]
         if my_tenant:
             cnt_q = cnt_q.where(Job.tenant_id == my_tenant)  # type: ignore[attr-defined]
         for st, n in s.exec(cnt_q).all():
