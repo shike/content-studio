@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import (articles, auth_api as auth_routes, benchmarks, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
-                  public_media, publishing, schedules, scripts, settings as settings_api, style,
+                  public_media, publishing, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
 from sqlmodel import Session, select
@@ -122,6 +122,7 @@ app.include_router(topics.router, dependencies=[Depends(require_ready_user)])
 app.include_router(scripts.router, dependencies=[Depends(require_ready_user)])
 app.include_router(articles.router, dependencies=[Depends(require_ready_user)])
 app.include_router(benchmarks.router, dependencies=[Depends(require_ready_user)])
+app.include_router(radar.router, dependencies=[Depends(require_ready_user)])
 app.include_router(publishing.router, dependencies=[Depends(require_ready_user)])
 app.include_router(watch.router, dependencies=[Depends(require_ready_user)])
 app.include_router(style.router, dependencies=[Depends(require_ready_user)])

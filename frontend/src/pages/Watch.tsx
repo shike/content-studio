@@ -38,31 +38,6 @@ interface ScanJob {
   result?: { queued?: number; notes?: string[] }
 }
 
-interface WatchCandidate {
-  id: number
-  keyword: string
-  direction: string
-  name: string
-  url: string
-  signature: string
-  follower_count: number
-  sample_video_id: string
-  sample_title: string
-  status: string
-  created_at: string
-  stats: { digg?: number; comment?: number; share?: number; collect?: number }
-  account_type?: string
-  leadgen_density?: number
-}
-
-const fmtFollow = (n: number) =>
-  n >= 10000
-    ? `${(n / 10000).toFixed(n / 10000 >= 100 ? 0 : 1).replace(/\.0$/, '')}万`
-    : String(n)
-
-const fmtN = (n?: number) =>
-  !n ? '0' : n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}万` : String(n)
-
 interface BenchmarkLite {
   id: number
   title: string
@@ -85,29 +60,18 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ platform: 'douyin', name: '', url: '', note: '', kind: 'competitor', account_type: 'persona' })
   const [resolveHint, setResolveHint] = useState('')
-  const [addMode, setAddMode] = useState<'link' | 'search'>('link')
-  const [dform, setDform] = useState({ keyword: '', direction: '' })
-  const [cands, setCands] = useState<WatchCandidate[]>([])
-  const [candFilter, setCandFilter] = useState('open')
-  const [expCand, setExpCand] = useState<number | null>(null)
-  const [discoverBusy, setDiscoverBusy] = useState('')
-  const [discoverSummary, setDiscoverSummary] = useState<{
-    candidates: number; new: number; already: number; skipped: number; notes: string[]
-  } | null>(null)
   const [scanBusy, setScanBusy] = useState('')
   const [scanSummary, setScanSummary] = useState<{ queued: number; notes: string[] } | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
-    const [w, h, c] = await Promise.all([
+    const [w, h] = await Promise.all([
       api<{ items: WatchAccount[] }>('/watch/accounts'),
       api<{ items: ScanJob[] }>('/watch/scan/history'),
-      api<{ items: WatchCandidate[] }>('/watch/discover/candidates'),
     ])
     setAccounts(w.items)
     setHistory(h.items)
-    setCands(c.items)
   }, [])
 
   useEffect(() => {
@@ -226,49 +190,6 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       await reload()
     })
 
-  const discover = () =>
-    guard(async () => {
-      if (!dform.keyword.trim()) return
-      setDiscoverSummary(null)
-      try {
-        const r = await api<{ job_id: number }>('/watch/discover', {
-          method: 'POST',
-          body: JSON.stringify({ keyword: dform.keyword.trim(), direction: dform.direction.trim() }),
-        })
-        const job = await waitJob(r.job_id, (j) => setDiscoverBusy(`搜账号：${j.progress}% ${j.message}`))
-        setDiscoverSummary({
-          candidates: job.result?.candidates ?? 0,
-          new: job.result?.new ?? 0,
-          already: job.result?.already ?? 0,
-          skipped: job.result?.skipped ?? 0,
-          notes: job.result?.notes ?? [],
-        })
-        setCandFilter('open')
-        await reload()
-      } finally {
-        setDiscoverBusy('')
-      }
-    })
-
-  const addCand = (c: WatchCandidate) =>
-    guard(async () => {
-      await api(`/watch/discover/candidates/${c.id}/add`, { method: 'POST' })
-      await reload()
-    })
-
-  const dismissCand = (c: WatchCandidate) =>
-    guard(async () => {
-      await api(`/watch/discover/candidates/${c.id}/dismiss`, { method: 'POST' })
-      await reload()
-    })
-
-  const clearCands = () =>
-    guard(async () => {
-      await api('/watch/discover/candidates', { method: 'DELETE' })
-      setExpCand(null)
-      await reload()
-    })
-
   const openExpand = (acc: WatchAccount) => {
     const next = expandedId === acc.id ? null : acc.id
     setExpandedId(next)
@@ -323,7 +244,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
     <div>
       <PageHeader
         icon={Radar}
-        title="同行监测"
+        title="监控的账号"
         desc="对标账号管理与扫描监测：扫描自动把新视频入库拆解库「待定夺」，批准后进拆解流水线"
         actions={
           <div className="flex gap-2">
@@ -350,11 +271,6 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
       {/* 添加账号（行内表单：贴链接识别 / 搜账号） */}
       {showAdd && (
         <div className="card mt-3 space-y-2 border-sky-200 bg-sky-50/40 p-4">
-          <div className="segment">
-            <button onClick={() => setAddMode('link')} className={`segment-item ${addMode === 'link' ? 'segment-item-active' : ''}`}>贴链接识别</button>
-            <button onClick={() => setAddMode('search')} className={`segment-item ${addMode === 'search' ? 'segment-item-active' : ''}`}>搜账号</button>
-          </div>
-          {addMode === 'link' && (
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <select
@@ -410,34 +326,6 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                 自动识别：贴视频链接自动反查（昵称+主页自动回填）；贴主页链接直接读主页标题。
               </div>
             </>
-          )}
-          {addMode === 'search' && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={dform.keyword}
-                  onChange={(e) => setDform({ ...dform, keyword: e.target.value })}
-                  onKeyDown={(e) => e.key === 'Enter' && discover()}
-                  placeholder="关键词，如：企业数字化转型"
-                  className="input min-w-48 flex-1"
-                />
-                <input
-                  value={dform.direction}
-                  onChange={(e) => setDform({ ...dform, direction: e.target.value })}
-                  onKeyDown={(e) => e.key === 'Enter' && discover()}
-                  placeholder="方向补充（选填），如：企业管理 口播"
-                  className="input min-w-56 flex-1"
-                />
-                <button onClick={discover} disabled={!dform.keyword.trim() || discoverBusy !== ''} className="btn-accent btn-xs disabled:opacity-40">
-                  <Search size={13} /> 开始搜索
-                </button>
-              </div>
-              {discoverBusy && <div className="text-xs text-sky-600">{discoverBusy}</div>}
-              <div className="text-[11px] text-slate-400">
-                搜索引擎挖抖音热门视频 → 自动反查作者与粉丝数 → 按粉丝数出候选（约 1~3 分钟，无 LLM 消耗）；风控样本自动跳过并说明。
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -459,146 +347,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         </div>
       )}
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
-      {discoverSummary && !discoverBusy && (
-        <div className="card mt-3 border-emerald-200 bg-emerald-50/50 px-4 py-2.5 text-[13px] text-emerald-800">
-          发现 <b>{discoverSummary.candidates}</b> 个候选账号：新增 {discoverSummary.new}，
-          已在清单 {discoverSummary.already}
-          {discoverSummary.skipped > 0 && <>，风控跳过 {discoverSummary.skipped}</>}
-          {discoverSummary.notes.length > 0 && (
-            <details className="mt-1">
-              <summary className="cursor-pointer text-xs text-emerald-700">检索与解析明细（展开）</summary>
-              <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
-                {discoverSummary.notes.map((n, i) => (
-                  <li key={i}>· {n}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
-
-      {/* 发现的账号（关键词搜出的候选，持久化，待定夺才显示入口卡片） */}
-      {cands.length > 0 && (() => {
-        const cc = {
-          open: cands.filter((c) => c.status === 'open').length,
-          added: cands.filter((c) => c.status === 'added').length,
-          dismissed: cands.filter((c) => c.status === 'dismissed').length,
-        }
-        const cf = candFilter ? cands.filter((c) => c.status === candFilter) : cands
-        return (
-          <div className="card mt-4 overflow-hidden p-0">
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-zinc-900">
-              <Search size={14} className="text-sky-600" /> 发现的账号
-              <span className="text-xs font-normal text-slate-400">
-                关键词搜出的候选对标，加入后随「扫一遍」自动监测新视频
-              </span>
-              {(cc.added + cc.dismissed) > 0 && (
-                <button onClick={clearCands} className="btn-ghost btn-xs ml-auto text-slate-400">
-                  <Trash2 size={12} /> 清掉已处理
-                </button>
-              )}
-            </div>
-            <div className="px-4 pt-3">
-              <ChipRow
-                active={candFilter}
-                onChange={setCandFilter}
-                chips={[
-                  { key: 'open', label: '待定夺', count: cc.open },
-                  { key: 'added', label: '已加入', count: cc.added },
-                  { key: 'dismissed', label: '已忽略', count: cc.dismissed },
-                  { key: '', label: '全部', count: cands.length },
-                ]}
-              />
-            </div>
-            {cf.length === 0 ? (
-              <div className="px-4 py-4 text-[13px] text-slate-400">该状态下暂无候选。</div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {cf.map((c) => {
-                  const expC = expCand === c.id
-                  return (
-                    <div key={c.id} className={expC ? 'bg-sky-50/40' : ''}>
-                      <div
-                        onClick={() => setExpCand(expC ? null : c.id)}
-                        className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-slate-50"
-                      >
-                        <span className={`badge shrink-0 ${c.status === 'added' ? 'bg-emerald-100 text-emerald-700' : c.status === 'dismissed' ? 'bg-slate-200 text-slate-500' : 'bg-amber-100 text-amber-800'}`}>
-                          {c.status === 'added' ? '已加入' : c.status === 'dismissed' ? '已忽略' : '待定夺'}
-                        </span>
-                        <span className="w-16 shrink-0 text-right text-sm font-bold tabular-nums text-sky-600" title="粉丝数（热门排序键）">
-                          {fmtFollow(c.follower_count)}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-zinc-900">{c.name}</div>
-                          <div className="mt-0.5 truncate text-xs text-slate-400">
-                            样本：{c.sample_title || c.sample_video_id}
-                          </div>
-                        </div>
-                        {c.status === 'open' && (
-                          <span className="flex shrink-0 items-center gap-1.5">
-                            <button onClick={(e) => { e.stopPropagation(); addCand(c) }} className="btn-accent btn-xs">
-                              <Plus size={12} /> 监测
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); dismissCand(c) }} className="btn-ghost btn-xs text-slate-400">
-                              忽略
-                            </button>
-                          </span>
-                        )}
-                        {c.account_type === 'leadgen' && (
-                          <span className="badge shrink-0 bg-amber-100 text-amber-800" title="评论区求带密度≥8% 判获客型">
-                            获客 · 求带 {Math.round((c.leadgen_density ?? 0) * 100)}%
-                          </span>
-                        )}
-                      </div>
-                      {expC && (
-                        <div className="grid gap-5 border-t border-sky-100 px-5 py-4 text-[13px] md:grid-cols-2">
-                          <div>
-                            <div className="mb-1.5 text-xs font-semibold text-slate-500">账号简介</div>
-                            <div className="whitespace-pre-wrap leading-relaxed text-slate-600">
-                              {c.signature || '（无签名）'}
-                            </div>
-                            <div className="mt-3">
-                              <div className="mb-1 text-xs font-semibold text-slate-500">样本视频</div>
-                              <a
-                                href={`https://www.douyin.com/video/${c.sample_video_id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-sky-600 hover:underline"
-                              >
-                                {c.sample_title || c.sample_video_id}
-                              </a>
-                              <div className="mt-1 text-xs text-slate-400">
-                                赞 {fmtN(c.stats.digg)} · 评 {fmtN(c.stats.comment)} · 转 {fmtN(c.stats.share)} · 藏 {fmtN(c.stats.collect)}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="space-y-1 text-slate-600">
-                            <div className="mb-1.5 text-xs font-semibold text-slate-500">来源与状态</div>
-                            <div>发现关键词：{c.keyword}{c.direction ? ` · ${c.direction}` : ''}</div>
-                            <div>粉丝：{fmtFollow(c.follower_count)}（按此排序）</div>
-                            <div>发现于 {relTime(c.created_at)}</div>
-                            <div className="break-all">
-                              主页：<a className="text-sky-600 hover:underline" href={safeHref(c.url)} target="_blank" rel="noreferrer">{c.url}</a>
-                            </div>
-                            {c.status === 'open' && (
-                              <div className="pt-1.5">
-                                <button onClick={() => addCand(c)} className="btn-accent btn-xs">
-                                  <Plus size={12} /> 加入监测清单
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )
-      })()}
 
       <div className="mt-4">
         <ChipRow

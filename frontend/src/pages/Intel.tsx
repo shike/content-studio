@@ -3,11 +3,13 @@ import type { SectionKey } from '../App'
 import { api } from '../api'
 import Benchmarks from './Benchmarks'
 import Watch from './Watch'
+import DiscoveredAccounts from './DiscoveredAccounts'
+import TopicInsights from './TopicInsights'
 import AccountTrends from './AccountTrends'
 
-type Tab = 'bench' | 'accounts' | 'trend'
+type Tab = 'bench' | 'discovered' | 'accounts' | 'topics' | 'trend'
 
-/** 情报中心：拆解资料库 / 监测账号 / 账号经营 三区（同行动态已并入拆解资料库，话题雷达已并入「热点雷达」，风格画像在人设号产线）。 */
+/** 情报中心：拆解资料库 / 发现的账号 / 监控的账号 / 话题洞察 / 账号经营 五区（同行动态已并入拆解资料库，话题雷达已并入「热点雷达」，风格画像在人设号产线）。 */
 export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => void }) {
   const [tab, setTab] = useState<Tab>('bench')
   const [error, setError] = useState('')
@@ -34,7 +36,9 @@ export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => v
       {error && <div className="mb-2 text-sm text-red-600">{error}</div>}
 
       {tab === 'bench' && <Benchmarks onNavigate={onNavigate} />}
+      {tab === 'discovered' && <DiscoveredAccounts />}
       {tab === 'accounts' && <Watch onNavigate={onNavigate} />}
+      {tab === 'topics' && <TopicInsights />}
       {tab === 'trend' && <AccountTrends />}
     </div>
   )
