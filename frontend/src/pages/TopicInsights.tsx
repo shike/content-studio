@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Radar, RefreshCw } from 'lucide-react'
+import { Plus, Radar, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, relTime } from '../components'
 
@@ -27,6 +27,44 @@ export default function TopicInsights() {
   const [loaded, setLoaded] = useState(false)
   const [checking, setChecking] = useState<number | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [link, setLink] = useState('')
+  const [extracting, setExtracting] = useState(false)
+  const [found, setFound] = useState<{ name: string; ch_id: string }[]>([])
+  const [adding, setAdding] = useState('')
+
+  const extractTopics = () =>
+    (async () => {
+      if (!link.trim()) return
+      setExtracting(true)
+      setError('')
+      setFound([])
+      try {
+        const r = await api<{ items: { name: string; ch_id: string }[] }>('/radar/topics/extract', {
+          method: 'POST',
+          body: JSON.stringify({ url: link.trim() }),
+        })
+        setFound(r.items || [])
+      } catch (e) {
+        setError(String(e))
+      } finally {
+        setExtracting(false)
+      }
+    })()
+
+  const addTopic = (t: { name: string; ch_id: string }) =>
+    (async () => {
+      setAdding(t.ch_id)
+      setError('')
+      try {
+        await api('/radar/topics', { method: 'POST', body: JSON.stringify({ name: t.name, ch_id: t.ch_id }) })
+        setFound((f) => f.filter((x) => x.ch_id !== t.ch_id))
+        load()
+      } catch (e) {
+        setError(String(e))
+      } finally {
+        setAdding('')
+      }
+    })()
 
   const load = () => {
     api<{ items: TopicRow[] }>('/radar/topics')
@@ -59,7 +97,35 @@ export default function TopicInsights() {
   return (
     <div>
       <div className="mb-2.5 text-xs text-slate-500">
-        每日 06:00「热点雷达」自动检查这些抖音话题下的新视频增速，飙升的爆款视频会自动走质量闸拆解、候选进选题库。新增监测话题：贴该话题下的任意视频链接走「发现的账号」或「拆解资料库」，标签会自动入库。
+        每日 06:00「热点雷达」自动检查这些抖音话题下的新视频增速，飙升的爆款视频会自动走质量闸拆解、候选进选题库。
+      </div>
+      <div className="card mb-3 space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-zinc-900"><Plus size={14} className="inline text-sky-600" /> 添加监测话题</span>
+          <input
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && extractTopics()}
+            placeholder="贴一条带该话题的抖音视频链接"
+            className="input min-w-64 flex-1"
+          />
+          <button onClick={extractTopics} disabled={!link.trim() || extracting} className="btn-accent btn-xs disabled:opacity-40">
+            {extracting ? '提取中…（打开视频页约 10~30 秒）' : '提取话题'}
+          </button>
+        </div>
+        {found.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {found.map((t) => (
+              <button key={t.ch_id} onClick={() => addTopic(t)}
+                disabled={adding === t.ch_id}
+                className="badge bg-sky-50 text-sky-700 transition hover:bg-sky-100 disabled:opacity-40"
+                title="点击加入监测">
+                <Plus size={11} className="inline" /> #{t.name}
+              </button>
+            ))}
+            <span className="text-[11px] text-slate-400">点击话题标签加入监测</span>
+          </div>
+        )}
       </div>
       {error && <div className="mb-2 text-sm text-red-600">{error}</div>}
       {!loaded ? (
