@@ -23,7 +23,9 @@ export default function Intel({ onNavigate }: { onNavigate: (k: SectionKey) => v
       <div className="mb-3 flex gap-1.5">
         {([
           ['bench', '拆解资料库'],
-          ['accounts', '监测账号'],
+          ['discovered', '发现的账号'],
+          ['accounts', '监控的账号'],
+          ['topics', '话题洞察'],
           ['trend', '账号经营'],
         ] as [Tab, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
