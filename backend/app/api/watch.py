@@ -290,7 +290,7 @@ def list_candidates(status: str = "") -> dict:
         if status:
             q = q.where(WatchCandidate.status == status)  # type: ignore[attr-defined]
         rows = s.exec(q.order_by(  # type: ignore[attr-defined]
-            WatchCandidate.follower_count.desc(),  # type: ignore[attr-defined]
+            WatchCandidate.leadgen_comments.desc(),  # type: ignore[attr-defined]
             WatchCandidate.id.desc(),  # type: ignore[attr-defined]
         )).all()
         return {"items": [_cand_dict(r) for r in rows]}

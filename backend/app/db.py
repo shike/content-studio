@@ -162,6 +162,13 @@ def _migrate(engine) -> None:
         if cols and "kind" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN kind VARCHAR NOT NULL DEFAULT 'competitor'"))
+        wccols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_candidates)"))]
+        if wccols and "leadgen_comments" not in wccols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_candidates ADD COLUMN leadgen_comments INTEGER DEFAULT 0"))
+        if wccols and "recent_same" not in wccols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_candidates ADD COLUMN recent_same INTEGER DEFAULT 0"))
         if cols and "creator_cookie" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))

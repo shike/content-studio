@@ -12,7 +12,7 @@ import json
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -203,7 +203,8 @@ def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Option
             if aid and aid not in seen:
                 seen.add(aid)
                 entries.append({"id": aid, "title": str(a.get("desc") or "")[:80],
-                                "stats": _extract_stats(a)})
+                                "stats": _extract_stats(a),
+                                "ctime": a.get("create_time") or 0})
     entries = entries[:_LIST_LIMIT]
     if not entries:
         return None, "分享页未吐出作品列表（等待窗内数据未到，可重试）", True
@@ -657,7 +658,7 @@ def _probe_leadgen_signal(video_id: str) -> dict:
     """打开视频页拦评论 XHR，返回 {comments, leadgen, density}。失败抛 RuntimeError。"""
     from playwright.sync_api import sync_playwright
 
-    from .browser import launch, ua
+    from ..browser import launch, ua
 
     comments: list[str] = []
     try:
@@ -690,9 +691,11 @@ def _probe_leadgen_signal(video_id: str) -> dict:
         raise RuntimeError(f"评论页打开失败: {str(e)[:80]}")
     if not comments:
         raise RuntimeError("未拦到评论（新视频评论少或接口未触发）")
-    leadgen = sum(1 for t in comments if any(k in t for k in _LEADGEN_KEYWORDS))
+    matched = [c for c in comments if any(k in c for k in _LEADGEN_KEYWORDS)]
+    leadgen = len(matched)
     density = round(leadgen / len(comments), 2)
-    return {"comments": len(comments), "leadgen": leadgen, "density": density}
+    return {"comments": len(comments), "leadgen": leadgen, "density": density,
+            "matched": matched[:8]}
 
 
 @register_executor("watch_discover_daily")
@@ -851,3 +854,128 @@ async def watch_discover(ctx, payload: dict) -> dict:
     return {"candidates": len(ranked), "new": new_cnt, "already": added_cnt,
             "skipped": skipped, "top": [f"{d['name']}（{_fmt_follow(d['follower_count'])}粉）"
                                         for d in ranked], "notes": notes}
+
+# ---- 获客号挖掘 v2（2026-10-31 用户定版：求带评论直接搜 + 近期多条同类验证）----
+
+_LEADGEN_HUNT_SEED_CAP = 16      # 每轮最多扫的种子视频数（控时长）
+_LEADGEN_HUNT_MIN_COMMENTS = 3   # 求带评论绝对数门槛：≥3 条判获客候选
+_PATROL_BUSINESS_WORDS = ("AI", "人工智能", "大模型", "数字化", "智能", "FDE", "OPC",
+                          "自动化", "获客", "落地", "降本", "提效")
+
+
+def _count_recent_same(entries: list[dict], days: int = 30) -> int:
+    """近 N 天内标题命中业务词的作品数（entries 最新在前，带 ctime）。"""
+    cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
+    n = 0
+    for e in entries:
+        ct = e.get("ctime") or 0
+        if ct and float(ct) < cutoff:
+            continue
+        title = (e.get("title") or "").lower()
+        if any(w.lower() in title for w in _PATROL_BUSINESS_WORDS):
+            n += 1
+    return n
+
+
+@register_executor("leadgen_hunt")
+async def leadgen_hunt(ctx, payload: dict) -> dict:
+    """获客号挖掘 v2：评论区求带驱动（用户定版：把评论区当搜索源）。
+
+    ① 种子池=监测话题最新视频 + 拆解库近 14 天已批准视频（AI/FDE/OPC 相关场）
+    ② 逐视频拦评论区：求带评论 ≥3 条 → 视频作者即获客号候选（求带数=转化规模）
+    ③ 持续性验证：作者近 30 天同类视频 ≥3 条（锚点分享页路线，失败标未验证不强拦）
+    ④ 入候选表：求带评论数为主排序，粉丝数仅展示。"""
+    import random
+
+    notes: list[str] = []
+    with Session(engine) as s:
+        seeds: dict[str, str] = {}
+        from ..models import RadarTopic
+        for rt in s.exec(select(RadarTopic).where(RadarTopic.enabled == True)).all():  # noqa: E712
+            for h in (rt.hits or [])[:10]:
+                vid = str((h or {}).get("id") or "")
+                if vid:
+                    seeds.setdefault(vid, f"话题#{rt.name}")
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        for b in s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                BenchmarkVideo.scan_status == "approved")).all():  # type: ignore[attr-defined]
+            if b.created_at and b.created_at >= cutoff.replace(tzinfo=None) and b.url:
+                m = re.search(r"/video/(\d+)", b.url)
+                if m:
+                    seeds.setdefault(m.group(1), "拆解库")
+    if not seeds:
+        raise TransientError("种子池为空（监测话题无命中且无近期拆解样本），稍后自动重试")
+    ids = list(seeds)
+    random.shuffle(ids)  # 轮换种子，避免每天扫同一批
+    ids = ids[:_LEADGEN_HUNT_SEED_CAP]
+
+    with Session(engine) as s:
+        known = {
+            (c.url, c.sample_video_id)
+            for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
+        }
+
+    found: list[dict] = []
+    scanned = failed = already = 0
+    for i, vid in enumerate(ids):
+        if any(svid == vid for (_u, svid) in known):
+            continue  # 该视频已产出过候选
+        ctx.set_progress(int(85 * i / len(ids)),
+                         f"扫评论 {i + 1}/{len(ids)}（候选 {len(found)}）")
+        try:
+            sig = await asyncio.to_thread(_probe_leadgen_signal, vid)
+        except Exception:
+            failed += 1
+            continue
+        scanned += 1
+        if sig["leadgen"] < _LEADGEN_HUNT_MIN_COMMENTS:
+            continue
+        info, err = await asyncio.to_thread(_probe_video_author, vid)
+        if info is None:
+            notes.append(f"种子 {vid}：求带 {sig['leadgen']} 条但反查作者失败（{err}）")
+            continue
+        if (info["url"], vid) in known:
+            already += 1
+            continue
+        recent_same = None
+        entries, lerr, _ = await asyncio.to_thread(
+            _list_author_videos_via_share_page, info["url"])
+        if entries:
+            recent_same = _count_recent_same(entries)
+        found.append({**info,
+                      "leadgen_comments": sig["leadgen"],
+                      "leadgen_density": sig["density"],
+                      "recent_same": recent_same if recent_same is not None else 0})
+        notes.append(f"{info['name']}：求带 {sig['leadgen']} 条"
+                     + (f"，近 30 天同类 {recent_same} 条" if entries else "（持续性未验证）"))
+        await asyncio.sleep(2)
+
+    found.sort(key=lambda d: (d["recent_same"] >= 3, d["leadgen_comments"]), reverse=True)
+    new_cnt = added_cnt = 0
+    with Session(engine) as s:
+        for d in found[:_DISCOVER_TOP_N]:
+            dup = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
+                WatchCandidate.url == d["url"])).first()  # type: ignore[attr-defined]
+            if dup is not None:
+                added_cnt += 1
+                continue
+            s.add(WatchCandidate(
+                keyword="leadgen_hunt", name=d["name"], url=d["url"],
+                sec_uid=d.get("sec_uid") or "",
+                signature=d.get("signature") or "",
+                follower_count=d.get("follower_count") or 0,
+                sample_video_id=d["video_id"], sample_title=d.get("title") or "",
+                sample_stats=json.dumps({"digg": d.get("digg") or 0,
+                                         "comment": d.get("comment") or 0,
+                                         "share": d.get("share") or 0,
+                                         "collect": d.get("collect") or 0}),
+                account_type="leadgen",
+                leadgen_density=round(d.get("leadgen_density") or 0, 2),
+                leadgen_comments=d["leadgen_comments"],
+                recent_same=d["recent_same"],
+            ))
+            new_cnt += 1
+        s.commit()
+    ctx.set_progress(100, f"扫描 {scanned} 条种子，候选 {len(found)}，新增 {new_cnt}")
+    return {"scanned": scanned, "candidates": len(found), "new": new_cnt,
+            "already": added_cnt, "skipped": failed, "notes": notes}

@@ -179,19 +179,15 @@ register_schedule(Schedule(key="watch_scan", label="同行扫描（全部监控�
 async def _run_watch_discover() -> str:
     from .runner import runner
 
-    # 关键词选择统一收口 watch.pick_discover_keyword：设置页配置 > 对标圈动态提炼 > 静态池
-    from ..watch.service import pick_discover_keyword
-
-    keyword = await pick_discover_keyword()
-    job = await runner.submit("watch_discover", {"keyword": keyword, "auto": True},
-                              dedup_key=f"1:discover:{datetime.now():%Y%m%d}",
+    job = await runner.submit("leadgen_hunt", {"auto": True},
+                              dedup_key=f"1:leadgenhunt:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（今日关键词：{keyword}）"
+    return f"job #{job.id}（求带评论驱动：种子池扫评论区，持续性验证后出候选）"
 
 
 # 钟点 2 点与扫描错峰（不可 hour_from_settings：全局 watch_scan_hour 恒有值会把它永久
 # 覆盖成 1 点——2026-10-06 四项任务挤在 1 点、发现任务"每日 2 点"设计失效的根因）
-register_schedule(Schedule(key="watch_discover_daily", label="同行发现（每日清单外高赞同行）",
+register_schedule(Schedule(key="watch_discover_daily", label="获客号挖掘（求带评论驱动）",
                            daily_hour=2,
                            enabled_by="watch_scan_enabled", run=_run_watch_discover))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
