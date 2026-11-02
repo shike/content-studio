@@ -683,14 +683,25 @@ def _probe_leadgen_signal(video_id: str) -> dict:
                 page.on("response", on_response)
                 page.goto(f"https://www.douyin.com/video/{video_id}",
                           timeout=45000, wait_until="domcontentloaded")
-                page.wait_for_timeout(6000)
+                # 评论面板不保证随页面自动加载（2026-11-02 服务器实测：需一次滚动才
+                # 触发 comment/list），等不到就滚动唤醒，60s 截止轮询。
+                deadline = time.monotonic() + 60
+                while not comments and time.monotonic() < deadline:
+                    page.wait_for_timeout(3000)
+                    if not comments and time.monotonic() < deadline:
+                        try:
+                            page.mouse.wheel(0, 600)
+                            page.wait_for_timeout(1500)
+                            page.mouse.wheel(0, -600)
+                        except Exception:  # noqa: BLE001
+                            break  # 页面已跳转/关闭，别空转
                 ctx.close()
             finally:
                 browser.close()
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"评论页打开失败: {str(e)[:80]}")
     if not comments:
-        raise RuntimeError("未拦到评论（新视频评论少或接口未触发）")
+        raise RuntimeError("未拦到评论（评论区可能已关闭或接口未触发）")
     matched = [c for c in comments if any(k in c for k in _LEADGEN_KEYWORDS)]
     leadgen = len(matched)
     density = round(leadgen / len(comments), 2)
@@ -917,6 +928,7 @@ async def leadgen_hunt(ctx, payload: dict) -> dict:
 
     found: list[dict] = []
     scanned = failed = already = 0
+    probe_fails: dict[str, int] = {}  # 失败原因→次数（不静默吞，聚合进 notes）
     for i, vid in enumerate(ids):
         if any(svid == vid for (_u, svid) in known):
             continue  # 该视频已产出过候选
@@ -924,8 +936,10 @@ async def leadgen_hunt(ctx, payload: dict) -> dict:
                          f"扫评论 {i + 1}/{len(ids)}（候选 {len(found)}）")
         try:
             sig = await asyncio.to_thread(_probe_leadgen_signal, vid)
-        except Exception:
+        except Exception as e:
             failed += 1
+            reason = str(e)[:60] or type(e).__name__
+            probe_fails[reason] = probe_fails.get(reason, 0) + 1
             continue
         scanned += 1
         if sig["leadgen"] < _LEADGEN_HUNT_MIN_COMMENTS:
@@ -950,6 +964,8 @@ async def leadgen_hunt(ctx, payload: dict) -> dict:
                      + (f"，近 30 天同类 {recent_same} 条" if entries else "（持续性未验证）"))
         await asyncio.sleep(2)
 
+    for reason, n in probe_fails.items():
+        notes.append(f"{n} 条种子评论探测失败：{reason}")
     found.sort(key=lambda d: (d["recent_same"] >= 3, d["leadgen_comments"]), reverse=True)
     new_cnt = added_cnt = 0
     with Session(engine) as s:
