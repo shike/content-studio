@@ -98,6 +98,7 @@ export interface Article {
   id: number
   topic_id: number | null
   script_id: number | null
+  note?: string
   md: string
   html: string
   status: string

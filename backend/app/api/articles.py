@@ -25,7 +25,85 @@ class GenerateIn(BaseModel):
     topic_id: int | None = None
     script_id: int | None = None
     style: str = ""  # 长文风格（deep_dive/practice/viewpoint/framework/comparison/inquiry/anatomy/outlook）
-    length: str = "feed"  # 双档位：feed=公众号版 1200~1800 字（默认）/ deep=深度版 3000~5000 字
+    length: str = "deep"  # 深度版唯一档位（2026-11-02 feed 退役；参数保留仅为兼容，服务端强制 deep）
+
+
+class DraftIn(BaseModel):
+    title: str
+    note: str = ""  # 报题备注/参考链接
+
+
+class WriteIn(BaseModel):
+    style: str = "auto"
+
+
+@router.post("/draft", status_code=201)
+def create_draft(body: DraftIn, user: User = Depends(require_user)) -> dict:
+    """报题即建长文草稿（公众号独立报题线 2026-11-02）：无选题阶段，直接进草稿箱待写。"""
+    title = body.title.strip()[:60]
+    if not title:
+        raise HTTPException(status_code=400, detail="报题一句话不能为空")
+    with Session(engine) as s:
+        dup = s.exec(select(Article).where(
+            Article.title == title,  # type: ignore[attr-defined]
+            Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]),  # type: ignore[attr-defined]
+        )).first()
+        if dup is not None:
+            raise HTTPException(status_code=409, detail=f"同题草稿已存在（#{dup.id}）")
+        row = Article(title=title, note=body.note.strip()[:300], status="pending")
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return row.model_dump()
+
+
+@router.post("/{article_id}/write", status_code=202)
+async def write_draft(article_id: int, body: WriteIn,
+                      user: User = Depends(require_user)) -> dict:
+    """待写草稿 → 生成长文（深度版唯一档位）。"""
+    with Session(engine) as s:
+        article = s.get(Article, article_id)
+        if article is None:
+            raise HTTPException(status_code=404, detail="article not found")
+        if article.status == "generating":
+            raise HTTPException(status_code=409, detail="该草稿正在生成长文")
+    job = await runner.submit("article_generate",
+                              {"article_id": article_id, "style": body.style or "auto",
+                               "length": "deep"})
+    with Session(engine) as s:
+        article = s.get(Article, article_id)
+        if article is not None:
+            article.status = "generating"
+            s.add(article)
+            s.commit()
+    return {"article_id": article_id, "job_id": job.id}
+
+
+class StyleSummaryOut(BaseModel):
+    pass
+
+
+@router.get("/style-summary")
+def style_summary(user: User = Depends(require_user)) -> dict:
+    """公众号独立风格画像（app_settings.article_style_note）。"""
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, "article_style_note")
+        return {"note": (row.value if row is not None else "") or ""}
+
+
+@router.post("/extract-style", status_code=202)
+async def extract_style(user: User = Depends(require_user)) -> dict:
+    """从已成文长文提取公众号风格画像。"""
+    job = await runner.submit("article_style_extract", {})
+    return {"job_id": job.id}
+
+
+@router.post("/extract-hotspots", status_code=202)
+async def extract_hotspots(user: User = Depends(require_user)) -> dict:
+    """独立热点报题任务（手动触发；调度每晚 0:30 自动跑）：产出待写长文草稿。"""
+    job = await runner.submit("article_hotspots", {"tenant_id": user.tenant_id})
+    return {"job_id": job.id}
 
 
 class ArticleUpdate(BaseModel):
@@ -41,8 +119,6 @@ class RenderIn(BaseModel):
 async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict:
     if body.topic_id is None and body.script_id is None:
         raise HTTPException(status_code=400, detail="topic_id 与 script_id 至少传一个")
-    if body.length not in ("feed", "deep"):
-        raise HTTPException(status_code=400, detail="length 只支持 feed（公众号版）/ deep（深度版）")
     with Session(engine) as s:
         dup = None
         if body.topic_id:
@@ -63,7 +139,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
         article_id = article.id
     job = await runner.submit("article_generate",
                               {"article_id": article_id, "style": body.style,
-                               "length": body.length})
+                               "length": "deep"})  # 深度版唯一档位
     return {"article_id": article_id, "job_id": job.id}
 
 

@@ -17,11 +17,19 @@ router = APIRouter(prefix="/api/topics")
 
 class IdeaIn(BaseModel):
     text: str
+    line: str = "persona"  # 选题线：persona | leadgen（三库独立，2026-11-02）
 
 
 class QuickIn(BaseModel):
     title: str
     audience: str = "both"  # boss | fde | both
+    line: str = "persona"  # 快速记选题默认人设库，可手动选获客
+
+
+def _validate_line(line: str) -> str:
+    if line not in ("persona", "leadgen"):
+        raise HTTPException(400, detail="line 必须是 persona / leadgen")
+    return line
 
 
 @router.post("/trending", status_code=202)
@@ -36,17 +44,18 @@ async def trending_topics(user: User = Depends(require_user)) -> dict:
 
 @router.post("/quick", status_code=201)
 def quick_topic(body: QuickIn) -> dict:
-    """快速记选题（R1.1b）：不触发 LLM，直接入库待审。"""
+    """快速记选题（R1.1b）：不触发 LLM，直接入库待审。默认进人设库，可指定获客库。"""
     title = body.title.strip()[:60]
     if not title:
         raise HTTPException(400, detail="标题不能为空")
     if body.audience not in ("boss", "fde", "both"):
         raise HTTPException(400, detail="audience 必须是 boss/fde/both")
+    line = _validate_line(body.line)
     with Session(engine) as s:
-        topic = Topic(title=title, source_type="manual", audience=body.audience)
+        topic = Topic(title=title, source_type="manual", audience=body.audience, line=line)
         s.add(topic)
         s.flush()  # flush 拿 id（同 benchmarks：消灭 commit+refresh 的偶发失败面）
-        topic_service.mark_similar(title, topic.id, s)
+        topic_service.mark_similar(title, topic.id, s, line=line)
         s.commit()
         s.refresh(topic)
         return topic.model_dump()
@@ -86,8 +95,9 @@ async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="idea 不能为空")
+    line = _validate_line(body.line)
     with Session(engine) as s:
-        topic = Topic(title=text[:60], source_type="idea", source_ref=text)
+        topic = Topic(title=text[:60], source_type="idea", source_ref=text, line=line)
         s.add(topic)
         s.commit()
         s.refresh(topic)
@@ -107,10 +117,14 @@ async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
 @router.get("")
 def list_topics(status: Optional[str] = None, source: Optional[str] = None,
                 audience: Optional[str] = None, min_score: Optional[float] = None,
+                line: Optional[str] = None,
                 order: str = "new", limit: int = 50, offset: int = 0) -> dict:
+    """三库独立（2026-11-02）：line 必传 persona/leadgen，两库互不可见。"""
     with Session(engine) as s:
+        if line not in ("persona", "leadgen"):
+            raise HTTPException(400, detail="line 必传 persona / leadgen")
         # order=new 按入库时间倒序；score 按分数从高到低（无分排最后，仍按新→旧）
-        q = select(Topic)
+        q = select(Topic).where(Topic.line == line)  # type: ignore[attr-defined]
         if order == "score":
             q = q.order_by(Topic.score.desc().nulls_last(), Topic.id.desc())  # type: ignore[attr-defined]
         else:
@@ -126,9 +140,9 @@ def list_topics(status: Optional[str] = None, source: Optional[str] = None,
         total = len(s.exec(q).all())
         rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         from sqlmodel import func
-        counts = {st: n for st, n in s.exec(
-            select(Topic.status, func.count(Topic.id)).group_by(Topic.status)  # type: ignore[arg-type]
-        ).all()}
+        cq = select(Topic.status, func.count(Topic.id)).group_by(Topic.status).where(  # type: ignore[arg-type]
+            Topic.line == line)  # type: ignore[attr-defined]
+        counts = {st: n for st, n in s.exec(cq).all()}
         return {"items": [_topic_out(s, t) for t in rows], "total": total, "counts": counts}
 
 
@@ -149,7 +163,8 @@ def approve_topic(topic_id: int) -> dict:
 @router.post("/{topic_id}/set-type")
 def set_topic_type(topic_id: int, body: dict,
                    user: User = Depends(require_user)) -> dict:
-    """手动修正选题的两类号归属（获客/人设），evidence.account_type 即口径。"""
+    """手动修正选题的两类号归属（获客/人设），evidence.account_type 即口径；
+    三库独立后同步搬库（line = account_type）。"""
     t = str((body or {}).get("account_type") or "").strip()
     if t not in ("persona", "leadgen"):
         raise HTTPException(status_code=400, detail="account_type 必须是 persona / leadgen")
@@ -161,6 +176,7 @@ def set_topic_type(topic_id: int, body: dict,
         ev["account_type"] = t
         ev["account_type_manual"] = True
         topic.evidence = ev
+        topic.line = t
         s.add(topic)
         s.commit()
     return {"id": topic_id, "account_type": t}

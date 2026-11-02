@@ -101,7 +101,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: SectionKey) 
       try {
         const r = await api<{ id: number }>('/topics/quick', {
           method: 'POST',
-          body: JSON.stringify({ title: quickTitle.trim(), audience: quickAudience }),
+          body: JSON.stringify({ title: quickTitle.trim(), audience: quickAudience, line: 'persona' }),
         })
         setQuickTitle('')
         setQuickMsg(`已记入选题库 #${r.id}，可去选题库深研`)

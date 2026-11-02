@@ -91,7 +91,7 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
             "reason": data.get("reason", ""),
             "search": search_meta,
         }
-        mark_similar(topic.title, topic.id, s)
+        mark_similar(topic.title, topic.id, s, line=topic.line if topic.line in ("persona", "leadgen") else "")
         s.add(topic)
         s.add(ResearchReport(topic_id=topic_id, content=report_md,
                              model=gateway.active()["model"]))
@@ -264,7 +264,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         hotspot = str(x.get("hotspot") or "").strip()
         if not hotspot or "对标圈" in hotspot:
             continue
-        if is_similar_title(str(x.get("title") or "")):  # 标题撞车：不同热点落到同一角度的兜底
+        if is_similar_title(str(x.get("title") or ""), line="persona"):  # 标题撞车兜底（提炼走人设线）
             continue
         hn = _norm(hotspot)
         if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
@@ -307,6 +307,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 audience=x.get("audience") if x.get("audience") in ("boss", "fde", "both") else "both",
                 source_type="trending",
                 source_ref=str(x.get("hotspot") or "")[:200],
+                line="persona",  # 站外热点提炼走人设线（获客号有独立挖号进料，2026-11-02）
                 evidence={
                     "hotspot": x.get("hotspot", ""),
                     "why_now": x.get("why_now", ""),
@@ -328,15 +329,16 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                          "hot": hot_meta, "queries": queries, "web": search_metas}}
 
 
-def recent_topic_titles(days: int = 14, limit: int = 24) -> list[str]:
-    """近 N 天已有选题标题（防撞车清单：生成前注入 prompt，让模型主动避开）。"""
+def recent_topic_titles(days: int = 14, limit: int = 24, line: str = "") -> list[str]:
+    """近 N 天已有选题标题（防撞车清单：生成前注入 prompt，让模型主动避开）。三库独立按线。"""
     from datetime import datetime, timedelta
 
     cutoff = datetime.now() - timedelta(days=days)
     with Session(engine) as s:
-        rows = s.exec(
-            select(Topic.title).where(Topic.created_at >= cutoff)  # type: ignore[attr-defined]
-            .order_by(Topic.id.desc())  # type: ignore[attr-defined]
+        q = select(Topic.title).where(Topic.created_at >= cutoff)  # type: ignore[attr-defined]
+        if line in ("persona", "leadgen"):
+            q = q.where(Topic.line == line)  # type: ignore[attr-defined]
+        rows = s.exec(q.order_by(Topic.id.desc())  # type: ignore[attr-defined]
         ).all()
     out = []
     for t in rows:
@@ -348,10 +350,12 @@ def recent_topic_titles(days: int = 14, limit: int = 24) -> list[str]:
     return out
 
 
-def is_similar_title(title: str, days: int = 14, threshold: float = 0.55) -> Optional[int]:
+def is_similar_title(title: str, days: int = 14, threshold: float = 0.55,
+                     line: str = "") -> Optional[int]:
     """标题相似拦截：与近 N 天已有选题归一化相似度 ≥阈值时返回撞车选题 id。
 
-    生成链路（热点/拆解）落库前硬拦截；人工链路（快速记题/深研）只标记不拦。"""
+    生成链路（热点/拆解）落库前硬拦截；人工链路（快速记题/深研）只标记不拦。
+    三库独立（2026-11-02）：line 传入时只与本线选题比对，跨线不拦。"""
     from datetime import datetime, timedelta
 
     if not (title or "").strip():
@@ -364,7 +368,10 @@ def is_similar_title(title: str, days: int = 14, threshold: float = 0.55) -> Opt
         return None
     cutoff = datetime.now() - timedelta(days=days)
     with Session(engine) as s:
-        for t in s.exec(select(Topic).where(Topic.created_at >= cutoff)).all():  # type: ignore[attr-defined]
+        q = select(Topic).where(Topic.created_at >= cutoff)  # type: ignore[attr-defined]
+        if line in ("persona", "leadgen"):
+            q = q.where(Topic.line == line)  # type: ignore[attr-defined]
+        for t in s.exec(q).all():
             if not t.title:
                 continue
             if SequenceMatcher(None, n, _norm(t.title)).ratio() >= threshold:
@@ -372,10 +379,13 @@ def is_similar_title(title: str, days: int = 14, threshold: float = 0.55) -> Opt
     return None
 
 
-def mark_similar(title: str, topic_id: int, session: Session) -> None:
-    """相似选题标记（R1.1c）：与既有未产出选题标题相似度 ≥0.62 时记入 evidence.similar_to。"""
-    rows = session.exec(
-        select(Topic).where(Topic.status.in_(["draft", "approved"]))).all()  # type: ignore[union-attr]
+def mark_similar(title: str, topic_id: int, session: Session, line: str = "") -> None:
+    """相似选题标记（R1.1c）：与既有未产出选题标题相似度 ≥0.62 时记入 evidence.similar_to。
+    三库独立：line 传入时只与本线比对。"""
+    q = select(Topic).where(Topic.status.in_(["draft", "approved"]))  # type: ignore[union-attr]
+    if line in ("persona", "leadgen"):
+        q = q.where(Topic.line == line)  # type: ignore[attr-defined]
+    rows = session.exec(q).all()
     similar = []
     for t in rows:
         if t.id == topic_id or not t.title:

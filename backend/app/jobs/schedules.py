@@ -176,6 +176,19 @@ async def _run_media_cleanup() -> str:
 register_schedule(Schedule(key="watch_scan", label="同行扫描（全部监控账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_watch_scan))
+async def _run_article_hotspots() -> str:
+    """公众号独立热点报题：站外热点 → 3 篇待写长文草稿（2026-11-02 三线定版）。"""
+    from .runner import runner
+
+    job = await runner.submit("article_hotspots", {"tenant_id": 1},
+                              dedup_key=f"1:articlehotspots:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（站外热点 → 待写长文草稿）"
+
+
+# 钟点 0 点（错峰窗 0-6 内最前，与 1:00 扫描错开；不可 hour_from_settings，同 watch_discover 理由）
+register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点报题（独立提炼）",
+                           daily_hour=0, run=_run_article_hotspots))
 async def _run_watch_discover() -> str:
     from .runner import runner
 

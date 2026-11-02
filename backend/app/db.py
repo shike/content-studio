@@ -172,6 +172,18 @@ def _migrate(engine) -> None:
         if wccols and "pure_reason" not in wccols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_candidates ADD COLUMN pure_reason VARCHAR DEFAULT ''"))
+        # 三库独立（2026-11-02 用户定版）：topics 加 line 硬隔离，存量按判定回填
+        tcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(topics)"))]
+        if tcols and "line" not in tcols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE topics ADD COLUMN line VARCHAR NOT NULL DEFAULT 'persona'"))
+            conn.execute(sqlalchemy.text(
+                "UPDATE topics SET line='leadgen' WHERE json_extract(evidence,'$.account_type')='leadgen'"))
+        # 公众号独立报题线（2026-11-02）：articles 加 note（报题备注/参考链接）
+        acols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(articles)"))]
+        if acols and "note" not in acols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE articles ADD COLUMN note VARCHAR DEFAULT ''"))
         if cols and "creator_cookie" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))

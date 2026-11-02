@@ -104,22 +104,18 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
     if (status) params.set('status', status)
     if (source) params.set('source', source)
     if (audience) params.set('audience', audience)
+    if (accountType) params.set('line', accountType) // 三库独立：服务端硬过滤
     const data = await api<{ items: Topic[]; total: number; counts?: Record<string, number> }>(`/topics?${params}`)
-    const scoped = accountType
-      ? data.items.filter((t) => (t.evidence?.account_type ?? 'persona') === accountType)
-      : data.items
-    setAll(scoped)
-    setTotal(accountType ? scoped.length : data.total)
+    setAll(data.items)
+    setTotal(data.total)
     if (data.counts) setCounts(data.counts)
-  }, [offset, status, source, audience, order])
+  }, [offset, status, source, audience, order, accountType])
 
   const loadDrafts = useCallback(async () => {
-    const d = await api<{ items: Topic[] }>('/topics?status=draft&limit=200')
-    setDrafts(accountType
-      ? d.items.filter((t) => (t.evidence?.account_type ?? 'persona') === accountType)
-      : d.items)
+    const d = await api<{ items: Topic[] }>(`/topics?status=draft&limit=200${accountType ? `&line=${accountType}` : ''}`)
+    setDrafts(d.items)
     return d.items
-  }, [])
+  }, [accountType])
 
   const reload = useCallback(async () => {
     await Promise.all([loadTable(), loadDrafts()])
@@ -219,7 +215,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
       if (!idea.trim()) return
       const r = await api<{ topic_id: number; job_id: number }>('/topics/ideas', {
         method: 'POST',
-        body: JSON.stringify({ text: idea.trim() }),
+        body: JSON.stringify({ text: idea.trim(), line: accountType ?? 'persona' }),
       })
       setIdea('')
       setBusy('')

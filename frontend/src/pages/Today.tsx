@@ -26,7 +26,11 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   const reload = useCallback(async () => {
     setError('')
     try {
-      const t = await api<{ items: Topic[] }>('/topics?status=draft&limit=200')
+      const [tp, tl] = await Promise.all([
+        api<{ items: Topic[] }>('/topics?status=draft&limit=200&line=persona'),
+        api<{ items: Topic[] }>('/topics?status=draft&limit=200&line=leadgen'),
+      ])
+      const t = { items: [...(tp.items || []), ...(tl.items || [])] } as { items: Topic[] }
       const s = await fetchMenuStats()
       setTodos({ draft: s.draftTopics, failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
       const ranked = (t.items || []).slice().sort((a, b) => {
@@ -90,7 +94,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
     if (!quick.trim()) return
     setBusy('入库中…')
     try {
-      await api('/topics/quick', { method: 'POST', body: JSON.stringify({ title: quick.trim(), audience: 'both' }) })
+      await api('/topics/quick', { method: 'POST', body: JSON.stringify({ title: quick.trim(), audience: 'both', line: 'persona' }) })
       setQuick('')
       setBusy('已入库（draft）')
       await reload()

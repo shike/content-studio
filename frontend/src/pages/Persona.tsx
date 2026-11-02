@@ -2,15 +2,14 @@ import { useState } from 'react'
 import type { SectionKey } from '../App'
 import Topics from './Topics'
 import Scripts from './Scripts'
-import Articles from './Articles'
 import Style from './Style'
 
 type Tab = 'topics' | 'content' | 'style'
 
-/** 人设号产线：选题 → 内容看板（脚本/长文）→ 风格画像。 */
+/** 人设号产线（2026-11-02 三线定版）：选题 → 内容看板（脚本工场）→ 风格画像。长文已独立成公众号线。 */
 export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) => void }) {
   const [tab, setTab] = useState<Tab>('topics')
-  const [sub, setSub] = useState<'scripts' | 'articles'>('scripts')
+  const [sub, setSub] = useState<'scripts'>('scripts')
 
   return (
     <div>
@@ -38,7 +37,6 @@ export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) =>
           <div className="mb-3 flex gap-1.5">
             {([
               ['scripts', '脚本工场'],
-              ['articles', '公众号长文'],
             ] as [typeof sub, string][]).map(([k, label]) => (
               <button key={k} onClick={() => setSub(k)}
                 className={`rounded-full px-3.5 py-1.5 text-xs ${sub === k ? 'bg-sky-100 text-sky-700' : 'border border-[#e8ecf0] bg-white text-slate-500'}`}>
@@ -47,7 +45,6 @@ export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) =>
             ))}
           </div>
           {sub === 'scripts' && <Scripts onNavigate={onNavigate} accountType="persona" />}
-          {sub === 'articles' && <Articles />}
         </div>
       )}
 

@@ -53,7 +53,7 @@ else:
               and isinstance(analysis.get("structure"), list)
               and isinstance(analysis.get("replicable_points"), list))
         check("拆解产物：转写非空 + hook/structure/replicable 齐备", ok, f"status={status}")
-    status, listing = request("GET", "/api/topics?source=benchmark&limit=5")
+    status, listing = request("GET", "/api/topics?source=benchmark&limit=5&line=persona")
     items = listing.get("items", []) if isinstance(listing, dict) else []
     check("拆解产出选题候选（source=benchmark ≥1）", status == 200 and len(items) >= 1,
           f"候选数={len(items)}")

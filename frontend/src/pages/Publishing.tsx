@@ -46,12 +46,13 @@ export default function Publishing() {
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
-    const [s, t] = await Promise.all([
+    const [s, tp, tl] = await Promise.all([
       api<{ items: Script[] }>('/scripts?limit=200'),
-      api<{ items: Topic[] }>('/topics?limit=200'),
+      api<{ items: Topic[] }>('/topics?limit=200&line=persona'),
+      api<{ items: Topic[] }>('/topics?limit=200&line=leadgen'),
     ])
     setScripts(s.items)
-    setTopics(t.items)
+    setTopics([...(tp.items || []), ...(tl.items || [])])
   }, [])
 
   useEffect(() => {

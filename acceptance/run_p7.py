@@ -55,7 +55,7 @@ def main() -> int:
         return 1
 
     section("P7 · 登录与会话")
-    st, _d, _sc = call("GET", "/api/topics")
+    st, _d, _sc = call("GET", "/api/topics?line=persona")
     check("未登录业务接口 401", st == 401, f"status={st}")
     st, d, _ = call("POST", "/api/auth/login", {"username": "admin", "password": "wrong-password"})
     check("错误口令 401", st == 401, f"status={st}")
@@ -87,15 +87,15 @@ def main() -> int:
     check("一次性密码登录 200 且标记 must_change_password",
           st == 200 and d.get("must_change_password") is True, str(d)[:120])
     otp_cookie = sc_otp.split(";")[0] if sc_otp else ""
-    st, d, _sc = call("GET", "/api/topics", cookie=otp_cookie)
+    st, d, _sc = call("GET", "/api/topics?line=persona", cookie=otp_cookie)
     check("未改密前业务接口 403（防绕过前端）", st == 403, f"status={st}")
     st, d, sc_new = call("POST", "/api/auth/change-password",
                          {"old_password": ADMIN_PASSWORD, "new_password": "P7-Ready-2026!"},
                          cookie=otp_cookie)
     check("改密成功", st == 200, str(d)[:100])
-    st, d, _sc = call("GET", "/api/topics", cookie=sc_new.split(";")[0])
+    st, d, _sc = call("GET", "/api/topics?line=persona", cookie=sc_new.split(";")[0])
     check("改密后新会话可用", st == 200, f"status={st}")
-    st, d, _sc = call("GET", "/api/topics", cookie=otp_cookie)
+    st, d, _sc = call("GET", "/api/topics?line=persona", cookie=otp_cookie)
     check("改密后旧会话作废（全端重登）", st == 401, f"status={st}")
     st, d, _sc = call("POST", "/api/auth/change-password",
                  {"old_password": "wrong-old", "new_password": "whatever-123"},
@@ -111,7 +111,7 @@ def main() -> int:
     logout_cookie = sc_l.split(";")[0]
     st, _d2, _sc2 = call("POST", "/api/auth/logout", cookie=logout_cookie)
     check("登出 200", st == 200)
-    st, _d3, _sc3 = call("GET", "/api/topics", cookie=logout_cookie)
+    st, _d3, _sc3 = call("GET", "/api/topics?line=persona", cookie=logout_cookie)
     check("登出后服务端会话作废（401）", st == 401, f"status={st}")
     st, d, _ = call("POST", "/api/auth/login", {"username": "admin", "password": "totally-wrong"})
     check("错口令 401（限流窗口内持续拒绝）", st == 401, f"status={st}")
@@ -132,7 +132,7 @@ def main() -> int:
         check(f"{label}（{path} → 404）", st == 404, f"status={st}")
 
     section("P7 · 业务数据可见（单租户）")
-    st, d, _sc = call("GET", "/api/topics?limit=5", cookie=admin)
+    st, d, _sc = call("GET", "/api/topics?limit=5&line=persona", cookie=admin)
     check("选题列表可见且带计数", st == 200 and isinstance(d.get("items"), list))
     st, d, _sc = call("GET", "/api/style/overview", cookie=admin)
     check("我的风格 overview 200", st == 200)

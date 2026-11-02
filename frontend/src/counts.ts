@@ -3,9 +3,15 @@ import type { Article, Script, Topic } from './api'
 
 /** 流水线待办统计（工作台卡片数据源）。 */
 export interface TodoStats {
-  draftTopics: number // 待审选题
-  pendingScripts: number // 待定稿脚本
+  draftTopics: number // 待审选题（两线合计）
+  draftTopicsPersona: number // 待审选题·人设库
+  draftTopicsLeadgen: number // 待审选题·获客库
+  pendingScripts: number // 待定稿脚本（两线合计）
+  pendingScriptsPersona: number
+  pendingScriptsLeadgen: number
   unwrittenTopics: number // 待写脚本（已定审选题）
+  unwrittenPersona: number
+  unwrittenLeadgen: number
   pendingArticles: number // 待写长文
   finalScripts: number // 已定稿脚本（发布台可生成物料包）
 }
@@ -50,15 +56,15 @@ export async function fetchMenuStats(): Promise<MenuStats> {
   }
 }
 
-/** 菜单徽章数字（2026-09-28 用户定版，替代 Q1 收紧口径）：显示「可工作/待拍板」的活账——
- *  选题库=待审 · 脚本工场=待定稿 · 公众号=待写长文 · 拆解库=待定夺+待拆 · 任务=待处置。
- *  过程性数字（生成中/排队）仍不上菜单，需要时去任务页看。 */
+/** 菜单徽章数字（2026-09-28 用户定版口径 + 2026-11-02 三线拆分）：
+ *  人设号=人设待审选题+待定稿脚本 · 获客号=获客待审选题+待定稿脚本 · 公众号=待写长文 ·
+ *  拆解库=待定夺+待拆 · 任务=在途（待处置红警）。过程性数字（生成中/排队）不上菜单。 */
 export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
   return {
     today: s.draftTopics,                           // 今日工作台徽章 = 待审选题（每日动线口径）
-    topics: s.draftTopics,                          // 待审选题
-    scripts: s.pendingScripts,                      // 待定稿脚本
-    articles: s.pendingArticles,                    // 待写长文
+    persona: s.draftTopicsPersona + s.pendingScriptsPersona,   // 人设号：两 tab 活账合计
+    leadgen: s.draftTopicsLeadgen + s.pendingScriptsLeadgen,   // 获客号：两 tab 活账合计
+    article: s.pendingArticles,                     // 公众号：待写长文
     benchmarks: s.benchmarksPending + s.benchmarksTodo, // 待定夺 + 待拆
     style: s.style,                                 // 风格视频待定夺
     // 任务徽章（2026-10-07 三次调整）：恒显在途数（运行中+排队+挂起）——待处置优先会把它

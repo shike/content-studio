@@ -82,7 +82,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
     const [s, allS, t, tpl] = await Promise.all([
       api<{ items: Script[]; total: number; counts?: Record<string, number> }>(`/scripts?${params}`),
       api<{ items: Script[] }>('/scripts?limit=500'), // 队列与"待写选题"派生用全量
-      api<{ items: Topic[] }>('/topics?limit=200'),
+      api<{ items: Topic[] }>(`/topics?limit=200${accountType ? `&line=${accountType}` : '&line=persona'}`),
       api<{ items: Template[] }>('/scripts/templates'),
     ])
     setScripts(s.items)

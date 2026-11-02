@@ -307,7 +307,8 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     analysis = await gateway.complete_json(
         [{"role": "system", "content": render(
             "benchmark_analyze", PERSONA=persona_text,
-            RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(14))
+            RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(
+                14, line=account_type if account_type in ("persona", "leadgen") else ""))
             or "（近 14 天无出题记录）")},
          {"role": "user", "content": llm_input}],
         purpose="benchmark_analyze", max_tokens=5000)
@@ -325,17 +326,22 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         # 不同同行视频产出同一角度是选题趋同的主通道（2026-10-10 用户裁定拦截）
         candidate = (analysis.get("topic_candidate") or {})
         topic_id = None
-        dup_of = is_similar_title(str(candidate.get("title") or "")) if candidate.get("title") else None
+        judged = (analysis.get("content_type") or account_type) or ""
+        dup_of = (is_similar_title(str(candidate.get("title") or ""),
+                                   line=judged if judged in ("persona", "leadgen") else "")
+                  if candidate.get("title") else None)
         if dup_of is not None:
             analysis["topic_candidate_suppressed"] = f"与近期选题 #{dup_of} 撞车，候选未入库"
         if candidate.get("title") and dup_of is None:
             audience = candidate.get("audience")
+            judged_line = "leadgen" if judged == "leadgen" else "persona"
             topic = Topic(
                 title=str(candidate["title"])[:60],
                 angle=candidate.get("angle", ""),
                 audience=audience if audience in ("boss", "fde", "both") else "both",
                 source_type="benchmark",
                 source_ref=f"benchmark:{benchmark_id}",
+                line=judged_line,  # 三库独立：按判定分流（2026-11-02）
                 score=_safe_score(analysis.get("score")),
                 evidence={
                     "summary": analysis.get("summary", ""),
@@ -350,7 +356,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             s.add(topic)
             s.flush()  # 拿 id 即可（commit+refresh 在 WAL 并发下偶发 refresh 找不到行——错误类消灭）
             from ..topics.service import mark_similar
-            mark_similar(topic.title, topic.id, s)
+            mark_similar(topic.title, topic.id, s, line=judged_line)
             s.commit()
             topic_id = topic.id
         else:

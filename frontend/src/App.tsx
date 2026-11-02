@@ -4,6 +4,7 @@ import {
   Fingerprint,
   LayoutDashboard,
   Magnet,
+  Newspaper,
   Radar,
   Send,
   Settings,
@@ -12,6 +13,7 @@ import type { LucideIcon } from 'lucide-react'
 import Today from './pages/Today'
 import Persona from './pages/Persona'
 import Leadgen from './pages/Leadgen'
+import Articles from './pages/Articles'
 import Intel from './pages/Intel'
 import PublishingHub from './pages/PublishingHub'
 import Tasks from './pages/Tasks'
@@ -21,21 +23,19 @@ import Login from './pages/Login'
 import ForceChangePassword from './pages/ForceChangePassword'
 
 /**
- * 新页面结构（2026-10-28 用户确认的彻底重构）：
- * 一级入口 6 个——今日工作台 / 人设号产线 / 获客号产线 / 情报中心 / 发布台 / 任务（设置沉底）。
- * 旧页面（选题库/脚本工场/公众号/同行监测/拆解库/话题雷达/我的风格/海报/工作台）
- * 全部作为容器内容并入：产线页按账号类型过滤，情报中心四流合一，海报并入发布台。
- * 旧 SectionKey 保留在类型里供内嵌页面的 onNavigate 使用，经 NAVMAP 路由到新分区。
+ * 三线结构（2026-11-02 用户定版）：内容产线拆三菜单——人设号 / 获客号 / 公众号，
+ * 三线各自闭环、选题库三库独立（公众号报题即草稿，无选题阶段）。
+ * 旧 SectionKey 保留经 NAVMAP 兼容路由（articles → 公众号线）。
  */
 export type SectionKey =
-  | 'today' | 'persona' | 'leadgen' | 'intel' | 'publishing' | 'tasks' | 'settings'
+  | 'today' | 'persona' | 'leadgen' | 'article' | 'intel' | 'publishing' | 'tasks' | 'settings'
   | 'dashboard' | 'topics' | 'scripts' | 'watch' | 'style' | 'benchmarks'
   | 'digital' | 'articles' | 'posters' | 'radar'
 
 /** 旧分区键 → 新分区（内嵌页面 onNavigate 的兼容路由）。 */
 const NAVMAP: Record<string, SectionKey> = {
   dashboard: 'today', topics: 'today', scripts: 'persona',
-  articles: 'persona', posters: 'publishing', watch: 'intel', style: 'persona',
+  articles: 'article', posters: 'publishing', watch: 'intel', style: 'persona',
   benchmarks: 'intel', radar: 'intel',
 }
 
@@ -49,6 +49,7 @@ const TODAY: SectionDef = { key: 'today', label: '今日工作台', icon: Layout
 const PRODUC: SectionDef[] = [
   { key: 'persona', label: '人设号', icon: Fingerprint },
   { key: 'leadgen', label: '获客号', icon: Magnet },
+  { key: 'article', label: '公众号', icon: Newspaper },
 ]
 const AUTO: SectionDef[] = [
   { key: 'intel', label: '情报中心', icon: Radar },
@@ -192,6 +193,7 @@ export default function App() {
           {active === 'today' && <Today onNavigate={navTo} />}
           {active === 'persona' && <Persona onNavigate={navTo} />}
           {active === 'leadgen' && <Leadgen onNavigate={navTo} />}
+          {active === 'article' && <Articles onNavigate={navTo} />}
           {active === 'intel' && <Intel onNavigate={navTo} />}
           {active === 'publishing' && <PublishingHub />}
           {active === 'tasks' && <Tasks />}

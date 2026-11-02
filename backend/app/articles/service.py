@@ -10,9 +10,10 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from ..db import engine
+from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Article, Script, Topic
+from ..models import AppSetting, Article, Script, Topic
 from ..prompts import load, render
 
 # 长文风格库（R10）：key → 结构骨架。生成时单选，auto 交给模型按素材挑。
@@ -191,7 +192,7 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
         ),
     },
 }
-DEFAULT_LENGTH = "feed"
+DEFAULT_LENGTH = "deep"  # 深度版唯一档位（2026-11-02 用户定版：公众号做深度内容，feed 退役）
 
 
 def _audience_short(audience_note: str) -> str:
@@ -279,9 +280,19 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
             "深研报告（深度素材，长文的主要原料）": report,
             "口播脚本终稿（可改写扩写，不要照抄）": script.final_text if script else "",
         }
+        # 公众号独立报题线（2026-11-02）：无选题无脚本的草稿，报题标题+备注就是原料
+        if topic is None and script is None:
+            material = {
+                "报题": {"标题": article.title, "备注/参考链接": article.note or ""},
+                "深研报告（深度素材，长文的主要原料）": "",
+            }
+        # 公众号独立风格画像（从已发长文提取，app_settings）：有就注入所有 prompt 的素材块
+        style_row = s.get(AppSetting, "article_style_note")
+        if style_row is not None and (style_row.value or "").strip():
+            material["公众号风格画像（从已发长文提取的表达习惯，行文必须贴合）"] = style_row.value[:1200]
 
     style = payload.get("style") or DEFAULT_STYLE
-    length = payload.get("length") or DEFAULT_LENGTH
+    length = "deep"  # 深度版唯一档位（2026-11-02 用户定版，feed 退役；payload.length 忽略）
     length_spec = length_specs(length, audience_note_of(tenant_id))
 
     # 自动透镜（style=auto）：读选题素材挑最合适的分析透镜，无效回落默认
@@ -524,3 +535,104 @@ def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str)
     if not inserted:
         out.append(f"\n![图表：{title}](chart:{filename})")
     return "\n".join(out)
+
+
+# ---- 公众号独立报题线（2026-11-02 三线定版）：独立热点报题 + 独立风格画像 ----
+
+_ARTICLE_STYLE_KEY = "article_style_note"
+
+
+def _article_pending_exists(title: str) -> bool:
+    with Session(engine) as s:
+        row = s.exec(select(Article).where(
+            Article.title == title[:60],  # type: ignore[attr-defined]
+            Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]),  # type: ignore[attr-defined]
+        )).first()
+        return row is not None
+
+
+@register_executor("article_hotspots")
+async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
+    """公众号独立热点报题：站外热点（百度热搜+科技媒体）× 画像 → 3 篇待写长文草稿。
+
+    与抖音选题提炼（trending_topics）完全独立——公众号线不进选题库，报题即草稿。"""
+    from ..tenant_brand import brand_of
+    from ..topics.hotlist import fetch_baidu_hot, fetch_tech_news
+
+    ctx.set_progress(10, "收集站外热点")
+    baidu, baidu_meta = await asyncio.to_thread(fetch_baidu_hot, 12)
+    news, news_meta = await asyncio.to_thread(fetch_tech_news, 6, 48)
+    items = []
+    for h in baidu[:8]:
+        items.append({"来源": "百度热搜", "标题": str(h.get("title") or "")[:40]})
+    for n in news[:10]:
+        items.append({"来源": str(n.get("source") or "科技媒体"), "标题": str(n.get("title") or "")[:60]})
+    if not items:
+        raise TransientError("站外热点源全部无数据（百度/科技媒体都空），稍后自动重试")
+
+    persona_text = brand_of(1)["persona"]
+    ctx.set_progress(35, "提炼深度长文切角")
+    data = await gateway.complete_json(
+        [{"role": "user", "content": render("article_hotspots", PERSONA=persona_text)
+          + "\n\n热点清单（JSON）：\n" + json.dumps(items, ensure_ascii=False)}],
+        purpose="article_hotspots", max_tokens=4000, thinking="disabled")
+    picks = [x for x in (data.get("topics") or []) if isinstance(x, dict) and (x.get("title") or "").strip()][:3]
+    if not picks:
+        raise TransientError("热点提炼未产出切角（LLM 空响应），稍后自动重试")
+
+    created = []
+    with Session(engine) as s:
+        for x in picks:
+            title = str(x.get("title") or "").strip()[:60]
+            if not title or _article_pending_exists(title):
+                continue
+            note = (f"热点：{str(x.get('hotspot') or '')[:80]}｜"
+                    f"为什么现在写：{str(x.get('why_now') or '')[:80]}｜"
+                    f"切角：{str(x.get('angle') or '')[:80]}")
+            s.add(Article(title=title, note=note, status="pending"))
+            created.append(title)
+        s.commit()
+    ctx.set_progress(100, f"报题 {len(created)} 篇待写草稿")
+    return {"drafts": created}
+
+
+@register_executor("article_style_extract")
+async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
+    """公众号风格画像：从已成文长文提取表达习惯，存 app_settings，长文生成默认注入。"""
+    ctx.set_progress(15, "收集已成文长文")
+    with Session(engine) as s:
+        rows = s.exec(select(Article).where(
+            Article.status.in_(["draft", "edited", "rendered"]),  # type: ignore[attr-defined]
+        ).order_by(Article.id.desc())  # type: ignore[attr-defined]
+        ).all()
+        samples = []
+        for a in rows:
+            if a.md and len(a.md.strip()) > 300:
+                samples.append(a.md[:3000])
+            if len(samples) >= 4:
+                break
+    if not samples:
+        raise RuntimeError("还没有已成文的长文可提取（先在公众号线写出第一篇）")
+
+    ctx.set_progress(45, "提炼风格特征")
+    data = await gateway.complete_json(
+        [{"role": "user", "content":
+            "以下是同一作者的多篇公众号深度长文节选。请提炼这位作者稳定的表达习惯，输出 JSON："
+            "{\"note\": \"200 字以内的风格画像（句式习惯/开头收尾方式/论证风格/用词偏好/忌讳），"
+            "写成给写作模型的指令，不要罗列例子\"}\n\n"
+            + "\n\n———\n\n".join(samples)}],
+        purpose="article_style_extract", max_tokens=2000, thinking="disabled")
+    note = str(data.get("note") or "").strip()
+    if not note:
+        raise TransientError("风格提炼空响应，稍后自动重试")
+
+    with Session(engine) as s:
+        row = s.get(AppSetting, _ARTICLE_STYLE_KEY)
+        if row is None:
+            s.add(AppSetting(key=_ARTICLE_STYLE_KEY, value=note))
+        else:
+            row.value = note
+            s.add(row)
+        s.commit()
+    ctx.set_progress(100, "公众号风格画像已更新")
+    return {"note": note[:120]}

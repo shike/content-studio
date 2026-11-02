@@ -118,7 +118,10 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     account_type = str(payload.get("account_type")
                        or (topic.evidence or {}).get("account_type") if topic is not None else ""
                        ) or "persona"
-    account_mode = ("——本条面向【获客号】：结尾必须切获客引导" if account_type == "leadgen" else "")
+    account_mode = ("。本条面向【获客号】：结尾必须切获客引导——评论区扣指定词/私信关键词/主页入口，引导要具体"
+                    if account_type == "leadgen"
+                    else "。本条面向【人设号】：结尾判断之外允许带一句自然的关注/合集引导（软引导 2026-11-02 放开），"
+                         "仍禁评论区扣字/私信领取/卖课导流")
     prompt = render("script_generate", LENGTH=length_spec,
                     MY_STYLE=build_my_style(use_style),
                     ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
@@ -147,7 +150,8 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                                   cta_rule=("保留并强化获客引导（这是获客号内容，引导是核心交付；"
                                             "但不得承诺收益/包就业等合规红线）")
                                   if account_type == "leadgen"
-                                  else "全删，这是他的红线")
+                                  else "允许结尾带一句自然的关注/合集引导（人设号软引导 2026-11-02 放开）；"
+                                       "仍禁评论区扣字/私信领取/卖课导流")
 
     with Session(engine) as s:
         script = s.get(Script, script_id)

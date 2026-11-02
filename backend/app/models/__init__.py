@@ -90,6 +90,7 @@ class Topic(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "topics"
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
+    line: str = Field(default="persona", index=True)  # 选题线（三库独立硬隔离：persona 人设库 | leadgen 获客库；2026-11-02）
     title: str = ""
     angle: str = ""
     audience: str = "both"  # boss | fde | both
@@ -221,10 +222,11 @@ class Article(TenantScoped, TimestampMixin, table=True):
     topic_id: Optional[int] = Field(default=None, foreign_key="topics.id")
     script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
     md: str = ""
-    title: str = ""  # 公众号主标题
+    title: str = ""  # 公众号主标题（报题即草稿：报题一句话就是初始标题）
+    note: str = ""  # 报题备注/参考链接（公众号独立报题线，2026-11-02）
     title_alts: list = Field(default_factory=list, sa_column=Column(JSON))  # 备选标题
     html: str = ""
-    status: str = "draft"  # draft | edited | rendered | published
+    status: str = "draft"  # pending 待写 | generating | failed | draft | edited | rendered | published
 
 
 class WatchAccount(TenantScoped, TimestampMixin, table=True):
