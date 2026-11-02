@@ -261,6 +261,7 @@ class WatchCandidate(TenantScoped, TimestampMixin, table=True):
     leadgen_density: float = 0.0  # 评论区求带密度 0~1（获客信号，2026-10-28）
     leadgen_comments: int = 0  # 求带评论绝对数（获客号挖掘 v2 主排序键，2026-10-31）
     recent_same: int = 0  # 作者近 30 天同类视频数（持续性验证；-1/0=未验证）
+    pure_reason: str = ""  # 纯获客判定依据（名字/签名/近期作品命中的引流词，v3 挖号先行 2026-11-02）
     status: str = Field(default="open", index=True)  # open 待定夺 | added 已加入 | dismissed 已忽略
 
 

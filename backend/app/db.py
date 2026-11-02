@@ -169,6 +169,9 @@ def _migrate(engine) -> None:
         if wccols and "recent_same" not in wccols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_candidates ADD COLUMN recent_same INTEGER DEFAULT 0"))
+        if wccols and "pure_reason" not in wccols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE watch_candidates ADD COLUMN pure_reason VARCHAR DEFAULT ''"))
         if cols and "creator_cookie" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))
