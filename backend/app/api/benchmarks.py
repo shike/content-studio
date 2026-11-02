@@ -106,19 +106,27 @@ def benchmark_authors(user: User = Depends(require_user)) -> dict:
 @router.get("/api/benchmarks")
 def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
                     analyzed: str = "", source: str = "", scan_status: str = "",
+                    account_type: str = "",
                     user: User = Depends(require_user)) -> dict:
     """分页 + 服务端筛选（analyzed: done|todo；source: douyin|local；
-    scan_status: pending|approved|ignored；默认返回 approved+done 的已定夺内容）。
+    scan_status: pending|approved|ignored；account_type: persona|leadgen；
+    默认返回 approved+done 的已定夺内容）。
 
-    counts 为全量口径（不受分页影响），供前端 chips 显示。
+    counts 为当前筛选口径（account_type 传入时按该类型统计——打法卡库页
+    chips 必须是类型内计数，全库数字会误导）；传 account_type 才生效。
     """
 
     def _analyzed(b: BenchmarkVideo) -> bool:
         a = b.analysis or {}
         return bool(a.get("hook") or a.get("structure") or a.get("score") is not None)
 
+    def _typed(q):
+        if account_type in ("persona", "leadgen"):
+            q = q.where(BenchmarkVideo.account_type == account_type)  # type: ignore[attr-defined]
+        return q
+
     with Session(engine) as s:
-        all_rows = s.exec(select(BenchmarkVideo).order_by(
+        all_rows = s.exec(_typed(select(BenchmarkVideo)).order_by(
             BenchmarkVideo.id.desc())).all()  # type: ignore[attr-defined]
         # counts 必须全库口径（chips 数字不随作者/来源筛选漂移——此前在过滤后统计）
         counts = {
@@ -130,7 +138,7 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
             "online": sum(1 for b in all_rows if b.source != "local" and b.scan_status != "pending"),
             "local": sum(1 for b in all_rows if b.source == "local"),
         }
-        q = select(BenchmarkVideo)
+        q = _typed(select(BenchmarkVideo))
         if author:
             q = q.where(BenchmarkVideo.author == author)
         if source:

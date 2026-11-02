@@ -72,17 +72,22 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
 
 
 @router.get("")
-def list_scripts(status: str = "", limit: int = 50, offset: int = 0) -> dict:
+def list_scripts(status: str = "", limit: int = 50, offset: int = 0,
+                 account_type: str = "") -> dict:
     with Session(engine) as s:
         q = select(Script).order_by(Script.id.desc())  # type: ignore[arg-type]
         if status:
             q = q.where(Script.status == status)
+        # 两类号产线分视图（2026-11-02）：产线页各看各的类型；兜底口径与前端一致（空=persona）
+        if account_type in ("persona", "leadgen"):
+            q = q.where(Script.account_type == account_type)  # type: ignore[attr-defined]
         total = len(s.exec(q).all())
         rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         from sqlmodel import func
-        counts = {st: n for st, n in s.exec(
-            select(Script.status, func.count(Script.id)).group_by(Script.status)  # type: ignore[arg-type]
-        ).all()}
+        cq = select(Script.status, func.count(Script.id)).group_by(Script.status)  # type: ignore[arg-type]
+        if account_type in ("persona", "leadgen"):
+            cq = cq.where(Script.account_type == account_type)  # type: ignore[attr-defined]
+        counts = {st: n for st, n in s.exec(cq).all()}
         return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
 
 

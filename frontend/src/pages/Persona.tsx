@@ -46,7 +46,7 @@ export default function Persona({ onNavigate }: { onNavigate: (k: SectionKey) =>
               </button>
             ))}
           </div>
-          {sub === 'scripts' && <Scripts onNavigate={onNavigate} />}
+          {sub === 'scripts' && <Scripts onNavigate={onNavigate} accountType="persona" />}
           {sub === 'articles' && <Articles />}
         </div>
       )}

@@ -44,11 +44,11 @@ export default function Leadgen({ onNavigate }: { onNavigate: (k: SectionKey) =>
               </button>
             ))}
           </div>
-          {sub === 'scripts' && <Scripts onNavigate={onNavigate} />}
+          {sub === 'scripts' && <Scripts onNavigate={onNavigate} accountType="leadgen" />}
         </div>
       )}
 
-      {tab === 'playbook' && <Benchmarks onNavigate={onNavigate} />}
+      {tab === 'playbook' && <Benchmarks onNavigate={onNavigate} accountType="leadgen" />}
     </div>
   )
 }

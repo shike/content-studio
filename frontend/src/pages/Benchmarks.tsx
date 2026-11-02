@@ -35,7 +35,7 @@ interface Benchmark {
 const analyzed = (b: Benchmark) =>
   Boolean(b.analysis && (b.analysis.hook || b.analysis.structure || b.analysis.score != null))
 
-export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
+export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
   const [items, setItems] = useState<Benchmark[]>([])
   const [url, setUrl] = useState('')
   const [filter, setFilter] = useState('')
@@ -64,12 +64,13 @@ export default function Benchmarks({ onNavigate }: { onNavigate?: (k: SectionKey
     if (f === 'online') params.set('source', 'douyin')
     if (f === 'local') params.set('source', 'local')
     if (au) params.set('author', au)
+    if (accountType) params.set('account_type', accountType)
     const b = await api<{ items: Benchmark[]; total: number; counts: BenchCounts }>(
       `/benchmarks?${params.toString()}`)
     setItems(b.items)
     setTotal(b.total)
     setCounts(b.counts)
-  }, [author])
+  }, [author, accountType])
 
   const reload = useCallback(async () => {
     await fetchPage(filter, page)

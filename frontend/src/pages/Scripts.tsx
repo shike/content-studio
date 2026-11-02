@@ -69,7 +69,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const [useStyle, setUseStyle] = useState(true)
   const [templateId, setTemplateId] = useState(0) // 0=不使用结构模板
   const [selAngles, setSelAngles] = useState<string[]>([]) // 指定打法（空=自动挑 3 种）
-  const [genAccountType, setGenAccountType] = useState<'persona' | 'leadgen'>('persona') // 本次投放账号类型（两类号策略）
+  const [genAccountType, setGenAccountType] = useState<'persona' | 'leadgen'>(accountType ?? 'persona') // 本次投放账号类型（两类号策略；跟随所在产线默认）
   const [anglesOpen, setAnglesOpen] = useState(false)
   const [finalizedView, setFinalizedView] = useState<{ id: number; titles: { platform: string; title: string }[]; teleLen: number } | null>(null)
   const [genProg, setGenProg] = useState<Record<number, { p: number; m: string }>>({})
@@ -78,6 +78,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const reload = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
     if (status) params.set('status', status)
+    if (accountType) params.set('account_type', accountType) // 产线分视图：各看各的类型（服务端筛选）
     const [s, allS, t, tpl] = await Promise.all([
       api<{ items: Script[]; total: number; counts?: Record<string, number> }>(`/scripts?${params}`),
       api<{ items: Script[] }>('/scripts?limit=500'), // 队列与"待写选题"派生用全量
@@ -91,7 +92,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
     setTopics(t.items)
     setTemplates(tpl.items)
     return allS.items
-  }, [offset, status])
+  }, [offset, status, accountType])
 
   const deleteScript = (id: number) =>
     guard(async () => {
@@ -184,7 +185,8 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const pendingWriteTopics = useMemo(() => {
     const started = new Set(allScripts.map((x) => x.topic_id))
     return topics.filter((t) => t.status === 'approved' && !started.has(t.id))
-  }, [topics, allScripts])
+      .filter((t) => !accountType || (t.evidence?.account_type ?? 'persona') === accountType)
+  }, [topics, allScripts, accountType])
   const sortedWriteTopics = useMemo(() => {
     const list = [...pendingWriteTopics]
     if (topicOrder === 'score') {
@@ -198,7 +200,8 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const regenTopics = useMemo(() => {
     const started = new Set(allScripts.map((x) => x.topic_id))
     return topics.filter((t) => started.has(t.id))
-  }, [topics, allScripts])
+      .filter((t) => !accountType || (t.evidence?.account_type ?? 'persona') === accountType)
+  }, [topics, allScripts, accountType])
 
   const guard = async (fn: () => Promise<void>) => {
     setError('')
@@ -690,8 +693,10 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
           <div className="p-6">
             <EmptyState
               icon={Inbox}
-              title="还没有脚本"
-              desc="先在「选题库」定审选题，再回到这里选择它，一键生成三版口播脚本。"
+              title={accountType === 'leadgen' ? '还没有获客脚本' : accountType === 'persona' ? '还没有人设脚本' : '还没有脚本'}
+              desc={accountType === 'leadgen'
+                ? '获客脚本来自「获客打法」类型的选题（选题行上有类型徽章，点击可切换）——先在选题库把选题定为获客类型，再回到这里生成。'
+                : '先在「选题库」定审选题，再回到这里选择它，一键生成三版口播脚本。'}
             />
           </div>
         ) : (
