@@ -995,3 +995,254 @@ async def leadgen_hunt(ctx, payload: dict) -> dict:
     ctx.set_progress(100, f"扫描 {scanned} 条种子，候选 {len(found)}，新增 {new_cnt}")
     return {"scanned": scanned, "candidates": len(found), "new": new_cnt,
             "already": added_cnt, "skipped": failed, "notes": notes}
+
+
+# ---- 纯获客号挖掘（2026-11-02 用户定版）：评论区顺藤 + 贴链判号，判定只看转化链路 ----
+# 用户标尺：暖暖AI赋能 297 粉（签名挂报名微信号）——纯获客号越纯越可能是小号，
+# 粉丝/赞/求带评论全不参与判定，只看签名/名字里的转化痕迹。
+
+_HARVEST_CONTACT_WORDS = ("微信", "加V", "V信", "weixin", "报名", "留电", "☎", "电话", "私信",
+                          "领取", "领资料", "加我", "联系", "wx", "V:", "1v1", "加好友")
+_HARVEST_BIZ_WORDS = ("组局", "沙龙", "社群", "同城", "训练营", "陪跑", "咨询", "课程", "培训",
+                      "学院", "商学院", "招生", "诊断", "带教", "接单", "承接", "获客", "引流",
+                      "落地", "合伙人", "代理", "创业", "圈主", "赋能", "ai落地", "数字化转型",
+                      "实体", "老板", "操盘", "企业ai", "fde", "线下", "私域")
+_HARVEST_SEEN_KEY = "harvest_seen_secs"
+_HARVEST_PER_RUN = 30     # 每轮解析主页上限（profile/other 连续解析 ~60 会开始空响应）
+_HARVEST_VIDEOS = 5       # 每轮种子视频数（控时长）
+_HARVEST_SEEN_CAP = 3000
+
+
+def judge_leadgen_account(nick: str, sig: str) -> tuple[bool, bool, str]:
+    """转化痕迹判定：返回 (纯获客, 依据)。联系入口命中=强；生意词 ≥2=生意形态明确。"""
+    text = f"{nick} {sig or ''}"
+    contact = [w for w in _HARVEST_CONTACT_WORDS if w.lower() in text.lower()]
+    biz = [w for w in _HARVEST_BIZ_WORDS if w.lower() in text.lower()]
+    if contact:
+        return True, True, f"签名/昵称带转化入口（{'、'.join(contact[:4])}）"
+    if len(biz) >= 2:
+        return True, False, f"生意形态词 ≥2（{'、'.join(biz[:4])}）"
+    if len(biz) == 1:
+        return False, False, f"单一生意词（{biz[0]}），疑似不足"
+    return False, False, "无获客信号"
+
+
+def _load_harvest_seen() -> set[str]:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, _HARVEST_SEEN_KEY)
+    try:
+        return set(json.loads(row.value)) if row is not None and row.value else set()
+    except Exception:  # noqa: BLE001 损坏即重建
+        return set()
+
+
+def _save_harvest_seen(seen: set[str]) -> None:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, _HARVEST_SEEN_KEY)
+        val = json.dumps(sorted(seen)[-_HARVEST_SEEN_CAP:])
+        if row is None:
+            s.add(AppSetting(key=_HARVEST_SEEN_KEY, value=val))
+        else:
+            row.value = val
+            s.add(row)
+        s.commit()
+
+
+def _harvest_video_commenters(vid: str, seen: set[str]) -> list[tuple[str, str]]:
+    """开视频页拦 comment/list（滚动唤醒+面板滚动），收评论者 sec_uid（接口只给 sec+昵称）。"""
+    from playwright.sync_api import sync_playwright
+
+    got: list[tuple[str, str]] = []
+    with sync_playwright() as p:
+        browser = launch(p)
+        try:
+            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                      viewport={"width": 1380, "height": 940})
+            page = ctx.new_page()
+
+            def on_resp(r):
+                if "aweme/v1/web/comment/list/" in r.url:
+                    try:
+                        for c in (r.json().get("comments") or []):
+                            u = c.get("user") or {}
+                            if u.get("sec_uid") and u["sec_uid"] not in seen:
+                                seen.add(u["sec_uid"])
+                                got.append((u["sec_uid"], (u.get("nickname") or "").strip()[:24]))
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            page.on("response", on_resp)
+            page.goto(f"https://www.douyin.com/video/{vid}",
+                      timeout=45000, wait_until="domcontentloaded")
+            page.wait_for_timeout(5000)
+            # 评论面板容器有自己的滚动：悬停后滚 8 屏翻页（每页 5 条）
+            for sel in ['[data-e2e="comment-list"]', ".comment-mainContent", 'div[class*="comment"]']:
+                loc = page.locator(sel)
+                if loc.count() > 0:
+                    try:
+                        loc.first.hover(timeout=3000)
+                        for _ in range(8):
+                            page.mouse.wheel(0, 900)
+                            page.wait_for_timeout(2500)
+                        break
+                    except Exception:  # noqa: BLE001
+                        continue
+        finally:
+            browser.close()
+    return got
+
+
+def _resolve_douyin_profile(sec: str) -> tuple[Optional[dict], Optional[list[dict]]]:
+    """PC 主页拦 user/profile/other 换全资料 + aweme/post 拿最新作品（限速由调用方控制）。"""
+    from playwright.sync_api import sync_playwright
+
+    cur: dict = {"u": None, "posts": []}
+    with sync_playwright() as p:
+        browser = launch(p)
+        try:
+            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                      viewport={"width": 1380, "height": 940})
+            page = ctx.new_page()
+
+            def on_resp(r):
+                if "aweme/v1/web/user/profile/other/" in r.url:
+                    try:
+                        u = (r.json().get("user") or {})
+                        if u.get("sec_uid"):
+                            cur["u"] = {
+                                "sec": u["sec_uid"],
+                                "nick": (u.get("nickname") or "").strip()[:24],
+                                "sig": (u.get("signature") or "").strip()[:100],
+                                "fans": int(u.get("follower_count") or 0),
+                                "works": int(u.get("aweme_count") or 0),
+                                "ip": (u.get("ip_location") or "").strip()[:12],
+                            }
+                    except Exception:  # noqa: BLE001
+                        pass
+                elif "aweme/v1/web/aweme/post/" in r.url:
+                    try:
+                        for a in (r.json().get("aweme_list") or [])[:3]:
+                            cur["posts"].append({"id": str(a.get("aweme_id") or ""),
+                                                 "title": (a.get("desc") or "").strip()[:40]})
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            page.on("response", on_resp)
+            page.goto(f"https://www.douyin.com/user/{sec}",
+                      timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(4500)
+        finally:
+            browser.close()
+    return cur.get("u"), cur.get("posts") or None
+
+
+def resolve_author_by_share_url(url: str) -> tuple[Optional[dict], Optional[str]]:
+    """贴链判号入口的解析：v.douyin.com 短链 / 视频 / 主页分享链接 → 作者全资料。"""
+    import httpx as _hx
+
+    try:
+        r = _hx.get(url.strip(), follow_redirects=True, timeout=20,
+                    headers={"User-Agent": ua()})
+        final = str(r.url)
+    except Exception as e:  # noqa: BLE001
+        return None, f"链接打不开：{type(e).__name__}"
+    m = re.search(r"/video/(\d{6,})", final) or re.search(r"share/video/(\d{6,})", final)
+    if m:
+        info, err = _probe_video_author(m.group(1))
+        return info, err
+    m = re.search(r"share/user/([A-Za-z0-9_-]{20,})", final) or \
+        re.search(r"/user/([A-Za-z0-9_-]{30,})", final) or \
+        re.search(r"sec_uid=([A-Za-z0-9_-]{20,})", final)
+    if not m:
+        return None, "链接里没有视频 id 或主页 sec_uid（请在 App 里分享主页或视频）"
+    sec = m.group(1)
+    info, _posts = _resolve_douyin_profile(sec)
+    if info is None:
+        return None, "主页资料未取到（等待窗内数据未到，可重试）"
+    return info, None
+
+
+@register_executor("leadgen_harvest")
+async def leadgen_harvest(ctx, payload: dict) -> dict:
+    """纯获客号挖掘（每晚调度）：评论区顺藤摸瓜——小预算限速版。
+
+    种子=获客样本视频按天轮换 + 已判纯号样本视频；收评论者 → 逐号解析主页（≤30，间隔限速）
+    → 转化痕迹判定（联系入口命中或生意词≥2）→ 入候选表（判纯才入，依据写 pure_reason）。"""
+    import random as _rand
+
+    notes: list[str] = []
+    seen = _load_harvest_seen()
+    day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
+    with Session(engine) as s:
+        vids = [re.search(r"/video/(\d+)", b.url).group(1) for b in s.exec(
+            select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                BenchmarkVideo.account_type == "leadgen",  # type: ignore[attr-defined]
+                BenchmarkVideo.scan_status == "approved")).all()  # type: ignore[attr-defined]
+            if re.search(r"/video/(\d+)", b.url or "")]
+        snow = [c.sample_video_id for c in s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
+            WatchCandidate.keyword.in_(["评论区收割", "手动贴链", "leadgen_harvest"]))).all()  # type: ignore[attr-defined]
+            if c.sample_video_id and c.status != "dismissed"]
+    vids = list(dict.fromkeys(vids))
+    _rand.shuffle(vids)
+    picks = vids[(day_idx * _HARVEST_VIDEOS) % max(len(vids), 1):
+                 (day_idx * _HARVEST_VIDEOS) % max(len(vids), 1) + _HARVEST_VIDEOS]
+    if len(picks) < _HARVEST_VIDEOS and snow:
+        picks += [v for v in snow if v not in picks][:_HARVEST_VIDEOS - len(picks)]
+    if not picks:
+        raise TransientError("种子池为空（获客样本库无视频），稍后自动重试")
+    ctx.set_progress(5, f"种子 {len(picks)} 条（轮换第 {day_idx % max(len(vids), 1)} 批）")
+
+    fresh: list[tuple[str, str]] = []
+    for vid in picks:
+        got = await asyncio.to_thread(_harvest_video_commenters, vid, seen)
+        fresh += got
+        notes.append(f"种子 {vid[:8]}… +{len(got)} 评论者")
+        ctx.set_progress(5 + int(30 * len(notes) / len(picks)),
+                         f"收评论 {len(notes)}/{len(picks)}（累计 {len(fresh)}）")
+
+    new_secs = [x for x in dict.fromkeys(fresh) if x[0] not in seen]
+    if not new_secs:
+        ctx.set_progress(100, "评论区无新号（全部已扫过）")
+        _save_harvest_seen(seen)
+        return {"scanned": len(picks), "new": 0, "inserted": 0, "notes": notes}
+
+    ctx.set_progress(40, f"解析 {min(len(new_secs), _HARVEST_PER_RUN)} 个主页…")
+    rows: list[dict] = []
+    fails = 0
+    for sec, nick in new_secs[:_HARVEST_PER_RUN]:
+        info, _posts = await asyncio.to_thread(_resolve_douyin_profile, sec)
+        if info is None:
+            fails += 1
+            if fails >= 3:
+                notes.append(f"连续 {fails} 个主页空响应，停止解析（限速保护），余量下轮再扫")
+                break
+            continue
+        fails = 0
+        rows.append(info)
+        await asyncio.sleep(4)  # 限速间隔
+    _save_harvest_seen(seen)
+
+    inserted = 0
+    with Session(engine) as s:
+        known_secs = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
+                      if c.sec_uid}
+        for pr in rows:
+            pure, _strong, reason = judge_leadgen_account(pr["nick"], pr["sig"])
+            if not pure or pr["sec"] in known_secs:
+                continue
+            s.add(WatchCandidate(
+                keyword="leadgen_harvest", name=pr["nick"], sec_uid=pr["sec"],
+                url=f"https://www.iesdouyin.com/share/user/{pr['sec']}",
+                signature=pr["sig"], follower_count=pr["fans"],
+                sample_video_id="", sample_title="",
+                sample_stats=json.dumps({"works": pr.get("works") or 0}),
+                account_type="leadgen", pure_reason=reason,
+            ))
+            inserted += 1
+            notes.append(f"{pr['nick']}（{pr['fans']}粉）：{reason}")
+        s.commit()
+    ctx.set_progress(100, f"解析 {len(rows)} 号，入表 {inserted}")
+    return {"scanned": len(picks), "new": len(new_secs), "resolved": len(rows),
+            "inserted": inserted, "notes": notes}

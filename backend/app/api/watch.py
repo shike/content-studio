@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..auth import require_user
-from ..auth import require_user
 from ..db import engine
 from ..models import User
 from ..jobs.runner import runner
@@ -281,6 +280,57 @@ async def discover(body: DiscoverIn, user: User = Depends(require_user)) -> dict
     job = await runner.submit("watch_discover", {"keyword": kw, "direction": direction},
                               dedup_key=f"{user.tenant_id}:discover:{kw}:{direction}")
     return {"job_id": job.id}
+
+
+class JudgeIn(BaseModel):
+    url: str
+
+
+@router.post("/judge-account")
+def judge_account(body: JudgeIn, user: User = Depends(require_user)) -> dict:
+    """贴链判号（2026-11-02 用户定版）：贴主页/视频分享链接 → 反查作者 → 转化痕迹判定。
+
+    手动贴链一律入候选表（keyword=手动贴链，判定依据写 pure_reason）——用户亲手带进来的
+    号不因词典没接住而丢失。"""
+    import asyncio
+
+    from ..watch.service import judge_leadgen_account, resolve_author_by_share_url
+
+    url = (body.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="请贴抖音分享链接")
+    info, err = asyncio.run(resolve_author_by_share_url(url))
+    if info is None:
+        raise HTTPException(status_code=422, detail=err or "解析失败")
+    pure, _strong, reason = judge_leadgen_account(info["name"], info.get("signature") or "")
+    sec = info.get("sec_uid") or ""
+    with Session(engine) as s:
+        dup = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
+            WatchCandidate.sec_uid == sec)).first() if sec else None  # type: ignore[attr-defined]
+        if dup is not None:
+            cand_id, cand_status = dup.id, dup.status
+        else:
+            row = WatchCandidate(
+                keyword="手动贴链", name=info["name"], sec_uid=sec,
+                url=f"https://www.iesdouyin.com/share/user/{sec}" if sec else url,
+                signature=(info.get("signature") or "")[:100],
+                follower_count=info.get("follower_count") or 0,
+                sample_video_id=info.get("video_id") or "",
+                sample_title=(info.get("title") or "")[:60],
+                sample_stats=json.dumps({"digg": info.get("digg") or 0,
+                                         "comment": info.get("comment") or 0,
+                                         "share": info.get("share") or 0}),
+                account_type="leadgen",
+                pure_reason=("手动贴链 · " + reason)[:70],
+            )
+            s.add(row)
+            s.commit()
+            s.refresh(row)
+            cand_id, cand_status = row.id, row.status
+    return {"candidate_id": cand_id, "status": cand_status, "pure": pure,
+            "reason": reason, "name": info["name"],
+            "fans": info.get("follower_count") or 0,
+            "signature": (info.get("signature") or "")[:100]}
 
 
 @router.get("/discover/candidates")

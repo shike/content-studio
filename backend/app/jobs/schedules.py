@@ -192,15 +192,15 @@ register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点�
 async def _run_watch_discover() -> str:
     from .runner import runner
 
-    job = await runner.submit("leadgen_hunt", {"auto": True},
-                              dedup_key=f"1:leadgenhunt:{datetime.now():%Y%m%d}",
+    job = await runner.submit("leadgen_harvest", {"auto": True},
+                              dedup_key=f"1:leadgenharvest:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（求带评论驱动：种子池扫评论区，持续性验证后出候选）"
+    return f"job #{job.id}（纯获客号挖掘：评论区顺藤+转化痕迹判定，小预算限速版）"
 
 
 # 钟点 2 点与扫描错峰（不可 hour_from_settings：全局 watch_scan_hour 恒有值会把它永久
 # 覆盖成 1 点——2026-10-06 四项任务挤在 1 点、发现任务"每日 2 点"设计失效的根因）
-register_schedule(Schedule(key="watch_discover_daily", label="获客号挖掘（求带评论驱动）",
+register_schedule(Schedule(key="watch_discover_daily", label="纯获客号挖掘（评论区顺藤）",
                            daily_hour=2,
                            enabled_by="watch_scan_enabled", run=_run_watch_discover))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
