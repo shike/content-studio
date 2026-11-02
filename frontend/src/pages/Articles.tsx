@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ClipboardCheck, Eye, FileText, Inbox, Newspaper, Save, Trash2 } from 'lucide-react'
 import { api, apiErrText, Article, waitJob } from '../api'
 import type { SectionKey } from '../App'
@@ -198,7 +198,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
   const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [titleDraftAlts] = useState<string[]>([])
   // 渲染是毫秒级同步操作，进度意义不大；关键是结果回显落在点击处（展开行内）
   const [renderState, setRenderState] = useState<{ id: number; kind: 'busy' | 'ok' | 'err'; msg?: string } | null>(null)
   // 一页纸知识图解：LLM 抽取 → 排版 PNG，文末自动追加；回显同 renderState 落在点击处
@@ -375,7 +374,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
 
   const statusCount = (k: string) => (k ? counts[k] || 0 : Object.values(counts).reduce((a, b) => a + b, 0))
   const pendingCount = statusCount('pending') + statusCount('generating')
-  const altsRef = useRef(titleDraftAlts)
 
   return (
     <div>
@@ -594,7 +592,7 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
                                   <span className="shrink-0">备选：</span>
                                   {art.title_alts!.map((t, i) => (
                                     <button
-                                      key={`${altsRef.current.length}-${i}`}
+                                      key={i}
                                       onClick={(e) => {
                                         e.stopPropagation()
                                         navigator.clipboard.writeText(t)

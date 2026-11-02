@@ -60,7 +60,7 @@ const SYSTEM: SectionDef[] = [
   { key: 'settings', label: '设置', icon: Settings },
 ]
 
-const BADGED_KEYS = new Set<string>(['today', 'tasks'])
+const BADGED_KEYS = new Set<string>(['today', 'persona', 'leadgen', 'article', 'tasks'])
 
 export default function App() {
   const [active, setActive] = useState<SectionKey>('today')
