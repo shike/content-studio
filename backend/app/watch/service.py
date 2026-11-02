@@ -1194,6 +1194,7 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
         raise TransientError("种子池为空（获客样本库无视频），稍后自动重试")
     ctx.set_progress(5, f"种子 {len(picks)} 条（轮换第 {day_idx % max(len(vids), 1)} 批）")
 
+    seen_before = set(seen)  # 历史快照：收割函数会把本轮收集也写进 seen，去重要对着历史比
     fresh: list[tuple[str, str]] = []
     for vid in picks:
         got = await asyncio.to_thread(_harvest_video_commenters, vid, seen)
@@ -1202,7 +1203,7 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
         ctx.set_progress(5 + int(30 * len(notes) / len(picks)),
                          f"收评论 {len(notes)}/{len(picks)}（累计 {len(fresh)}）")
 
-    new_secs = [x for x in dict.fromkeys(fresh) if x[0] not in seen]
+    new_secs = [x for x in dict.fromkeys(fresh) if x[0] not in seen_before]
     if not new_secs:
         ctx.set_progress(100, "评论区无新号（全部已扫过）")
         _save_harvest_seen(seen)
@@ -1210,6 +1211,7 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
 
     ctx.set_progress(40, f"解析 {min(len(new_secs), _HARVEST_PER_RUN)} 个主页…")
     rows: list[dict] = []
+    resolved_secs: set[str] = set()
     fails = 0
     for sec, nick in new_secs[:_HARVEST_PER_RUN]:
         info, _posts = await asyncio.to_thread(_resolve_douyin_profile, sec)
@@ -1220,9 +1222,11 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
                 break
             continue
         fails = 0
+        resolved_secs.add(info["sec"])
         rows.append(info)
         await asyncio.sleep(4)  # 限速间隔
-    _save_harvest_seen(seen)
+    # 只把解析成功的记入历史（没解析成的不算已扫，限速窗过后下轮重试）
+    _save_harvest_seen(seen_before | resolved_secs)
 
     inserted = 0
     with Session(engine) as s:

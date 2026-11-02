@@ -292,14 +292,12 @@ def judge_account(body: JudgeIn, user: User = Depends(require_user)) -> dict:
 
     手动贴链一律入候选表（keyword=手动贴链，判定依据写 pure_reason）——用户亲手带进来的
     号不因词典没接住而丢失。"""
-    import asyncio
-
     from ..watch.service import judge_leadgen_account, resolve_author_by_share_url
 
     url = (body.url or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="请贴抖音分享链接")
-    info, err = asyncio.run(resolve_author_by_share_url(url))
+    info, err = resolve_author_by_share_url(url)  # 同步函数（def 端点跑线程池，可直接阻塞）
     if info is None:
         raise HTTPException(status_code=422, detail=err or "解析失败")
     pure, _strong, reason = judge_leadgen_account(info["name"], info.get("signature") or "")
