@@ -97,7 +97,7 @@ export default function TopicInsights() {
   return (
     <div>
       <div className="mb-2.5 text-xs text-slate-500">
-        每日 06:00「热点雷达」自动检查这些抖音话题下的新视频增速，飙升的爆款视频会自动走质量闸拆解、候选进选题库。
+        每日 06:00「热点雷达」自动拉取这些抖音话题的内容样本（免登录接口给的是话题精选集，非实时新增）；样本中新出现的低粉高赞视频会自动走质量闸拆解、候选进选题库。
       </div>
       <div className="card mb-3 space-y-2 p-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -157,7 +157,7 @@ export default function TopicInsights() {
                   onClick={() => checkNow(t.id)}
                   disabled={checking !== null}
                   className="btn-ghost btn-xs text-sky-600 disabled:opacity-40"
-                  title="立即拉取该话题下最新视频"
+                  title="立即拉取该话题的内容样本"
                 >
                   {checking === t.id ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                   {checking === t.id ? '拉取中…' : '立即刷新'}
@@ -185,7 +185,7 @@ export default function TopicInsights() {
                 </div>
               ) : (
                 <div className="mt-2.5 text-xs text-slate-400">
-                  暂无命中视频——话题下新增视频增速未达飙升线，持续观察中。
+                  样本中没有低粉高赞命中（粉丝 &lt;10 万且赞粉比 ≥2）——达标的会出现在上面并自动拆解。
                 </div>
               )}
               {(t.hits || []).length > 5 && (

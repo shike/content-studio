@@ -156,17 +156,22 @@ def _extract_hashtags(vid: str) -> list[dict]:
 
 
 async def check_topic(row: RadarTopic) -> dict:
-    """巡检单个话题：拉最新视频 → 识别新增（热度速度）→ 刷新最新视频列表 → 飙升通知。
+    """巡检单个话题：拉内容样本 → 识别新出现视频 → 刷新样本快照 → 低粉高赞命中自动拆解。
 
     row 可为脱管实例（调用方会话已关）：merge 回当前会话再改。
-    recent 恒为话题下当前最新视频（每次巡检刷新，带 new 标记）——
-    没有新增时列表不能被清空（用户要始终看得到话题里在发生什么）。"""
+    recent 恒为话题下当前样本（每次巡检刷新，带 new 标记）——
+    没有新增时列表不能被清空（用户要始终看得到话题里在发生什么）。
+    2026-11-02 实证：免登录接口返回的是话题精选集而非实时增量（新增恒 0 是接口
+    结构问题不是故障），「样本里新出现的低粉高赞」仍是有效的自动拆解信号。"""
     vids = await asyncio.to_thread(fetch_topic_videos, row.ch_id)
     seen = set(row.seen_ids or [])
     fresh_ids = {v["id"] for v in vids if v["id"] not in seen}
     spiked = False
     name = row.name
     recent = [dict(v, new=v["id"] in fresh_ids) for v in vids[:10]]
+    # 已命中 id 必须在首个会话 commit 前取（expire_on_commit 会把 merged 实例过期，
+    # 之后读 row.hits 就是 DetachedInstanceError——2026-11-02 生产实测踩中）。
+    known_hit_ids = {h.get("id") for h in (row.hits or []) if isinstance(h, dict)}
     with Session(engine) as s:
         row = s.merge(row)
         row.seen_ids = ((row.seen_ids or []) + sorted(fresh_ids))[-SEEN_CAP:]
@@ -179,8 +184,12 @@ async def check_topic(row: RadarTopic) -> dict:
 
     # 低粉高赞探测（小账号爆款信号）：探测话题下最新 5 条，赞粉比 ≥2 且粉丝 <10万 入清单。
     # 每条 ~10s（playwright detail）；单条失败跳过不阻塞。
+    # 2026-11-02 实证：免登录话题接口返回固定「精选」集合（排序/翻页参数全被无视），
+    # 列表基本不轮换——已命中过的 id 不再重复探测，否则每夜白探同样的视频。
     hit_candidates: list[dict] = []
     for i, v in enumerate(vids[:PROBE_PER_CHECK]):
+        if v["id"] in known_hit_ids:
+            continue
         try:
             info = await asyncio.to_thread(_probe_video, v["id"])
             ratio = round(info["digg"] / max(info["followers"], 1), 1)
@@ -235,4 +244,5 @@ async def check_topic(row: RadarTopic) -> dict:
     if spiked:
         titles = "；".join(v["desc"] for v in recent[:2])
         await asyncio.to_thread(_notify, f"#{name} 新增 {row_new if (row_new := len(fresh_ids)) else 0} 条视频：{titles[:80]}")
+    return {"name": name, "new": len(fresh_ids), "spiked": spiked}
 

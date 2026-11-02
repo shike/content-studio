@@ -11,7 +11,9 @@ router = APIRouter(prefix="/api/radar")
 
 @router.get("/topics")
 def list_topics(user: User = Depends(require_user)) -> dict:
-    """已监测话题与最近命中（每日 06:00 热点雷达自动检查写入）。"""
+    """已监测话题与最近命中（每日 06:00 热点雷达自动巡检写入）。
+
+    最近检查取 last_checked_at（updated_at 只在内容变化时才动，不能当检查时间）。"""
     from ..models import RadarTopic
 
     with Session(engine) as s:
@@ -23,13 +25,13 @@ def list_topics(user: User = Depends(require_user)) -> dict:
             "name": r.name,
             "enabled": bool(r.enabled),
             "hits": r.hits or [],
-            "updated_at": r.updated_at,
+            "updated_at": r.last_checked_at or r.updated_at,
         } for r in rows]}
 
 
 @router.post("/topics/{topic_id}/check")
 async def check_topic_now(topic_id: int, user: User = Depends(require_user)) -> dict:
-    """立即拉取该话题下最新视频（免登录），刷新命中快照并按飙升逻辑自动拆解。"""
+    """立即拉取该话题内容样本（免登录），样本中新出现的低粉高赞照旧自动拆解。"""
     import asyncio
 
     from ..models import RadarTopic
