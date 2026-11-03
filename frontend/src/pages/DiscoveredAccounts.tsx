@@ -30,8 +30,8 @@ const fmtFollow = (n: number) =>
 const fmtN = (n?: number) =>
   !n ? '0' : n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}万` : String(n)
 
-/** 发现的账号（自「监测账号」页拆出，2026-10-30）：关键词挖出的候选对标号，定夺后进监控清单。 */
-export default function DiscoveredAccounts() {
+/** 发现的账号（自「监测账号」页拆出，2026-10-30）：关键词挖出的候选对标号，定夺后进监控清单。accountType=情报中心类型切换（2026-11-03 分线）。 */
+export default function DiscoveredAccounts({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [cands, setCands] = useState<WatchCandidate[]>([])
   const [candFilter, setCandFilter] = useState('open')
   const [cpageRaw, setCpage] = useState(0)
@@ -47,9 +47,12 @@ export default function DiscoveredAccounts() {
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
-    const r = await api<{ items: WatchCandidate[] }>('/watch/discover/candidates')
+    const p = new URLSearchParams()
+    if (accountType) p.set('account_type', accountType)
+    const qs = p.toString()
+    const r = await api<{ items: WatchCandidate[] }>(`/watch/discover/candidates${qs ? `?${qs}` : ''}`)
     setCands(r.items)
-  }, [])
+  }, [accountType])
 
   useEffect(() => {
     reload().catch((e) => setError(String(e)))

@@ -48,7 +48,7 @@ interface BenchmarkLite {
 
 const ABNORMAL_RE = /未生效|降级|失败|不存在/
 
-export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
+export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
   const [accounts, setAccounts] = useState<WatchAccount[]>([])
   const [history, setHistory] = useState<ScanJob[]>([])
   const [filter, setFilter] = useState('')
@@ -67,13 +67,16 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
+    const p = new URLSearchParams()
+    if (accountType) p.set('account_type', accountType)
+    const qs = p.toString()
     const [w, h] = await Promise.all([
-      api<{ items: WatchAccount[] }>('/watch/accounts'),
+      api<{ items: WatchAccount[] }>(`/watch/accounts${qs ? `?${qs}` : ''}`),
       api<{ items: ScanJob[] }>('/watch/scan/history'),
     ])
     setAccounts(w.items)
     setHistory(h.items)
-  }, [])
+  }, [accountType])
 
   useEffect(() => {
     reload().catch((e) => setError(String(e)))
@@ -253,7 +256,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
         desc="对标账号管理与扫描监测：扫描自动把新视频入库拆解库「待定夺」，批准后进拆解流水线"
         actions={
           <div className="flex gap-2">
-            <button onClick={() => setShowAdd((v) => !v)} className="btn-ghost">
+            <button onClick={() => { setForm((f) => ({ ...f, account_type: accountType || 'persona' })); setShowAdd((v) => !v) }} className="btn-ghost">
               <Plus size={14} /> 添加账号
             </button>
             <button onClick={scanAll} disabled={Boolean(scanBusy)} className="btn-accent disabled:opacity-50">
@@ -373,7 +376,7 @@ export default function Watch({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           <div className="p-6">
             <EmptyState
               icon={Radar}
-              title="还没有对标账号"
+              title={accountType === 'leadgen' ? '还没有获客号监控' : '还没有对标账号'}
               desc="点右上角「添加账号」，贴对标账号的主页链接或任意视频分享链接，自动识别昵称与主页。"
             />
           </div>

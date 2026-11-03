@@ -999,10 +999,20 @@ async def leadgen_hunt(ctx, payload: dict) -> dict:
             "already": added_cnt, "skipped": failed, "notes": notes}
 
 
-# ---- 纯获客号挖掘（2026-11-02 用户定版）：评论区顺藤 + 贴链判号，判定只看转化链路 ----
+# ---- 纯获客号挖掘（2026-11-02 用户定版；判定标准 V4：入表一律 LLM 终审）----
 # 用户标尺：暖暖AI赋能 297 粉（签名挂报名微信号）——纯获客号越纯越可能是小号，
-# 粉丝/赞/求带评论全不参与判定，只看签名/名字里的转化痕迹。
+# 粉丝/赞/求带评论全不参与判定。
+# 迭代史：V1/V2 只看转化链路混进船锚厂家/摄影号/广告老板号；V3 加赛道闸但词表仍
+# 有入表权，高崇耕（纯内容干货号）靠"落地/企业ai"话题词碰撞直通入表，智典（诊断
+# 钩子服务商）靠我把"咨询诊断"写进教培面混进来。V4 根治（2026-11-03 用户拍板
+# "只认教/带人形态"）：**词表降级为初筛（只决定要不要解析+进存档），入表唯一
+# 门槛 = LLM 终审**——语义读完整签名，不存在话题词/生意词碰撞问题。
 
+_HARVEST_AI_WORDS = ("人工智能", "aigc", "gpt", "大模型", "智能体", "数字员工", "fde")
+# 初筛教培词（宽收召回：初筛错放由 LLM 终审拦，初筛错拒本来就走 pending 复判）
+_HARVEST_EDU_WORDS = ("培训", "课程", "训练营", "训练", "陪跑", "带教", "学员", "教练",
+                      "招生", "组局", "教学", "讲课", "干货", "操盘手", "私教", "导师",
+                      "开课", "内训")
 _HARVEST_CONTACT_WORDS = ("微信", "加V", "V信", "weixin", "报名", "留电", "☎", "电话", "私信",
                           "领取", "领资料", "加我", "联系", "wx", "V:", "1v1", "加好友")
 _HARVEST_BIZ_WORDS = ("组局", "沙龙", "社群", "同城", "训练营", "陪跑", "咨询", "课程", "培训",
@@ -1031,14 +1041,26 @@ def _harvest_budget(key: str, default: int) -> int:
 
 
 def judge_leadgen_account(nick: str, sig: str) -> tuple[bool, bool, str]:
-    """转化痕迹判定：返回 (纯获客, 依据)。联系入口命中=强；生意词 ≥2=生意形态明确。"""
+    """V4 初筛（无入表权，只决定解析优先级）：返回 (初筛纯, 强信号, 依据)。
+
+    三段：①AI 生态词（船锚厂家/广告公司死这）②教/带人形态词（服务商/内容号降权）
+    ③转化链路（联系方式必须与 AI 教育形态同时在场）。初筛纯 → 存档标 lexicon
+    优先送 LLM 终审；初筛不过 → pending 排后，终审兜底教培变体写法。"""
     text = f"{nick} {sig or ''}"
-    contact = [w for w in _HARVEST_CONTACT_WORDS if w.lower() in text.lower()]
-    biz = [w for w in _HARVEST_BIZ_WORDS if w.lower() in text.lower()]
+    low = text.lower()
+    ai_hit = [w for w in _HARVEST_AI_WORDS if w in low] or (
+        ["ai"] if re.search(r"(?<![a-z0-9])ai(?![a-z0-9])", low) else [])
+    if not ai_hit:
+        return False, False, "非AI赛道（签名/昵称无AI生态词）"
+    edu = [w for w in _HARVEST_EDU_WORDS if w in low]
+    if not edu:
+        return False, False, "AI赛道但非教/带人形态（服务商/内容号）"
+    contact = [w for w in _HARVEST_CONTACT_WORDS if w.lower() in low]
+    biz = [w for w in _HARVEST_BIZ_WORDS if w.lower() in low]
     if contact:
-        return True, True, f"签名/昵称带转化入口（{'、'.join(contact[:4])}）"
+        return True, True, f"初筛纯·转化入口（{'、'.join(contact[:3])}｜教词：{'、'.join(edu[:3])}）"
     if len(biz) >= 2:
-        return True, False, f"生意形态词 ≥2（{'、'.join(biz[:4])}）"
+        return True, False, f"初筛纯·生意形态（{'、'.join(biz[:3])}）"
     if len(biz) == 1:
         return False, False, f"单一生意词（{biz[0]}），疑似不足"
     return False, False, "无获客信号"
@@ -1131,7 +1153,8 @@ def _resolve_douyin_profile(sec: str) -> tuple[Optional[dict], Optional[list[dic
                             cur["u"] = {
                                 "sec": u["sec_uid"],
                                 "nick": (u.get("nickname") or "").strip()[:24],
-                                "sig": (u.get("signature") or "").strip()[:100],
+                                # 截 220：联系入口常落在签名尾部（凯凯案例 100 字截断正好切掉 🌐微信号）
+                                "sig": (u.get("signature") or "").strip()[:220],
                                 "fans": int(u.get("follower_count") or 0),
                                 "works": int(u.get("aweme_count") or 0),
                                 "ip": (u.get("ip_location") or "").strip()[:12],
@@ -1182,14 +1205,15 @@ def resolve_author_by_share_url(url: str) -> tuple[Optional[dict], Optional[str]
 
 
 async def _llm_rejudge(notes: list[str]) -> int:
-    """LLM 复判（2026-11-03）：词表没过的存档号（judged_by=pending 且有签名）批量再判一轮。
-
-    判定器与词表同一条转化链路标准（联系入口强信号 / 生意形态词≥2），但能读懂
-    变体表达（"商务合作看主页" "接 AI 落地单" 这类词表抓不住的写法）。纯号入候选表。"""
+    """LLM 终审（V4 起入表唯一门槛）：存档队列（词表初筛纯 lexicon 优先，pending 排后）
+    每轮批量 ≤20 条交 LLM 按双闸判定——先 AI 教育培训赛道闸（教/带人形态才算，
+    咨询诊断/项目交付服务商拒），再转化链路纯度闸。纯号入候选表。"""
     with Session(engine) as s:
         pending = s.exec(select(HarvestProfile).where(  # type: ignore[attr-defined]
-            HarvestProfile.judged_by == "pending",  # type: ignore[attr-defined]
-            HarvestProfile.signature != "").limit(_HARVEST_LLM_BATCH)).all()  # type: ignore[attr-defined]
+            HarvestProfile.judged_by.in_(["pending", "lexicon"]),  # type: ignore[attr-defined]
+            HarvestProfile.signature != "")  # type: ignore[attr-defined]
+            .order_by(HarvestProfile.judged_by, HarvestProfile.id)  # type: ignore[attr-defined]  # lexicon < pending：初筛纯优先终审
+            .limit(_HARVEST_LLM_BATCH)).all()
     if not pending:
         return 0
     batch = [{"id": i + 1, "昵称": p.nickname, "签名": p.signature,
@@ -1217,7 +1241,7 @@ async def _llm_rejudge(notes: list[str]) -> int:
                         keyword="LLM复判", name=p.nickname, sec_uid=p.sec_uid,
                         url=f"https://www.iesdouyin.com/share/user/{p.sec_uid}",
                         signature=p.signature, follower_count=p.follower_count,
-                        sample_video_id="", sample_title="",
+                        sample_video_id=p.sample_video_id, sample_title="",
                         sample_stats=json.dumps({"works": p.works_count}),
                         account_type="leadgen", pure_reason=f"LLM复判 · {p.pure_reason}",
                     ))
@@ -1233,8 +1257,9 @@ async def _llm_rejudge(notes: list[str]) -> int:
 async def leadgen_harvest(ctx, payload: dict) -> dict:
     """纯获客号挖掘（每晚调度）：评论区顺藤摸瓜——小预算限速版。
 
-    种子=获客样本视频按天轮换 + 已判纯号样本视频；收评论者 → 逐号解析主页（≤30，间隔限速）
-    → 转化痕迹判定（联系入口命中或生意词≥2）→ 入候选表（判纯才入，依据写 pure_reason）。"""
+    种子=获客样本+全部候选样本视频按天轮换+已判纯号顺藤；收评论者 → 逐号解析主页
+    （≤预算，间隔限速，余量回捞存量补档）→ 词表初筛（无入表权）→ 全部进存档排队
+    → LLM 终审（V4 入表唯一门槛：AI 教/带人赛道+转化链路双闸）→ 纯号入候选表。"""
     import random as _rand
 
     notes: list[str] = []
@@ -1335,10 +1360,9 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
     # 只把解析成功的记入历史（没解析成的不算已扫，限速窗过后下轮重试）
     _save_harvest_seen(seen_before | resolved_secs)
 
-    inserted = 0
+    # V4：词表只有初筛权——所有解析到的号进存档排队，入表唯一门槛是下面的 LLM 终审
+    queued = 0
     with Session(engine) as s:
-        known_secs = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
-                      if c.sec_uid}
         for pr, vid in zip(rows, row_vids):
             pure, _strong, reason = judge_leadgen_account(pr["nick"], pr["sig"])
             hp = s.exec(select(HarvestProfile).where(  # type: ignore[attr-defined]
@@ -1350,36 +1374,24 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
             hp.signature = pr["sig"]
             hp.follower_count = pr["fans"]
             hp.works_count = pr.get("works") or 0
+            hp.sample_video_id = pr.get("_first_post", "")
             if vid:
                 hp.source_video_id = vid
             hp.updated_at = datetime.now(timezone.utc)
-            if pure:
-                hp.judged_by = "lexicon"
-                hp.judged_pure = True
+            if hp.judged_by != "llm":  # 终审已判过的存档不改判（资料可更新，判定不回退）
+                hp.judged_by = "lexicon" if pure else "pending"
                 hp.pure_reason = reason
-                if pr["sec"] not in known_secs:
-                    s.add(WatchCandidate(
-                        keyword="leadgen_harvest", name=pr["nick"], sec_uid=pr["sec"],
-                        url=f"https://www.iesdouyin.com/share/user/{pr['sec']}",
-                        signature=pr["sig"], follower_count=pr["fans"],
-                        sample_video_id=pr.get("_first_post", ""), sample_title="",
-                        sample_stats=json.dumps({"works": pr.get("works") or 0}),
-                        account_type="leadgen", pure_reason=reason,
-                    ))
-                    inserted += 1
-                    notes.append(f"{pr['nick']}（{pr['fans']}粉）：{reason}")
-            elif hp.judged_by == "pending":
-                hp.pure_reason = reason  # 词表没过也留痕：pending 等下 LLM 复判
+                if pure:
+                    queued += 1
         s.commit()
-    ctx.set_progress(80, f"解析 {len(rows)} 号（回捞 {backfilled}），词表入表 {inserted}")
+    ctx.set_progress(80, f"解析 {len(rows)} 号（回捞 {backfilled}），初筛纯 {queued} 送终审")
 
     llm_in = 0
     try:
         llm_in = await _llm_rejudge(notes)
-    except Exception as e:  # noqa: BLE001 复判失败不拖垮整轮（存档已落库，下轮接着判）
-        notes.append(f"LLM复判失败（下轮重试）：{type(e).__name__}: {str(e)[:80]}")
-    ctx.set_progress(100, f"解析 {len(rows)} 号（回捞 {backfilled}），入表 {inserted + llm_in}"
-                          f"（词表 {inserted} + LLM {llm_in}）")
+    except Exception as e:  # noqa: BLE001 终审失败不拖垮整轮（存档已落库，下轮接着判）
+        notes.append(f"LLM终审失败（下轮重试）：{type(e).__name__}: {str(e)[:80]}")
+    ctx.set_progress(100, f"解析 {len(rows)} 号（回捞 {backfilled}），LLM 终审入表 {llm_in}")
     return {"scanned": len(picks), "new": len(new_secs), "resolved": len(rows),
-            "backfill": backfilled, "inserted": inserted, "llm_inserted": llm_in,
+            "backfill": backfilled, "prefiltered": queued, "inserted": llm_in,
             "notes": notes}

@@ -184,6 +184,11 @@ def _migrate(engine) -> None:
         if acols and "note" not in acols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE articles ADD COLUMN note VARCHAR DEFAULT ''"))
+        # V4 判定管线（2026-11-03）：存档带自家作品 id，LLM 终审入表后雪球自喂
+        hpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(harvest_profiles)"))]
+        if hpcols and "sample_video_id" not in hpcols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE harvest_profiles ADD COLUMN sample_video_id VARCHAR DEFAULT ''"))
         if cols and "creator_cookie" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))

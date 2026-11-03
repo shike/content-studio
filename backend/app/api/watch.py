@@ -105,11 +105,15 @@ def _parse_scores(note: str) -> dict | None:
 
 
 @router.get("/accounts")
-def list_accounts() -> dict:
+def list_accounts(account_type: str = "") -> dict:
+    """account_type：persona|leadgen 类型内过滤（情报中心 2026-11-03 分线；空=全量）。"""
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
     stats: dict[str, dict] = {}
     with Session(engine) as s:
-        rows = s.exec(select(WatchAccount).order_by(WatchAccount.id)).all()
+        q = select(WatchAccount).order_by(WatchAccount.id)  # type: ignore[attr-defined]
+        if account_type in ("persona", "leadgen"):
+            q = q.where(WatchAccount.account_type == account_type)  # type: ignore[attr-defined]
+        rows = s.exec(q).all()
         for b in s.exec(select(BenchmarkVideo)).all():
             if b.source != "douyin" or not b.author:
                 continue
@@ -332,11 +336,14 @@ def judge_account(body: JudgeIn, user: User = Depends(require_user)) -> dict:
 
 
 @router.get("/discover/candidates")
-def list_candidates(status: str = "") -> dict:
+def list_candidates(status: str = "", account_type: str = "") -> dict:
+    """account_type：persona|leadgen 类型内过滤（情报中心 2026-11-03 分线；空=全量）。"""
     with Session(engine) as s:
         q = select(WatchCandidate)
         if status:
             q = q.where(WatchCandidate.status == status)  # type: ignore[attr-defined]
+        if account_type in ("persona", "leadgen"):
+            q = q.where(WatchCandidate.account_type == account_type)  # type: ignore[attr-defined]
         rows = s.exec(q.order_by(  # type: ignore[attr-defined]
             WatchCandidate.leadgen_comments.desc(),  # type: ignore[attr-defined]
             WatchCandidate.id.desc(),  # type: ignore[attr-defined]

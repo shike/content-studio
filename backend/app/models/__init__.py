@@ -281,6 +281,7 @@ class HarvestProfile(TenantScoped, TimestampMixin, table=True):
     follower_count: int = 0
     works_count: int = 0
     source_video_id: str = ""  # 从哪条种子视频评论区顺藤而来（空=存量回捞补档）
+    sample_video_id: str = ""  # 该号自家最新作品 id（入表后当雪球种子，顺藤它的评论区）
     judged_by: str = Field(default="pending", index=True)  # pending 词表未判 | lexicon | llm
     judged_pure: bool = False
     pure_reason: str = ""  # 最近一次判定依据（含未过原因，可观测）
