@@ -20,10 +20,12 @@ from sqlmodel import Session, select
 
 from ..browser import launch, ua
 from ..db import engine
+from ..llm import gateway
+from ..prompts import render
 from ..settings import settings
 from ..jobs.errors import TransientError
 from ..jobs.runner import register_concurrent, register_executor, runner
-from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
+from ..models import BenchmarkVideo, HarvestProfile, WatchAccount, WatchCandidate
 
 _MAX_NEW_PER_ACCOUNT = 10  # 每账号每次扫描最多排队拆解的新视频数（控 LLM 成本）
 _LIST_LIMIT = 20          # 每账号最多看最近 N 条
@@ -1011,6 +1013,21 @@ _HARVEST_SEEN_KEY = "harvest_seen_secs"
 _HARVEST_PER_RUN = 30     # 每轮解析主页上限（profile/other 连续解析 ~60 会开始空响应）
 _HARVEST_VIDEOS = 5       # 每轮种子视频数（控时长）
 _HARVEST_SEEN_CAP = 3000
+_HARVEST_LLM_BATCH = 20   # 每轮 LLM 复判条数（一次调用批量判）
+
+
+def _harvest_budget(key: str, default: int) -> int:
+    """战役模式预算覆盖：app_settings.harvest_videos / harvest_profiles 可临时调大
+    （挖号冲刺期用），不设或非法回落默认小预算（夜间常态挖不动太快会撞限速）。"""
+    from ..models import AppSetting
+    k = f"harvest_{key}"
+    with Session(engine) as s:
+        row = s.get(AppSetting, k)
+    try:
+        v = int(str(row.value)) if row is not None else default
+    except (TypeError, ValueError):
+        v = default
+    return max(1, min(v, 200))
 
 
 def judge_leadgen_account(nick: str, sig: str) -> tuple[bool, bool, str]:
@@ -1164,6 +1181,54 @@ def resolve_author_by_share_url(url: str) -> tuple[Optional[dict], Optional[str]
     return info, None
 
 
+async def _llm_rejudge(notes: list[str]) -> int:
+    """LLM 复判（2026-11-03）：词表没过的存档号（judged_by=pending 且有签名）批量再判一轮。
+
+    判定器与词表同一条转化链路标准（联系入口强信号 / 生意形态词≥2），但能读懂
+    变体表达（"商务合作看主页" "接 AI 落地单" 这类词表抓不住的写法）。纯号入候选表。"""
+    with Session(engine) as s:
+        pending = s.exec(select(HarvestProfile).where(  # type: ignore[attr-defined]
+            HarvestProfile.judged_by == "pending",  # type: ignore[attr-defined]
+            HarvestProfile.signature != "").limit(_HARVEST_LLM_BATCH)).all()  # type: ignore[attr-defined]
+    if not pending:
+        return 0
+    batch = [{"id": i + 1, "昵称": p.nickname, "签名": p.signature,
+              "粉丝": p.follower_count} for i, p in enumerate(pending)]
+    data = await gateway.complete_json(
+        [{"role": "system",
+          "content": render("leadgen_judge", BATCH=json.dumps(batch, ensure_ascii=False))}],
+        purpose="leadgen_judge", max_tokens=2000, thinking="disabled")
+    jmap = {j.get("id"): j for j in (data.get("judgments") or []) if isinstance(j, dict)}
+    inserted = 0
+    with Session(engine) as s:
+        known_secs = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
+                      if c.sec_uid}
+        for i, p in enumerate(pending):
+            j = jmap.get(i + 1)
+            if not isinstance(j, dict):
+                continue
+            p.judged_by = "llm"
+            p.pure_reason = str(j.get("reason") or "")[:80]
+            p.updated_at = datetime.now(timezone.utc)
+            if j.get("pure"):
+                p.judged_pure = True
+                if p.sec_uid not in known_secs:
+                    s.add(WatchCandidate(
+                        keyword="LLM复判", name=p.nickname, sec_uid=p.sec_uid,
+                        url=f"https://www.iesdouyin.com/share/user/{p.sec_uid}",
+                        signature=p.signature, follower_count=p.follower_count,
+                        sample_video_id="", sample_title="",
+                        sample_stats=json.dumps({"works": p.works_count}),
+                        account_type="leadgen", pure_reason=f"LLM复判 · {p.pure_reason}",
+                    ))
+                    inserted += 1
+                    known_secs.add(p.sec_uid)
+                    notes.append(f"LLM复判入表：{p.nickname}（{p.follower_count}粉）{p.pure_reason}")
+            s.add(p)
+        s.commit()
+    return inserted
+
+
 @register_executor("leadgen_harvest")
 async def leadgen_harvest(ctx, payload: dict) -> dict:
     """纯获客号挖掘（每晚调度）：评论区顺藤摸瓜——小预算限速版。
@@ -1175,46 +1240,57 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
     notes: list[str] = []
     seen = _load_harvest_seen()
     day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
+    n_videos = _harvest_budget("videos", _HARVEST_VIDEOS)
+    n_profiles = _harvest_budget("profiles", _HARVEST_PER_RUN)
     with Session(engine) as s:
         vids = [re.search(r"/video/(\d+)", b.url).group(1) for b in s.exec(
             select(BenchmarkVideo).where(  # type: ignore[attr-defined]
                 BenchmarkVideo.account_type == "leadgen",  # type: ignore[attr-defined]
                 BenchmarkVideo.scan_status == "approved")).all()  # type: ignore[attr-defined]
             if re.search(r"/video/(\d+)", b.url or "")]
+        # 种子池扩容（2026-11-03）：全部候选（不限来源关键词）的样本视频都入池——
+        # 评论会长新，老种子隔几天重刮也有增量；评论区枯竭时这是不贴新链接的主要弹药
+        cand_vids = [c.sample_video_id for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
+                     if c.sample_video_id and c.status != "dismissed"]
         snow = [c.sample_video_id for c in s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
             WatchCandidate.keyword.in_(["评论区收割", "手动贴链", "leadgen_harvest"]))).all()  # type: ignore[attr-defined]
             if c.sample_video_id and c.status != "dismissed"]
-    vids = list(dict.fromkeys(vids))
+    vids = list(dict.fromkeys(vids + cand_vids))
     _rand.shuffle(vids)
-    picks = vids[(day_idx * _HARVEST_VIDEOS) % max(len(vids), 1):
-                 (day_idx * _HARVEST_VIDEOS) % max(len(vids), 1) + _HARVEST_VIDEOS]
-    if len(picks) < _HARVEST_VIDEOS and snow:
-        picks += [v for v in snow if v not in picks][:_HARVEST_VIDEOS - len(picks)]
+    # 雪球优先（2026-11-02 战役模式）：已判纯号自己视频的评论区同行最密——纯号先排
+    picks = list(dict.fromkeys(snow))[:n_videos] if snow else []
+    picks += [v for v in vids if v not in picks][:n_videos - len(picks)]
+    if len(picks) < n_videos:
+        picks += [v for v in vids if v not in picks][:n_videos - len(picks)]
     if not picks:
         raise TransientError("种子池为空（获客样本库无视频），稍后自动重试")
     ctx.set_progress(5, f"种子 {len(picks)} 条（轮换第 {day_idx % max(len(vids), 1)} 批）")
 
     seen_before = set(seen)  # 历史快照：收割函数会把本轮收集也写进 seen，去重要对着历史比
     fresh: list[tuple[str, str]] = []
+    sec2vid: dict[str, str] = {}  # 评论者 → 从哪条种子视频顺藤而来（存档溯源用）
     for vid in picks:
         got = await asyncio.to_thread(_harvest_video_commenters, vid, seen)
         fresh += got
+        for sec, _n in got:
+            sec2vid.setdefault(sec, vid)
         notes.append(f"种子 {vid[:8]}… +{len(got)} 评论者")
         ctx.set_progress(5 + int(30 * len(notes) / len(picks)),
                          f"收评论 {len(notes)}/{len(picks)}（累计 {len(fresh)}）")
 
     new_secs = [x for x in dict.fromkeys(fresh) if x[0] not in seen_before]
     if not new_secs:
-        ctx.set_progress(100, "评论区无新号（全部已扫过）")
-        _save_harvest_seen(seen)
-        return {"scanned": len(picks), "new": 0, "inserted": 0, "notes": notes}
+        # 种子评论区全扫过≠无事可做：解析预算让给存量回捞，LLM 复判照跑
+        notes.append("评论区无新号，本轮预算全给存量回捞")
+        ctx.set_progress(45, "评论区无新号，回捞存量中…")
 
-    ctx.set_progress(40, f"解析 {min(len(new_secs), _HARVEST_PER_RUN)} 个主页…")
+    ctx.set_progress(50, f"解析新号 {min(len(new_secs), n_profiles)} 个…")
     rows: list[dict] = []
+    row_vids: list[str] = []  # 与 rows 对齐：该号来源种子（空=回捞）
     resolved_secs: set[str] = set()
     fails = 0
-    for sec, nick in new_secs[:_HARVEST_PER_RUN]:
-        info, _posts = await asyncio.to_thread(_resolve_douyin_profile, sec)
+    for sec, nick in new_secs[:n_profiles]:
+        info, posts = await asyncio.to_thread(_resolve_douyin_profile, sec)
         if info is None:
             fails += 1
             if fails >= 3:
@@ -1222,9 +1298,40 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
                 break
             continue
         fails = 0
+        if posts:
+            info["_first_post"] = posts[0].get("id", "")
         resolved_secs.add(info["sec"])
         rows.append(info)
-        await asyncio.sleep(4)  # 限速间隔
+        row_vids.append(sec2vid.get(sec, ""))
+        await asyncio.sleep(5)  # 限速间隔（解析预算大时更要留喘息）
+
+    # 存量回捞（2026-11-03）：历史上"解析成功但词表拒掉"的号只记了 seen 没存资料——
+    # 用本轮余量预算按天轮换重解析补档，补进存档后由 LLM 复判再筛一遍
+    backfilled = 0
+    if len(rows) < n_profiles and fails < 3:
+        with Session(engine) as s:
+            stored = {r for r in s.exec(select(HarvestProfile.sec_uid)).all()}  # type: ignore[attr-defined]
+        pool = [sec for sec in sorted(seen_before) if sec not in stored]
+        if pool:
+            off = (day_idx * n_profiles) % len(pool)
+            take = pool[off:off + (n_profiles - len(rows))]
+            ctx.set_progress(60, f"回捞存量 {len(take)} 个（补解析存档）…")
+            for sec in take:
+                info, posts = await asyncio.to_thread(_resolve_douyin_profile, sec)
+                if info is None:
+                    fails += 1
+                    if fails >= 3:
+                        notes.append("回捞撞限速窗，停止（存量明天接着补）")
+                        break
+                    continue
+                fails = 0
+                if posts:
+                    info["_first_post"] = posts[0].get("id", "")
+                resolved_secs.add(info["sec"])
+                rows.append(info)
+                row_vids.append("")
+                backfilled += 1
+                await asyncio.sleep(5)
     # 只把解析成功的记入历史（没解析成的不算已扫，限速窗过后下轮重试）
     _save_harvest_seen(seen_before | resolved_secs)
 
@@ -1232,21 +1339,47 @@ async def leadgen_harvest(ctx, payload: dict) -> dict:
     with Session(engine) as s:
         known_secs = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
                       if c.sec_uid}
-        for pr in rows:
+        for pr, vid in zip(rows, row_vids):
             pure, _strong, reason = judge_leadgen_account(pr["nick"], pr["sig"])
-            if not pure or pr["sec"] in known_secs:
-                continue
-            s.add(WatchCandidate(
-                keyword="leadgen_harvest", name=pr["nick"], sec_uid=pr["sec"],
-                url=f"https://www.iesdouyin.com/share/user/{pr['sec']}",
-                signature=pr["sig"], follower_count=pr["fans"],
-                sample_video_id="", sample_title="",
-                sample_stats=json.dumps({"works": pr.get("works") or 0}),
-                account_type="leadgen", pure_reason=reason,
-            ))
-            inserted += 1
-            notes.append(f"{pr['nick']}（{pr['fans']}粉）：{reason}")
+            hp = s.exec(select(HarvestProfile).where(  # type: ignore[attr-defined]
+                HarvestProfile.sec_uid == pr["sec"])).first()  # type: ignore[attr-defined]
+            if hp is None:
+                hp = HarvestProfile(sec_uid=pr["sec"])
+                s.add(hp)
+            hp.nickname = pr["nick"]
+            hp.signature = pr["sig"]
+            hp.follower_count = pr["fans"]
+            hp.works_count = pr.get("works") or 0
+            if vid:
+                hp.source_video_id = vid
+            hp.updated_at = datetime.now(timezone.utc)
+            if pure:
+                hp.judged_by = "lexicon"
+                hp.judged_pure = True
+                hp.pure_reason = reason
+                if pr["sec"] not in known_secs:
+                    s.add(WatchCandidate(
+                        keyword="leadgen_harvest", name=pr["nick"], sec_uid=pr["sec"],
+                        url=f"https://www.iesdouyin.com/share/user/{pr['sec']}",
+                        signature=pr["sig"], follower_count=pr["fans"],
+                        sample_video_id=pr.get("_first_post", ""), sample_title="",
+                        sample_stats=json.dumps({"works": pr.get("works") or 0}),
+                        account_type="leadgen", pure_reason=reason,
+                    ))
+                    inserted += 1
+                    notes.append(f"{pr['nick']}（{pr['fans']}粉）：{reason}")
+            elif hp.judged_by == "pending":
+                hp.pure_reason = reason  # 词表没过也留痕：pending 等下 LLM 复判
         s.commit()
-    ctx.set_progress(100, f"解析 {len(rows)} 号，入表 {inserted}")
+    ctx.set_progress(80, f"解析 {len(rows)} 号（回捞 {backfilled}），词表入表 {inserted}")
+
+    llm_in = 0
+    try:
+        llm_in = await _llm_rejudge(notes)
+    except Exception as e:  # noqa: BLE001 复判失败不拖垮整轮（存档已落库，下轮接着判）
+        notes.append(f"LLM复判失败（下轮重试）：{type(e).__name__}: {str(e)[:80]}")
+    ctx.set_progress(100, f"解析 {len(rows)} 号（回捞 {backfilled}），入表 {inserted + llm_in}"
+                          f"（词表 {inserted} + LLM {llm_in}）")
     return {"scanned": len(picks), "new": len(new_secs), "resolved": len(rows),
-            "inserted": inserted, "notes": notes}
+            "backfill": backfilled, "inserted": inserted, "llm_inserted": llm_in,
+            "notes": notes}
