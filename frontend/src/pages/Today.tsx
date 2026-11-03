@@ -150,8 +150,8 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           {todos.failed > 0 ? '⚠️' : '✅'} 失败任务 <b className="tabular-nums">{todos.failed}</b>
         </span>
         <span className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5">🔄 进行中 <b className="tabular-nums">{todos.active}</b></span>
-        <button onClick={() => onNavigate('intel')} className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5 hover:bg-slate-50">
-          📡 情报中心
+        <button onClick={() => onNavigate('persona')} className="rounded-full border border-[#e8ecf0] bg-white px-3 py-1.5 hover:bg-slate-50">
+          🔍 对标情报
         </button>
       </div>
 

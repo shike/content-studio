@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   Magnet,
   Newspaper,
-  Radar,
   Send,
   Settings,
 } from 'lucide-react'
@@ -14,7 +13,6 @@ import Today from './pages/Today'
 import Persona from './pages/Persona'
 import Leadgen from './pages/Leadgen'
 import Articles from './pages/Articles'
-import Intel from './pages/Intel'
 import PublishingHub from './pages/PublishingHub'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
@@ -23,9 +21,10 @@ import Login from './pages/Login'
 import ForceChangePassword from './pages/ForceChangePassword'
 
 /**
- * 三线结构（2026-11-02 用户定版）：内容产线拆三菜单——人设号 / 获客号 / 公众号，
- * 三线各自闭环、选题库三库独立（公众号报题即草稿，无选题阶段）。
- * 旧 SectionKey 保留经 NAVMAP 兼容路由（articles → 公众号线）。
+ * 三线结构（2026-11-02 用户定版；2026-11-03 IA 收敛：情报中心解散并入产线——
+ * 人设号=选题/内容/风格/账号经营/对标情报，获客号=选题/脚本/挖号情报，
+ * 每条线一个入口全都有，类型切换器随维度归一而消失）。
+ * 旧 SectionKey 保留经 NAVMAP 兼容路由（intel/watch/benchmarks/radar → 各产线）。
  */
 export type SectionKey =
   | 'today' | 'persona' | 'leadgen' | 'article' | 'intel' | 'publishing' | 'tasks' | 'settings'
@@ -35,8 +34,8 @@ export type SectionKey =
 /** 旧分区键 → 新分区（内嵌页面 onNavigate 的兼容路由）。 */
 const NAVMAP: Record<string, SectionKey> = {
   dashboard: 'today', topics: 'today', scripts: 'persona',
-  articles: 'article', posters: 'publishing', watch: 'intel', style: 'persona',
-  benchmarks: 'intel', radar: 'intel',
+  articles: 'article', posters: 'publishing', watch: 'persona', style: 'persona',
+  benchmarks: 'persona', radar: 'persona', intel: 'persona',
 }
 
 interface SectionDef {
@@ -52,7 +51,6 @@ const PRODUC: SectionDef[] = [
   { key: 'article', label: '公众号', icon: Newspaper },
 ]
 const AUTO: SectionDef[] = [
-  { key: 'intel', label: '情报中心', icon: Radar },
   { key: 'publishing', label: '发布台', icon: Send },
 ]
 const SYSTEM: SectionDef[] = [
@@ -178,7 +176,7 @@ export default function App() {
           {renderItem(TODAY)}
           {renderGroupLabel('内容产线')}
           {PRODUC.map(renderItem)}
-          {renderGroupLabel('情报 · 自动')}
+          {renderGroupLabel('发布')}
           {AUTO.map(renderItem)}
         </nav>
 
@@ -194,7 +192,6 @@ export default function App() {
           {active === 'persona' && <Persona onNavigate={navTo} />}
           {active === 'leadgen' && <Leadgen onNavigate={navTo} />}
           {active === 'article' && <Articles onNavigate={navTo} />}
-          {active === 'intel' && <Intel onNavigate={navTo} />}
           {active === 'publishing' && <PublishingHub />}
           {active === 'tasks' && <Tasks />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}

@@ -30,16 +30,13 @@ const fmtFollow = (n: number) =>
 const fmtN = (n?: number) =>
   !n ? '0' : n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}万` : String(n)
 
-/** 发现的账号（自「监测账号」页拆出，2026-10-30）：关键词挖出的候选对标号，定夺后进监控清单。accountType=情报中心类型切换（2026-11-03 分线）。 */
+/** 候选定夺（原"发现的账号"；2026-11-03 IA 收敛后住进各产线的情报标签）：候选对标号定夺后进监控清单。accountType 随所在产线固定。 */
 export default function DiscoveredAccounts({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [cands, setCands] = useState<WatchCandidate[]>([])
   const [candFilter, setCandFilter] = useState('open')
   const [cpageRaw, setCpage] = useState(0)
   const [expCand, setExpCand] = useState<number | null>(null)
   const [dform, setDform] = useState({ keyword: '', direction: '' })
-  const [judgeUrl, setJudgeUrl] = useState('')
-  const [judgeBusy, setJudgeBusy] = useState('')
-  const [judgeResult, setJudgeResult] = useState<{ name: string; fans: number; signature: string; pure: boolean; reason: string } | null>(null)
   const [discoverBusy, setDiscoverBusy] = useState('')
   const [discoverSummary, setDiscoverSummary] = useState<{
     candidates: number; new: number; already: number; skipped: number; notes: string[]
@@ -57,25 +54,6 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
   useEffect(() => {
     reload().catch((e) => setError(String(e)))
   }, [reload])
-
-  const judgeLink = () =>
-    (async () => {
-      if (!judgeUrl.trim()) return
-      setJudgeBusy('解析中…（打开链接约 10~30 秒）')
-      setJudgeResult(null)
-      setError('')
-      try {
-        const r = await api<{ name: string; fans: number; signature: string; pure: boolean; reason: string }>(
-          '/watch/judge-account', { method: 'POST', body: JSON.stringify({ url: judgeUrl.trim() }) })
-        setJudgeResult(r)
-        setJudgeUrl('')
-        await reload()
-      } catch (e) {
-        setError(String(e).replace(/^Error:\s*/, ''))
-      } finally {
-        setJudgeBusy('')
-      }
-    })()
 
   const discover = () =>
     (async () => {
@@ -151,32 +129,7 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
 
   return (
     <div>
-      {/* 贴链判号（2026-11-02 用户定版：刷到疑似纯获客号 → 分享链接贴进来） */}
-      <div className="card space-y-2 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-zinc-900"><Search size={14} className="inline text-sky-600" /> 贴链判号</span>
-          <input
-            value={judgeUrl}
-            onChange={(e) => setJudgeUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && judgeLink()}
-            placeholder="贴抖音分享链接（App 里分享主页或视频 → 复制链接）"
-            className="input min-w-64 flex-1"
-          />
-          <button onClick={judgeLink} disabled={!judgeUrl.trim() || judgeBusy !== ''} className="btn-accent btn-xs disabled:opacity-40">
-            {judgeBusy ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />} 判定并入库
-          </button>
-        </div>
-        {judgeBusy && <div className="text-xs text-sky-600">{judgeBusy}</div>}
-        {judgeResult && !judgeBusy && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[13px] text-emerald-900">
-            <b>{judgeResult.name}</b>（{judgeResult.fans} 粉）已入候选表 —— 判定：{judgeResult.reason}
-            <div className="mt-0.5 truncate text-[11px] text-slate-500">{judgeResult.signature || '（无签名）'}</div>
-          </div>
-        )}
-        <span className="text-[11px] text-slate-400">
-          判定只看转化链路（签名/昵称的联系方式与生意形态），粉丝量不参与——纯获客号往往是小号。
-        </span>
-      </div>
+      {/* 贴链判号入口已上收到 LineIntel 顶部的统一贴链框（2026-11-03 IA 收敛去重） */}
 
       {/* 手动挖掘：关键词搜账号 */}
       <div className="card space-y-2 p-4">
