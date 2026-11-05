@@ -571,8 +571,25 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     if not items:
         raise TransientError("站外热点源全部无数据（百度/科技媒体都空），稍后自动重试")
 
+    # 受众锚定预筛（2026-11-05 垃圾选题教训：科技媒体清单里挑出「Anthropic 中转站」
+    # 这种纯技术行业新闻——读者的买家是不懂技术的实体老板，先硬性剔除与生意无关的题）
+    ctx.set_progress(25, "按读者受众预筛热点")
+    screen = await gateway.complete_json(
+        [{"role": "user", "content":
+          "读者画像：不懂技术的实体老板/普通人，他们关心生意成本、用人、赚钱、避坑，"
+          "正在考虑要不要学 AI 落地相关技能。\n下面是候选热点清单（JSON）。"
+          "判断每条是否值得写给他们看：需要写代码/调 API/懂模型圈才能用得上的话题一律不相关；"
+          "涉及生意成本、用人决策、门店经营、政策对生意的影响、普通人机会的才算相关。"
+          '\n清单：\n' + json.dumps(items, ensure_ascii=False) +
+          '\n输出 JSON：{"relevant": [命中的序号数组]}。一条都没有就给空数组。'}],
+        purpose="discover_keywords", max_tokens=1024, thinking="disabled")
+    keep = {int(x) for x in (screen.get("relevant") or []) if str(x).strip().isdigit()}
+    items = [x for i, x in enumerate(items) if (i + 1) in keep] if keep else []
+    if not items:
+        raise TransientError("今日热点里没有读者业务相关的题（受众锚定筛空），宁缺勿滥，稍后重试")
+    ctx.set_progress(35, f"预筛后剩 {len(items)} 条相关热点，提炼切角")
+
     persona_text = brand_of(1)["persona"]
-    ctx.set_progress(35, "提炼深度长文切角")
     data = await gateway.complete_json(
         [{"role": "user", "content": render("article_hotspots", PERSONA=persona_text)
           + "\n\n热点清单（JSON）：\n" + json.dumps(items, ensure_ascii=False)}],
