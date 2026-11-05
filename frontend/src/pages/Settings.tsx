@@ -19,6 +19,7 @@ interface AppSettings {
   auto_dissect_enabled: boolean
   auto_dissect_min_score: number
   auto_dissect_daily_cap: number
+  auto_topic_min_sharpness: number
 }
 
 const MODELS = ['glm-5.3-flash', 'glm-5.3']
@@ -59,8 +60,9 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   const [scanHour, setScanHour] = useState(1)
   const [discoverKw, setDiscoverKw] = useState('')
   const [autoDissect, setAutoDissect] = useState(true)
-  const [autoMinScore, setAutoMinScore] = useState(6)
-  const [autoCap, setAutoCap] = useState(6)
+  const [autoMinScore, setAutoMinScore] = useState(8)
+  const [autoCap, setAutoCap] = useState(4)
+  const [autoSharp, setAutoSharp] = useState(7)
   const [pingReply, setPingReply] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -82,6 +84,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     setAutoDissect(c.auto_dissect_enabled)
     setAutoMinScore(c.auto_dissect_min_score)
     setAutoCap(c.auto_dissect_daily_cap)
+    setAutoSharp(c.auto_topic_min_sharpness ?? 7)
   }, [])
 
   useEffect(() => {
@@ -113,7 +116,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     guard(async () => {
       if (!conf) return
       setBusy('保存中（运行时生效）…')
-      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap }
+      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap, auto_topic_min_sharpness: autoSharp }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
       setPingReply('')
@@ -324,6 +327,16 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                   />
                   条
                 </div>
+                <div className="flex items-center gap-2 text-sm text-slate-700">
+                  选题锐度闸（拆解自评≥）
+                  <input
+                    type="number"
+                    value={autoSharp}
+                    onChange={(e) => setAutoSharp(Number(e.target.value) || 0)}
+                    className="input max-w-20"
+                  />
+                  才入库（宁缺勿滥；不过闸的候选直接丢弃）
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="block text-sm text-slate-700">每日发现的关键词池</label>
@@ -341,7 +354,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
 
       {/* 保存条 */}
       <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
-        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour || autoDissect !== conf.auto_dissect_enabled || autoMinScore !== conf.auto_dissect_min_score || autoCap !== conf.auto_dissect_daily_cap) && (
+        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour || autoDissect !== conf.auto_dissect_enabled || autoMinScore !== conf.auto_dissect_min_score || autoCap !== conf.auto_dissect_daily_cap || autoSharp !== (conf.auto_topic_min_sharpness ?? 7)) && (
           <div className="flex items-center gap-3 rounded-2xl bg-slate-900 px-5 py-3 text-sm text-slate-100 shadow-xl">
             <span>
               待保存：<b className="text-sky-400">{model}</b>

@@ -47,8 +47,9 @@ class Settings(BaseSettings):
     watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     # 全自动拆解闸（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：达标作品自动批准进拆解
     auto_dissect_enabled: bool = True
-    auto_dissect_min_score: float = 6.0  # 放行门槛：内容热度分（赞粉比×赞数量，quality.content_score 0~10）
-    auto_dissect_daily_cap: int = 6      # 每日自动拆解上限（控下载与 LLM 成本）
+    auto_dissect_min_score: float = 8.0  # 放行门槛：内容热度分（2026-11-05 进料门槛大幅提高 6→8，宁缺勿滥）
+    auto_dissect_daily_cap: int = 4      # 每日自动拆解上限（2026-11-05 量砍 1/3，配合锐度闸）
+    auto_topic_min_sharpness: float = 7.0  # 选题候选锐度闸：拆解 LLM 锐度自评低于此值不入库（宁缺勿滥）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
 
     @property
