@@ -273,3 +273,15 @@ async def _run_hl_search() -> str:
 
 register_schedule(Schedule(key="hl_search_daily", label="同城组局号搜索挖掘（江浙沪）",
                            daily_hour=2, run=_run_hl_search))
+
+
+async def _run_hl_funnel() -> str:
+    from .runner import runner
+    job = await runner.submit("hl_funnel_topics", {"auto": True},
+                              dedup_key=f"1:hlfunnel:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（组局号漏斗选题引擎）"
+
+
+register_schedule(Schedule(key="hl_funnel_daily", label="组局号漏斗选题引擎（名单跟踪→五形态切角）",
+                           daily_hour=2, run=_run_hl_funnel))

@@ -1681,3 +1681,167 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
     return {"searches": len(searched), "secs": len(result["authors"]),
             "verified": len(result["verified"]), "inserted": inserted,
             "strong": strong, "mid": mid, "rejected": rejected, "notes": notes}
+
+
+# ---- 组局号漏斗选题引擎（2026-11-05 ③ 获客号产线定版）----
+# 名单号（搜索矩阵入库的暖暖型）每周在办活动——他们的新作品就是你的活教材。
+# 本执行器：夜间跟踪名单号最新作品 → 提取新活动动作 → LLM 转成你的活动漏斗五形态
+# 切角（邀约/见证/逼单/背书/打法）→ 入获客库待审。活动本身完全人工，系统只产内容。
+_HL_FUNNEL_SEEN_KEY = "hl_funnel_seen"
+_HL_FUNNEL_SEEN_CAP = 3000
+_HL_FUNNEL_TRACK = 40       # 每晚跟踪作者数（75 号约两晚轮完）
+_HL_FUNNEL_OUT = 5          # 每次产出切角上限
+_HL_FUNNEL_GUIDE = {
+    "邀约": "结尾行动指令直接给报名动作（评论区扣关键词/私信『报名』），正文给到场理由（谁来/聊什么/得到什么），时间地点写【时间】【地点】占位由老板发布时填",
+    "见证": "主体=上一次活动的真实结果（来了谁、聊出什么、当场定了什么），用数字落差呈现，结尾引导预约下一场",
+    "逼单": "主体=下场活动名额稀缺+报名截止，利他包装（帮你留位/别错过），结尾明确报名动作与截止",
+    "背书": "主体=嘉宾与背书资源介绍（谁来讲、什么背景、做成过什么），借势立信任，结尾引导报名",
+    "打法": "主体=把同行验证过的获客打法拆成可复制步骤，结尾自然过渡到『这套打法怎么用到你的生意上』",
+}
+
+
+def _hl_funnel_seen() -> set[str]:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, _HL_FUNNEL_SEEN_KEY)
+    try:
+        v = json.loads(row.value) if row is not None and row.value else []
+        return set(v) if isinstance(v, list) else set()
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _hl_funnel_seen_save(seen: set[str]) -> None:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, _HL_FUNNEL_SEEN_KEY)
+        val = json.dumps(sorted(seen)[-_HL_FUNNEL_SEEN_CAP:], ensure_ascii=False)
+        if row is None:
+            s.add(AppSetting(key=_HL_FUNNEL_SEEN_KEY, value=val))
+        else:
+            row.value = val
+            s.add(row)
+        s.commit()
+
+
+@register_executor("hl_funnel_topics")
+async def hl_funnel_topics(ctx, payload: dict) -> dict:
+    """组局号漏斗选题引擎（每晚调度）：名单号最新作品 → 活动动作样本 →
+    LLM 转成你的活动漏斗五形态切角 → 获客库待审（line=leadgen，source=funnel）。"""
+    import hashlib as _hl
+    from ..tenant_brand import brand_of
+
+    ctx.set_progress(5, "收集跟踪名单")
+    with Session(engine) as s:
+        rows = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
+            WatchCandidate.keyword == "搜索矩阵",  # type: ignore[attr-defined]
+            WatchCandidate.status.in_(["open", "added"]))).all()  # type: ignore[attr-defined]
+        tracked = list({(c.sec_uid, c.name) for c in rows if c.sec_uid})
+    if not tracked:
+        raise TransientError("跟踪名单为空（搜索矩阵候选未入库），稍后自动重试")
+    day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
+    start = (day_idx * _HL_FUNNEL_TRACK) % len(tracked)
+    batch = tracked[start:start + _HL_FUNNEL_TRACK]
+
+    seen = _hl_funnel_seen()
+    ctx.set_progress(15, f"拉取 {len(batch)} 个名单号最新作品…")
+
+    samples: list[dict] = []
+    seen_new: set[str] = set()
+
+    def _pull_one(browser_ctx, sec: str, nick: str) -> list[str]:
+        got: list[str] = []
+        page = browser_ctx.new_page()
+
+        def on_resp(r):
+            if "aweme/post" in r.url and "/web/api/v2/" in r.url:
+                try:
+                    d = r.json()
+                    for a in (d.get("aweme_list") or [])[:15]:
+                        dsc = (a.get("desc") or "").strip()[:70]
+                        if dsc:
+                            got.append(dsc)
+                except Exception:
+                    pass
+
+        page.on("response", on_resp)
+        try:
+            page.goto(f"https://www.douyin.com/share/user/{sec}", timeout=30000,
+                      wait_until="domcontentloaded")
+            page.wait_for_timeout(4500)
+        except Exception:
+            pass
+        page.close()
+        return got
+
+    interesting = tuple(_HL_ACT) + tuple(_HL_TOPIC)
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = launch(p)
+        mctx = browser.new_context(user_agent=_HL_MOBILE_UA, locale="zh-CN",
+                                   viewport={"width": 390, "height": 844}, is_mobile=True)
+        for i, (sec, nick) in enumerate(batch):
+            try:
+                descs = await asyncio.to_thread(_pull_one, mctx, sec, nick)
+            except Exception:
+                descs = []
+            for dsc in descs:
+                h = _hl.md5(dsc.encode()).hexdigest()[:16]
+                if h in seen:
+                    continue
+                seen_new.add(h)
+                if any(w in dsc for w in interesting):
+                    samples.append({"来源": nick, "动作": dsc})
+            if i % 10 == 0:
+                ctx.set_progress(15 + int(45 * (i + 1) / len(batch)),
+                                 f"拉取 {i + 1}/{len(batch)}（新动作样本 {len(samples)}）")
+            await asyncio.sleep(random.uniform(1.8, 2.8))
+        browser.close()
+
+    _hl_funnel_seen_save(seen | seen_new)
+    if not samples:
+        ctx.set_progress(100, f"跟踪 {len(batch)} 号，无新活动动作（名单号本周未更新）")
+        return {"tracked": len(batch), "samples": 0, "created": 0}
+
+    ctx.set_progress(65, f"新动作样本 {len(samples)}，转漏斗切角…")
+    persona_text = brand_of(1)["persona"]
+    prompt_text = render("hl_funnel", PERSONA=persona_text,
+                         SAMPLES=json.dumps(samples[:40], ensure_ascii=False))
+    data = await gateway.complete_json(
+        [{"role": "system", "content": prompt_text}],
+        purpose="leadgen_judge", max_tokens=3000, thinking="disabled")
+    picks = [x for x in (data.get("topics") or []) if isinstance(x, dict)
+             and (x.get("title") or "").strip()][:_HL_FUNNEL_OUT]
+    if not picks:
+        ctx.set_progress(100, f"样本 {len(samples)}，LLM 未产出切角（宁缺勿滥）")
+        return {"tracked": len(batch), "samples": len(samples), "created": 0}
+
+    created = 0
+    with Session(engine) as s:
+        from ..topics.service import is_similar_title, mark_similar
+        for x in picks:
+            title = str(x.get("title") or "").strip()[:60]
+            form = str(x.get("funnel_form") or "打法")
+            if form not in _HL_FUNNEL_GUIDE:
+                form = "打法"
+            if not title or is_similar_title(title, line="leadgen"):
+                continue
+            topic = Topic(
+                title=title, angle=str(x.get("angle") or "")[:200],
+                audience="both", source_type="funnel",
+                source_ref=f"funnel:{str(x.get('sample_source') or '')[:40]}",
+                line="leadgen",
+                evidence={
+                    "funnel_form": form,
+                    "hook": x.get("hook") or "",
+                    "account_type": "leadgen",
+                    "samples": [x.get("sample_source") or ""],
+                },
+            )
+            s.add(topic)
+            s.flush()
+            mark_similar(topic.title, topic.id, s, line="leadgen")
+            created += 1
+        s.commit()
+    ctx.set_progress(100, f"样本 {len(samples)}，漏斗切角入获客库 {created} 条")
+    return {"tracked": len(batch), "samples": len(samples), "created": created}
