@@ -57,6 +57,13 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
         cand_open_leadgen = s.execute(text(
             "SELECT COUNT(*) FROM watch_candidates WHERE status='open' AND account_type='leadgen' AND tenant_id=:tid"
         ), {"tid": tid}).scalar() or 0
+        # 今日三锐池（2026-11-05 ④）：draft 且锐度≥7，徽章与三锐卡同口径
+        sharp_persona = s.execute(text(
+            "SELECT COUNT(*) FROM topics WHERE status='draft' AND line='persona' AND sharpness >= 7.0 AND tenant_id=:tid"
+        ), {"tid": tid}).scalar() or 0
+        sharp_leadgen = s.execute(text(
+            "SELECT COUNT(*) FROM topics WHERE status='draft' AND line='leadgen' AND sharpness >= 7.0 AND tenant_id=:tid"
+        ), {"tid": tid}).scalar() or 0
     return {"draftTopics": draft_topics,
             "draftTopicsPersona": draft_persona, "draftTopicsLeadgen": draft_leadgen,
             "pendingScripts": pending_scripts,
@@ -67,4 +74,6 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
             "pendingArticles": pending_articles,
             "openCandidatesPersona": cand_open_persona,
             "openCandidatesLeadgen": cand_open_leadgen,
+            "sharpPersona": sharp_persona,
+            "sharpLeadgen": sharp_leadgen,
             "finalScripts": final_scripts}

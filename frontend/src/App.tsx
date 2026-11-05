@@ -17,6 +17,7 @@ import SettingsPage from './pages/Settings'
 import { fetchMenuStats, menuBadges } from './counts'
 import Login from './pages/Login'
 import ForceChangePassword from './pages/ForceChangePassword'
+import Mobile from './Mobile'
 
 /**
  * 三线结构（2026-11-02 用户定版；2026-11-03 IA 收敛：情报中心解散并入产线——
@@ -151,6 +152,15 @@ export default function App() {
   // 首登强制改密（R11.1）：一次性密码登录后全屏拦截，改完才放行
   if (authed === true && me?.must_change_password) {
     return <ForceChangePassword username={me.display_name} onDone={() => probe()} />
+  }
+
+  // 手机轻量页（/?view=m，2026-11-05 ⑤）：只做拍板动作，不渲染桌面侧栏
+  if (new URLSearchParams(window.location.search).get('view') === 'm') {
+    return <div className="min-h-full bg-[#f7f8fa]"><Mobile onExit={() => {
+      const u = new URL(window.location.href)
+      u.searchParams.delete('view')
+      window.location.href = u.toString()
+    }} /></div>
   }
 
   return (

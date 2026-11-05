@@ -186,6 +186,9 @@ def _migrate(engine) -> None:
                 "ALTER TABLE articles ADD COLUMN note VARCHAR DEFAULT ''"))
         # V4 判定管线（2026-11-03）：存档带自家作品 id，LLM 终审入表后雪球自喂
         hpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(harvest_profiles)"))]
+        tcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(topics)"))]
+        if tcols and "sharpness" not in tcols:
+            conn.execute(sqlalchemy.text("ALTER TABLE topics ADD COLUMN sharpness REAL"))
         if hpcols and "sample_video_id" not in hpcols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE harvest_profiles ADD COLUMN sample_video_id VARCHAR DEFAULT ''"))

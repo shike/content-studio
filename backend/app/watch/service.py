@@ -1833,8 +1833,13 @@ async def hl_funnel_topics(ctx, payload: dict) -> dict:
                 form = "打法"
             if not title or is_similar_title(title, line="leadgen"):
                 continue
+            try:
+                sharp_v = float(x.get("sharpness") or 0) or None
+            except (TypeError, ValueError):
+                sharp_v = None
             topic = Topic(
                 title=title, angle=str(x.get("angle") or "")[:200],
+                sharpness=sharp_v,
                 audience="both", source_type="funnel",
                 source_ref=f"funnel:{str(x.get('sample_source') or '')[:40]}",
                 line="leadgen",

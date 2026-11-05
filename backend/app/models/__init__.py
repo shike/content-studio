@@ -98,6 +98,7 @@ class Topic(TenantScoped, TimestampMixin, table=True):
     source_ref: str = ""
     evidence: dict = Field(default_factory=dict, sa_column=Column(JSON))
     score: Optional[float] = None
+    sharpness: Optional[float] = None  # 锐度分（每日三锐排序键；拆解/漏斗 LLM 自评或夜间批量评分，2026-11-05）
     score_breakdown: dict = Field(default_factory=dict, sa_column=Column(JSON))
     status: str = "draft"  # draft | approved | rejected | produced
 

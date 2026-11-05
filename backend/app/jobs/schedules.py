@@ -285,3 +285,15 @@ async def _run_hl_funnel() -> str:
 
 register_schedule(Schedule(key="hl_funnel_daily", label="组局号漏斗选题引擎（名单跟踪→五形态切角）",
                            daily_hour=2, run=_run_hl_funnel))
+
+
+async def _run_topic_sharp() -> str:
+    from .runner import runner
+    job = await runner.submit("topic_sharpness_score", {"auto": True},
+                              dedup_key=f"1:topicsharp:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（选题锐度批量评分）"
+
+
+register_schedule(Schedule(key="topic_sharp_daily", label="选题锐度批量评分（每日三锐排序键）",
+                           daily_hour=2, run=_run_topic_sharp))

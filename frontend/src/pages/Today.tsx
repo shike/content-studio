@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, Topic } from '../api'
 import { fetchMenuStats } from '../counts'
+import SharpPicks from '../SharpPicks'
 
 interface MetricsResp {
   items: { date: string; fans?: number; play?: number; profile_views?: number }[]
@@ -164,6 +165,13 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           className="w-full rounded-xl border border-[#e8ecf0] bg-white px-4 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-sky-300"
         />
         <button onClick={quickAdd} disabled={!quick.trim()} className="btn-accent btn-sm disabled:opacity-40">入库</button>
+      </div>
+
+      <div className="mb-3 space-y-2">
+        <SharpPicks line="persona" label="今日三锐 · 人设号" compact
+          onApprove={() => { reload(); }} />
+        <SharpPicks line="leadgen" label="今日三锐 · 获客号" compact
+          onApprove={() => { reload(); }} />
       </div>
 
       <div className="mb-2.5 flex items-center gap-2 text-xs text-slate-500">

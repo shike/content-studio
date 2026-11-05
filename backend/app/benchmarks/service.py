@@ -352,6 +352,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                 source_ref=f"benchmark:{benchmark_id}",
                 line=judged_line,  # 三库独立：按判定分流（2026-11-02）
                 score=_safe_score(analysis.get("score")),
+                sharpness=sharp or None,
                 evidence={
                     "summary": analysis.get("summary", ""),
                     "replicable_points": analysis.get("replicable_points") or [],

@@ -399,3 +399,65 @@ def mark_similar(title: str, topic_id: int, session: Session, line: str = "") ->
             ev["similar_to"] = similar[:5]
             topic.evidence = ev
             session.add(topic)
+
+
+# ---- 每日三锐（2026-11-05 ④ 定版）：存量/新增选题的锐度批量评分 + 三锐挑选 ----
+_TOPIC_SHARP_BATCH = 60  # 每晚评分条数（存量清完后即覆盖新增）
+
+
+@register_executor("topic_sharpness_score")
+async def topic_sharpness_score(ctx, payload: dict) -> dict:
+    """锐度批量评分：draft 且无锐度分的选题，LLM 按四问锚点打 1-10（与拆解/漏斗自评同口径），
+    存 Topic.sharpness 供「今日三锐」排序。宁缺勿滥口径：低于 7 不进三锐。"""
+    ctx.set_progress(10, "收集待评选题")
+    with Session(engine) as s:
+        rows = s.exec(select(Topic).where(  # type: ignore[attr-defined]
+            Topic.status == "draft",  # type: ignore[attr-defined]
+            Topic.sharpness.is_(None),  # type: ignore[attr-defined]
+        ).order_by(Topic.id.desc()).limit(_TOPIC_SHARP_BATCH)).all()  # type: ignore[attr-defined]
+    if not rows:
+        ctx.set_progress(100, "无待评选题（存量已清完，新增即评）")
+        return {"scored": 0}
+    scored = 0
+    for i in range(0, len(rows), 20):
+        batch = rows[i:i + 20]
+        payload_items = [{"id": j + 1, "标题": t.title, "角度": (t.angle or "")[:120]}
+                         for j, t in enumerate(batch)]
+        data = await gateway.complete_json(
+            [{"role": "system", "content": render(
+                "topic_sharpness", BATCH=json.dumps(payload_items, ensure_ascii=False))}],
+            purpose="leadgen_judge", max_tokens=2000, thinking="disabled")
+        jmap = {int(r.get("id") or 0): r for r in (data.get("scores") or []) if isinstance(r, dict)}
+        with Session(engine) as s:
+            for j, t in enumerate(batch):
+                r = jmap.get(j + 1)
+                if not r:
+                    continue
+                try:
+                    t.sharpness = max(0.0, min(10.0, float(r.get("sharpness") or 0)))
+                except (TypeError, ValueError):
+                    continue
+                s.add(t)
+                scored += 1
+            s.commit()
+        ctx.set_progress(10 + int(85 * min(i + 20, len(rows)) / len(rows)),
+                         f"评分 {min(i + 20, len(rows))}/{len(rows)}")
+    ctx.set_progress(100, f"锐度评分 {scored} 条")
+    return {"scored": scored}
+
+
+def daily_picks(line: str, offset: int) -> dict:
+    """今日三锐：line 线 draft 且锐度≥阈值，按锐度降序取 3 条（offset 换一批）。"""
+    from ..settings import settings as _settings
+    floor = _settings.auto_topic_min_sharpness
+    with Session(engine) as s:
+        rows = s.exec(select(Topic).where(  # type: ignore[attr-defined]
+            Topic.line == line,  # type: ignore[attr-defined]
+            Topic.status == "draft",  # type: ignore[attr-defined]
+            Topic.sharpness >= floor,  # type: ignore[attr-defined]
+        ).order_by(Topic.sharpness.desc(), Topic.id.desc())).all()  # type: ignore[attr-defined]
+        total = len(rows)
+        win = rows[offset * 3:offset * 3 + 3]
+        return {"total": total,
+                "items": [{"id": t.id, "title": t.title, "angle": (t.angle or "")[:120],
+                           "sharpness": t.sharpness} for t in win]}
