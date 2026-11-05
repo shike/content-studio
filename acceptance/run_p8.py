@@ -125,21 +125,6 @@ check("调度开关往返（关→开，状态还原）",
       toggled.get("enabled") is False and restored.get("enabled") is True,
       f"toggle后={toggled.get('enabled')}, 还原后={restored.get('enabled')}")
 
-section("P8 · 海报提示词工场（R6.6）")
-code, d = request("POST", "/api/poster/freetext", body={"content": "太短"})
-check("freetext 内容太短 400", code == 400, f"code={code}")
-if llm_ready:
-    long_content = ("面向制造业中小企业老板的 AI 质检培训大纲：第一讲 AI 质检的边界与适用场景；"
-                    "第二讲 试点产线怎么选；第三讲 验收标准怎么写进合同；第四讲 常见坑与避坑清单。")
-    code, d = request("POST", "/api/poster/freetext",
-                      body={"content": long_content, "poster_type": "knowledge", "count": 2}, timeout=180)
-    posters = d.get("posters") if isinstance(d, dict) else None
-    check("freetext 生成海报提示词（posters 带 prompt）",
-          code == 200 and isinstance(posters, list) and len(posters) >= 1
-          and all((p.get("prompt") or "").strip() for p in posters),
-          f"code={code}, posters={len(posters) if isinstance(posters, list) else '?'}")
-else:
-    skip("freetext 生成", "未配置 ZHIPU_API_KEY")
 
 section("P8 · 工作室品牌与内容配置九字段（R9 品牌域）")
 code, d = request("GET", "/api/tenant/brand")
@@ -188,20 +173,6 @@ if gen_job and llm_ready:
     done = _pj(gen_job, timeout=420)
     check("自动透镜生成完成", (done or {}).get("status") == "succeeded",
           f"status={(done or {}).get('status')}")
-
-if article_id and llm_ready:
-    # 海报提示词单配图位契约（与前端同 POST 方法）
-    code, d = request("POST", f"/api/articles/{article_id}/poster-prompt",
-                      body={"slot_index": 0}, timeout=180)
-    check("海报单配图位提示词契约（200 + prompt 非空）",
-          code == 200 and bool((d or {}).get("prompt")), f"code={code}, {str(d)[:80]}")
-    # kg 短正文 400：改稿为短文 → kg 拒绝 → 恢复原稿
-    _, art = request("GET", f"/api/articles/{article_id}")
-    origin_md = (art or {}).get("md") or ""
-    request("PUT", f"/api/articles/{article_id}", body={"md": "太短"})
-    code, d = request("POST", f"/api/articles/{article_id}/knowledge-graphic", body={})
-    check("知识图解短正文 400", code == 400, f"code={code}")
-    request("PUT", f"/api/articles/{article_id}", body={"md": origin_md})
 
 # 非法 style 回落受理（内部回落 deep_dive，不崩溃即契约）
 if article_id and not llm_ready:
@@ -375,21 +346,6 @@ check("调度开关往返（关→开，状态还原）",
       toggled.get("enabled") is False and restored.get("enabled") is True,
       f"toggle后={toggled.get('enabled')}, 还原后={restored.get('enabled')}")
 
-section("P8 · 海报提示词工场（R6.6）")
-code, d = request("POST", "/api/poster/freetext", body={"content": "太短"})
-check("freetext 内容太短 400", code == 400, f"code={code}")
-if llm_ready:
-    long_content = ("面向制造业中小企业老板的 AI 质检培训大纲：第一讲 AI 质检的边界与适用场景；"
-                    "第二讲 试点产线怎么选；第三讲 验收标准怎么写进合同；第四讲 常见坑与避坑清单。")
-    code, d = request("POST", "/api/poster/freetext",
-                      body={"content": long_content, "poster_type": "knowledge", "count": 2}, timeout=180)
-    posters = d.get("posters") if isinstance(d, dict) else None
-    check("freetext 生成海报提示词（posters 带 prompt）",
-          code == 200 and isinstance(posters, list) and len(posters) >= 1
-          and all((p.get("prompt") or "").strip() for p in posters),
-          f"code={code}, posters={len(posters) if isinstance(posters, list) else '?'}")
-else:
-    skip("freetext 生成", "未配置 ZHIPU_API_KEY")
 
 section("P8 · 工作室品牌与内容配置九字段（R9 品牌域）")
 code, d = request("GET", "/api/tenant/brand")
@@ -438,20 +394,6 @@ if gen_job and llm_ready:
     done = _pj(gen_job, timeout=420)
     check("自动透镜生成完成", (done or {}).get("status") == "succeeded",
           f"status={(done or {}).get('status')}")
-
-if article_id and llm_ready:
-    # 海报提示词单配图位契约（与前端同 POST 方法）
-    code, d = request("POST", f"/api/articles/{article_id}/poster-prompt",
-                      body={"slot_index": 0}, timeout=180)
-    check("海报单配图位提示词契约（200 + prompt 非空）",
-          code == 200 and bool((d or {}).get("prompt")), f"code={code}, {str(d)[:80]}")
-    # kg 短正文 400：改稿为短文 → kg 拒绝 → 恢复原稿
-    _, art = request("GET", f"/api/articles/{article_id}")
-    origin_md = (art or {}).get("md") or ""
-    request("PUT", f"/api/articles/{article_id}", body={"md": "太短"})
-    code, d = request("POST", f"/api/articles/{article_id}/knowledge-graphic", body={})
-    check("知识图解短正文 400", code == 400, f"code={code}")
-    request("PUT", f"/api/articles/{article_id}", body={"md": origin_md})
 
 # 非法 style 回落受理（内部回落 deep_dive，不崩溃即契约）
 if article_id and not llm_ready:

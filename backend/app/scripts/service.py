@@ -127,19 +127,13 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                     ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
                     PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
                     ACCOUNT_MODE=account_mode)
-    versions: list[dict] = []
-    for attempt in range(2):  # 不足 3 版时补一轮
-        ctx.set_progress(10 + attempt * 20, f"生成 3 版脚本（第 {attempt + 1} 次）")
-        data = await gateway.complete_json(
-            [{"role": "system", "content": prompt},
-             {"role": "user", "content": json.dumps(topic_info, ensure_ascii=False)}],
-            purpose="script_generate", max_tokens=20000)  # v7 prompt 变长，思考链耗尽 12000 致空正文（2026-10-10 实测）
-        merged = _normalize_versions((data.get("versions") or []))
-        seen = {v["hook"] for v in versions}
-        versions += [v for v in merged if v["hook"] not in seen]
-        if len(versions) >= 3:
-            break
-    versions = versions[:3]
+    # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
+    ctx.set_progress(20, "生成精品脚本（单版全预算）")
+    data = await gateway.complete_json(
+        [{"role": "system", "content": prompt},
+         {"role": "user", "content": json.dumps(topic_info, ensure_ascii=False)}],
+        purpose="script_generate", max_tokens=20000)  # v7 prompt 变长，思考链耗尽 12000 致空正文（2026-10-10 实测）
+    versions = _normalize_versions((data.get("versions") or []))[:1]
     if not versions:
         raise RuntimeError("脚本生成失败：没有任何可用版本")
 

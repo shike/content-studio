@@ -261,3 +261,15 @@ def _run_crawl_probe() -> Awaitable[str]:
 
 register_schedule(Schedule(key="crawl_probe", label="抖音采集探针（2 小时）",
                            interval_hours=2, run=_run_crawl_probe))
+
+
+async def _run_hl_search() -> str:
+    from .runner import runner
+    job = await runner.submit("hl_search_matrix", {"auto": True},
+                              dedup_key=f"1:hlsearch:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（同城组局号搜索矩阵：城市×关键词→取证→LLM分级）"
+
+
+register_schedule(Schedule(key="hl_search_daily", label="同城组局号搜索挖掘（江浙沪）",
+                           daily_hour=2, run=_run_hl_search))

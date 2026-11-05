@@ -553,7 +553,8 @@ def _article_pending_exists(title: str) -> bool:
 
 @register_executor("article_hotspots")
 async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
-    """公众号独立热点报题：站外热点（百度热搜+科技媒体）× 画像 → 3 篇待写长文草稿。
+    """公众号独立热点报题（2026-11-05 改每日一篇直出）：站外热点×画像 → 1 篇待写草稿，
+    建稿后自动链发 article_generate 成文——早晨草稿箱里是一篇完整长文，改完即发。
 
     与抖音选题提炼（trending_topics）完全独立——公众号线不进选题库，报题即草稿。"""
     from ..tenant_brand import brand_of
@@ -576,7 +577,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
         [{"role": "user", "content": render("article_hotspots", PERSONA=persona_text)
           + "\n\n热点清单（JSON）：\n" + json.dumps(items, ensure_ascii=False)}],
         purpose="article_hotspots", max_tokens=4000, thinking="disabled")
-    picks = [x for x in (data.get("topics") or []) if isinstance(x, dict) and (x.get("title") or "").strip()][:3]
+    picks = [x for x in (data.get("topics") or []) if isinstance(x, dict) and (x.get("title") or "").strip()][:1]
     if not picks:
         raise TransientError("热点提炼未产出切角（LLM 空响应），稍后自动重试")
 
@@ -592,8 +593,30 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
             s.add(Article(title=title, note=note, status="pending"))
             created.append(title)
         s.commit()
-    ctx.set_progress(100, f"报题 {len(created)} 篇待写草稿")
-    return {"drafts": created}
+    ctx.set_progress(90, f"报题 {len(created)} 篇，链发成文任务")
+    # 直出链：报题即自动生成长文（每晚一篇，早晨可发）
+    chained = 0
+    if created:
+        from ..jobs.runner import runner
+        from ..db import engine as _engine
+        from sqlmodel import Session as _S
+        with _S(_engine) as s2:
+            rows = s2.exec(select(Article).where(
+                Article.title.in_(created),  # type: ignore[attr-defined]
+                Article.status == "pending")).all()  # type: ignore[attr-defined]
+            ids = [r.id for r in rows]
+        for aid in ids:
+            await runner.submit("article_generate",
+                                {"article_id": aid, "style": "auto", "length": "deep"})
+            with _S(_engine) as s3:
+                art = s3.get(Article, aid)
+                if art is not None:
+                    art.status = "generating"
+                    s3.add(art)
+                    s3.commit()
+            chained += 1
+    ctx.set_progress(100, f"报题 {len(created)} 篇，直出链发 {chained} 篇")
+    return {"drafts": created, "chained": chained}
 
 
 @register_executor("article_style_extract")

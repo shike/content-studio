@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   Magnet,
   Newspaper,
-  Send,
   Settings,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -13,7 +12,6 @@ import Today from './pages/Today'
 import Persona from './pages/Persona'
 import Leadgen from './pages/Leadgen'
 import Articles from './pages/Articles'
-import PublishingHub from './pages/PublishingHub'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
 import { fetchMenuStats, menuBadges } from './counts'
@@ -34,7 +32,8 @@ export type SectionKey =
 /** 旧分区键 → 新分区（内嵌页面 onNavigate 的兼容路由）。 */
 const NAVMAP: Record<string, SectionKey> = {
   dashboard: 'today', topics: 'today', scripts: 'persona',
-  articles: 'article', posters: 'publishing', watch: 'persona', style: 'persona',
+  articles: 'article', posters: 'today', watch: 'persona', style: 'persona',
+  publishing: 'today',
   benchmarks: 'persona', radar: 'persona', intel: 'persona',
 }
 
@@ -49,9 +48,6 @@ const PRODUC: SectionDef[] = [
   { key: 'persona', label: '人设号', icon: Fingerprint },
   { key: 'leadgen', label: '获客号', icon: Magnet },
   { key: 'article', label: '公众号', icon: Newspaper },
-]
-const AUTO: SectionDef[] = [
-  { key: 'publishing', label: '发布台', icon: Send },
 ]
 const SYSTEM: SectionDef[] = [
   { key: 'tasks', label: '任务', icon: Activity },
@@ -176,8 +172,6 @@ export default function App() {
           {renderItem(TODAY)}
           {renderGroupLabel('内容产线')}
           {PRODUC.map(renderItem)}
-          {renderGroupLabel('发布')}
-          {AUTO.map(renderItem)}
         </nav>
 
         <div className="border-t border-[rgba(240,233,213,0.1)] px-3 py-3">
@@ -192,7 +186,6 @@ export default function App() {
           {active === 'persona' && <Persona onNavigate={navTo} />}
           {active === 'leadgen' && <Leadgen onNavigate={navTo} />}
           {active === 'article' && <Articles onNavigate={navTo} />}
-          {active === 'publishing' && <PublishingHub />}
           {active === 'tasks' && <Tasks />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}
             onLogout={() => { setMe(null); setAuthed(false) }} />}

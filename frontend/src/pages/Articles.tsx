@@ -56,23 +56,6 @@ function ImageHints({ md, articleId }: { md: string; articleId: number }) {
   )
   const [gen, setGen] = useState<Record<string, { image_url: string; file: string }>>({})
   const [busyKw, setBusyKw] = useState('')
-  // 即梦海报提示词：按配图位生成完整提示词，复制去即梦/豆包出图
-  const [pp, setPp] = useState<Record<number, { prompt: string; mode: string }>>({})
-  const [ppBusy, setPpBusy] = useState<number | null>(null)
-  const genPosterPrompt = async (idx: number) => {
-    setPpBusy(idx)
-    try {
-      const r = await api<{ prompt: string; mode: string }>(`/articles/${articleId}/poster-prompt`, {
-        method: 'POST',
-        body: JSON.stringify({ slot_index: idx }),
-      })
-      setPp((m) => ({ ...m, [idx]: r }))
-    } catch (e) {
-      setPp((m) => ({ ...m, [idx]: { prompt: String(e), mode: 'error' } }))
-    } finally {
-      setPpBusy(null)
-    }
-  }
   const genImage = async (kw: string, caption: string) => {
     setBusyKw(kw)
     try {
@@ -121,14 +104,6 @@ function ImageHints({ md, articleId }: { md: string; articleId: number }) {
             <span className="font-medium text-slate-600">{i + 1}. {ph.caption || '配图'}</span>
             <code className="rounded bg-slate-100 px-1 text-[10px]">{ph.kw}</code>
             <button
-              onClick={(e) => { e.stopPropagation(); genPosterPrompt(i) }}
-              disabled={ppBusy === i}
-              className="btn-ghost btn-xs text-violet-600"
-              title="生成即梦(Seedream)海报提示词：复制去即梦/豆包出图"
-            >
-              {ppBusy === i ? '提示词…' : '海报提示词'}
-            </button>
-            <button
               onClick={(e) => { e.stopPropagation(); genImage(ph.kw, ph.caption) }}
               disabled={busyKw !== ''}
               className="btn-accent btn-xs"
@@ -136,20 +111,6 @@ function ImageHints({ md, articleId }: { md: string; articleId: number }) {
               {busyKw === ph.kw ? '生成中…（约 20 秒）' : 'AI 生图'}
             </button>
           </div>
-          {pp[i] && (
-            <div className="mt-1.5 rounded-lg border border-violet-200 bg-violet-50/60 p-2">
-              <div className="flex items-center gap-2">
-                <span className="badge shrink-0 bg-violet-100 text-violet-700">即梦提示词{pp[i].mode === 'llm' ? '' : '（模板）'}</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(pp[i].prompt) }}
-                  className="btn-ghost btn-xs ml-auto text-violet-600"
-                >
-                  复制 → 去即梦出图
-                </button>
-              </div>
-              <pre className="mt-1.5 max-h-44 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-slate-600">{pp[i].prompt}</pre>
-            </div>
-          )}
           {gen[ph.kw] && (
             <div className="mt-1.5 flex items-center gap-2">
               <img src={gen[ph.kw].image_url} alt={ph.caption} className="h-20 rounded-lg border border-slate-200" />
@@ -183,9 +144,7 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
   const [styleNote, setStyleNote] = useState('')
   const [styleBusy, setStyleBusy] = useState('')
   const [writeStyle, setWriteStyle] = useState<Record<number, string>>({})
-  // 整篇配图提示词包（一次 LLM 抽取全部配图位的即梦提示词）
-  const [pack, setPack] = useState<{ items: { slot: number; caption: string; kw: string; title: string; layout: string; prompt: string }[]; mode: string } | null>(null)
-  const [packBusy, setPackBusy] = useState(false)
+
   const [booted, setBooted] = useState(false)
   const [filter, setFilter] = useState('')
   const [total, setTotal] = useState(0)
@@ -200,9 +159,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
   const [error, setError] = useState('')
   // 渲染是毫秒级同步操作，进度意义不大；关键是结果回显落在点击处（展开行内）
   const [renderState, setRenderState] = useState<{ id: number; kind: 'busy' | 'ok' | 'err'; msg?: string } | null>(null)
-  // 一页纸知识图解：LLM 抽取 → 排版 PNG，文末自动追加；回显同 renderState 落在点击处
-  const [kgState, setKgState] = useState<{ id: number; kind: 'busy' | 'ok' | 'err'; msg?: string; file?: string } | null>(null)
-
   const LIMIT = 20
   const reload = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
@@ -331,31 +287,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
       setRenderState({ id: article.id, kind: 'err', msg: apiErrText(e) })
     }
   }
-
-  const loadPosterPack = (article: Article) =>
-    guard(async () => {
-      setPackBusy(true)
-      try {
-        // method 必须显式 POST：api() 默认 GET，GET 打到 POST-only 路由会落 404 兜底（"unknown api route"）
-        const r = await api<{ items: { slot: number; caption: string; kw: string; title: string; layout: string; prompt: string }[]; mode: string }>(
-          `/articles/${article.id}/poster-pack`, { method: 'POST' })
-        setPack({ items: r.items, mode: r.mode })
-      } finally {
-        setPackBusy(false)
-      }
-    })
-
-  const genKg = (article: Article) =>
-    guard(async () => {
-      setKgState({ id: article.id, kind: 'busy' })
-      try {
-        const r = await api<{ file: string; title: string }>(`/articles/${article.id}/knowledge-graphic`, { method: 'POST' })
-        setKgState({ id: article.id, kind: 'ok', file: r.file, msg: r.title })
-        await reload()
-      } catch (e) {
-        setKgState({ id: article.id, kind: 'err', msg: apiErrText(e) })
-      }
-    })
 
   const copyHtml = async (article: Article) => {
     setCopyState({ id: article.id, kind: 'busy' })
@@ -607,36 +538,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
                                 </div>
                               )}
                               <ImageHints md={art.md} articleId={art.id} />
-                              {pack && pack.items.length > 0 && (
-                                <div className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-semibold text-violet-700">即梦海报提示词包 · {pack.items.length} 条</span>
-                                    <span className="text-[10px] text-slate-400">{pack.mode === 'llm' ? 'LLM 精修' : pack.mode}</span>
-                                    <button
-                                      onClick={() => navigator.clipboard.writeText(pack.items.map((it, i) => `【${i + 1}】${it.title}\n${it.prompt}`).join('\n\n'))}
-                                      className="btn-ghost btn-xs ml-auto text-violet-600"
-                                    >
-                                      一键复制全部
-                                    </button>
-                                  </div>
-                                  {pack.items.map((it, i) => (
-                                    <div key={i} className="rounded-lg border border-violet-100 bg-white p-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <span className="badge shrink-0 bg-violet-100 text-violet-700">{i + 1}</span>
-                                        <span className="truncate text-xs font-medium text-slate-700">{it.title || it.caption || `配图位 ${it.slot + 1}`}</span>
-                                        <span className="ml-auto shrink-0 text-[10px] text-slate-400">{it.layout}</span>
-                                        <button
-                                          onClick={() => navigator.clipboard.writeText(it.prompt)}
-                                          className="btn-ghost btn-xs text-violet-600"
-                                        >
-                                          复制
-                                        </button>
-                                      </div>
-                                      <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-slate-600">{it.prompt}</pre>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
                             </div>
                           )}
                           <div className="flex items-center gap-2">
@@ -674,31 +575,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
                             )}
                             {copyState?.id === art.id && copyState.kind === 'err' && (
                               <span className="text-xs text-red-500">复制失败：{copyState.msg}</span>
-                            )}
-                            <button
-                              onClick={(e) => { e.stopPropagation(); loadPosterPack(art) }}
-                              disabled={packBusy}
-                              className="btn-ghost btn-xs text-violet-600"
-                              title="一次生成全部配图位的即梦海报提示词，复制去即梦/豆包批量出图"
-                            >
-                              {packBusy ? '生成中…' : '全套配图提示词'}
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); genKg(art) }}
-                              disabled={kgState?.id === art.id && kgState.kind === 'busy'}
-                              className="btn-ghost btn-xs text-sky-600"
-                              title="LLM 提炼全文 → 自动排版一页纸知识图解 PNG，追加到文末"
-                            >
-                              {kgState?.id === art.id && kgState.kind === 'busy' ? '图解生成中…（约 1 分钟）' : '生成知识图解'}
-                            </button>
-                            {kgState?.id === art.id && kgState.kind === 'ok' && (
-                              <span className="flex items-center gap-1.5 text-xs text-emerald-600">
-                                <img src={`/api/articles/images/${kgState.file}`} alt="" className="h-8 rounded border border-slate-200" />
-                                已生成「{kgState.msg}」· 文末已追加，重新渲染即可内嵌
-                              </span>
-                            )}
-                            {kgState?.id === art.id && kgState.kind === 'err' && (
-                              <span className="text-xs text-red-500">图解失败：{kgState.msg}</span>
                             )}
                           </div>
                           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">

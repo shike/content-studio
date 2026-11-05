@@ -9,8 +9,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (articles, auth_api as auth_routes, benchmarks, stats, crawl, health, jobs, llm, metrics, poster, tenant_api,
-                  public_media, publishing, radar, schedules, scripts, settings as settings_api, style,
+from .api import (articles, auth_api as auth_routes, benchmarks, stats, crawl, health, jobs, llm, metrics, tenant_api,
+                  public_media, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
 from sqlmodel import Session, select
@@ -20,7 +20,6 @@ from .version import APP_VERSION
 # 导入服务模块以注册任务执行器
 from .articles import service as _article_service  # noqa: F401
 from .benchmarks import service as _benchmark_service  # noqa: F401
-from .publishing import service as _publishing_service  # noqa: F401
 from .radar import service as _radar_service  # noqa: F401
 from .scripts import service as _script_service  # noqa: F401
 from .topics import service as _topic_service  # noqa: F401
@@ -112,7 +111,6 @@ app.include_router(health.router)
 app.include_router(stats.router, dependencies=[Depends(require_ready_user)])
 app.include_router(crawl.router, dependencies=[Depends(require_ready_user)])
 app.include_router(tenant_api.router, dependencies=[Depends(require_ready_user)])
-app.include_router(poster.router, dependencies=[Depends(require_ready_user)])
 # 公开路由（无登录门禁）：签名配图——公众号编辑器跨域抓图带不了 Cookie，见 api/public_media.py
 app.include_router(public_media.router)
 app.include_router(jobs.router, dependencies=[Depends(require_ready_user)])
@@ -123,7 +121,6 @@ app.include_router(scripts.router, dependencies=[Depends(require_ready_user)])
 app.include_router(articles.router, dependencies=[Depends(require_ready_user)])
 app.include_router(benchmarks.router, dependencies=[Depends(require_ready_user)])
 app.include_router(radar.router, dependencies=[Depends(require_ready_user)])
-app.include_router(publishing.router, dependencies=[Depends(require_ready_user)])
 app.include_router(watch.router, dependencies=[Depends(require_ready_user)])
 app.include_router(style.router, dependencies=[Depends(require_ready_user)])
 app.include_router(metrics.router, dependencies=[Depends(require_ready_user)])

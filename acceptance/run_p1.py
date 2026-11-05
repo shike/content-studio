@@ -81,14 +81,14 @@ else:
                  f"status={status}, {str(r)[:120]}"):
         sys.exit(finish("P1 内容核心"))
     script_id = r["script_id"]
-    # 生成=三版生成+自动打磨一轮（两次 LLM 调用，思考型模型实测可达 ~10 分钟）
+    # 生成=一版精品直出+自动打磨一轮（两次 LLM 调用，思考型模型实测可达 ~10 分钟）
     job = poll_job(r.get("job_id"), timeout=900)
-    check("3 版脚本生成完成", job is not None and job.get("status") == "succeeded")
+    check("一版精品脚本生成完成", job is not None and job.get("status") == "succeeded")
     status, s = request("GET", f"/api/scripts/{script_id}")
     versions = s.get("versions") or []
-    ok = (status == 200 and len(versions) == 3
+    ok = (status == 200 and len(versions) == 1
           and all(v.get("hook") and v.get("body") for v in versions))
-    check("脚本含 3 个版本且各带钩子+正文", ok, f"版本数={len(versions)}")
+    check("脚本为一版精品且带钩子+正文", ok, f"版本数={len(versions)}")
     # 新契约：生成后自动打磨一轮（polish 会把批判意见以「｜改进：」并入 notes）
     check("生成后自动打磨一轮（notes 含改进标记）",
           any("｜改进：" in (v.get("notes") or "") for v in versions),
@@ -102,10 +102,10 @@ else:
     check("批判打磨任务完成", job is not None and job.get("status") == "succeeded",
           f"status={status}")
     # 定稿是同步 LLM 调用（思考型模型实测 50~90s），超时给足
-    # 三版逐版 LLM 质量评审（X11：钩子/口语化/证明/自然收尾/合规/人设回扣）
+    # 一版精品 LLM 质量评审（X11：钩子/口语化/证明/自然收尾/合规/人设回扣）
     for i, v in enumerate(versions):
         ok_q, note = quality.judge(v.get("body") or "")
-        check(f"三版质量评审·第{i + 1}版（单项≥6 总评≥7）", ok_q, note)
+        check(f"精品质量评审·第{i + 1}版（单项≥6 总评≥7）", ok_q, note)
     status, fr = request("POST", f"/api/scripts/{script_id}/finalize", timeout=240)
     check("定稿任务受理 202", status == 202 and fr.get("job_id"), f"status={status}")
     job = poll_job(fr.get("job_id"), timeout=360)
@@ -163,24 +163,6 @@ else:
     check("渲染产物无 [CHART] 规格块残留（JSON 不漏给读者）",
           "[CHART]" not in html and "[/CHART]" not in html,
           f"html 含 CHART 标记={html.count('[CHART]')}")
-    # 知识图解端点契约：手动重生成（成文时已自动追加过一次，这里验证端点本身）
-    status, kg = request("POST", f"/api/articles/{article_id}/knowledge-graphic", body={}, timeout=180)
-    kg_ok = (status == 200 and isinstance(kg, dict)
-             and str(kg.get("file") or "").startswith("gen_kg_") and bool(kg.get("title")))
-    check("知识图解端点契约（手动重生成 200 + gen_kg_ 文件 + 标题）", kg_ok,
-          f"status={status}, {str(kg)[:100]}")
-    check("知识图解随文追加（md 含 gen_kg_ 图解标记）",
-          "gen_kg_" in a_md, f"md 含图解标记数={a_md.count('gen_kg_')}")
-    # 海报提示词包契约：POST-only 端点，前端曾漏 method 打成 GET 落 404 兜底（92423fe 修）——
-    # 此断言用与前端相同的 POST 方法防回归
-    status, pack = request("POST", f"/api/articles/{article_id}/poster-pack", body={}, timeout=180)
-    pack_ok = (status == 200 and isinstance(pack, dict)
-               and pack.get("mode") in ("llm", "llm+template", "template")
-               and isinstance(pack.get("items"), list) and len(pack["items"]) >= 1
-               and all(str(it.get("prompt") or "").strip() for it in pack["items"]))
-    check("海报提示词包契约（POST 200 + items 带 prompt + mode 标记）", pack_ok,
-          f"status={status}, mode={(pack or {}).get('mode') if isinstance(pack, dict) else pack}, "
-          f"items={len((pack or {}).get('items') or []) if isinstance(pack, dict) else '?'}")
     status, payload = request("GET", f"/api/articles/{article_id}/wechat-copy")
     payload_html = (payload or {}).get("html") if isinstance(payload, dict) else ""
     check("粘贴载荷把配图换成签名公开地址（微信跨域抓图）",

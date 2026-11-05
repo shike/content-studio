@@ -234,29 +234,6 @@ def article_image(filename: str, user: User = Depends(require_user)):
     raise HTTPException(status_code=404, detail="image not found")
 
 
-@router.post("/{article_id}/knowledge-graphic")
-async def knowledge_graphic(article_id: int, user: User = Depends(require_user)) -> dict:
-    """手动（重新）生成文章的一页纸知识图解：LLM 抽取 → 排版 → PNG，追加进文末。"""
-    from ..articles.kg import generate_for_article
-
-    with Session(engine) as s:
-        art = s.get(Article, article_id)
-        if art is None:
-            raise HTTPException(status_code=404, detail="article not found")
-        md, tenant_id = art.md, art.tenant_id
-        title = art.title
-    if len((md or "").strip()) < 200:
-        raise HTTPException(status_code=400, detail="文章内容太短，先完成正文再生成知识图解")
-    r = await generate_for_article(article_id, tenant_id, md)
-    with Session(engine) as s:
-        art = s.get(Article, article_id)
-        if art is not None:
-            art.md = (art.md or "").rstrip() + f"\n\n![知识图解]({r['file']})\n"
-            s.add(art)
-            s.commit()
-    return {"file": r["file"], "title": r["spec"]["title"]}
-
-
 @router.get("/{article_id}")
 def get_article(article_id: int) -> dict:
     with Session(engine) as s:

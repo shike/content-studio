@@ -306,7 +306,7 @@ article:    draft ──► edited ──► rendered ──► published（由 
   - 自动重试放行（`_reenqueue`）与人工重试同样先做实体复活，failed 状态不跨重试周期。
   - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate）已全部迁移，执行器体内不再自带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
-- **执行器注册表**：`idea_research / benchmark_analyze / script_generate(含自动打磨一轮) / script_polish / script_finalize(定稿+标题候选) / article_generate / watch_scan(payload.account_id 单号扫描，全量仅 competitor) / watch_resolve(自动提取口令全文中的链接) / watch_discover(关键词发现对标账号，light 并发道) / self_scan / self_analyze / self_profile_update / topic_radar(话题雷达：话题下新增视频速度测热度，飙升发 macOS 通知))`。
+- **执行器注册表**：`idea_research / benchmark_analyze / script_generate(一版精品直出，含自动打磨一轮) / script_polish / script_finalize(定稿+标题候选) / article_generate / watch_scan(payload.account_id 单号扫描，全量仅 competitor) / watch_resolve(自动提取口令全文中的链接) / watch_discover(关键词发现对标账号，light 并发道) / self_scan / self_analyze / self_profile_update / topic_radar(话题雷达：话题下新增视频速度测热度，飙升发 macOS 通知))`。
 - **话题雷达**：`radar_topics` 表（ch_id 唯一/seen_ids 防重/recent 最近新视频）。数据源=m.douyin.com challenge/aweme 接口（免登录，无互动统计字段）→ 热度代理=话题下新增视频速度，单次巡检新增 ≥5 条判飙升并发 macOS 通知。`GET/POST/DELETE /api/radar`、`POST /{id}/check`（单话题即时巡检）、`POST /{id}/toggle`（启停）、
 `POST /check-all`（走 topic_radar 任务）、`POST /extract-hashtags` `{url}`（贴视频链接提取话题）、
 `POST /mine`（从拆解库挖话题候选）；空表自动种入 3 个已知泛 AI 话题；每日随定时扫描巡检一次（X10 调度）。
