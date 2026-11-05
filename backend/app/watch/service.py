@@ -27,7 +27,7 @@ from ..prompts import render
 from ..settings import settings
 from ..jobs.errors import TransientError
 from ..jobs.runner import register_concurrent, register_executor, runner
-from ..models import BenchmarkVideo, HarvestProfile, WatchAccount, WatchCandidate
+from ..models import BenchmarkVideo, HarvestProfile, Topic, WatchAccount, WatchCandidate
 
 _MAX_NEW_PER_ACCOUNT = 10  # 每账号每次扫描最多排队拆解的新视频数（控 LLM 成本）
 _LIST_LIMIT = 20          # 每账号最多看最近 N 条
