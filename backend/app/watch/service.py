@@ -1724,32 +1724,16 @@ def _hl_funnel_seen_save(seen: set[str]) -> None:
         s.commit()
 
 
-@register_executor("hl_funnel_topics")
-async def hl_funnel_topics(ctx, payload: dict) -> dict:
-    """组局号漏斗选题引擎（每晚调度）：名单号最新作品 → 活动动作样本 →
-    LLM 转成你的活动漏斗五形态切角 → 获客库待审（line=leadgen，source=funnel）。"""
+def _hl_funnel_pull_sync(ctx, batch: list[tuple[str, str]], interesting: tuple,
+                         seen: set[str]) -> tuple[list[dict], set[str]]:
+    """同步采集体（executor 线程池调用）：逐号拉最新作品，返回（样本, 新 seen 哈希）。"""
     import hashlib as _hl
-    from ..tenant_brand import brand_of
-
-    ctx.set_progress(5, "收集跟踪名单")
-    with Session(engine) as s:
-        rows = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
-            WatchCandidate.keyword == "搜索矩阵",  # type: ignore[attr-defined]
-            WatchCandidate.status.in_(["open", "added"]))).all()  # type: ignore[attr-defined]
-        tracked = list({(c.sec_uid, c.name) for c in rows if c.sec_uid})
-    if not tracked:
-        raise TransientError("跟踪名单为空（搜索矩阵候选未入库），稍后自动重试")
-    day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
-    start = (day_idx * _HL_FUNNEL_TRACK) % len(tracked)
-    batch = tracked[start:start + _HL_FUNNEL_TRACK]
-
-    seen = _hl_funnel_seen()
-    ctx.set_progress(15, f"拉取 {len(batch)} 个名单号最新作品…")
+    from playwright.sync_api import sync_playwright
 
     samples: list[dict] = []
     seen_new: set[str] = set()
 
-    def _pull_one(browser_ctx, sec: str, nick: str) -> list[str]:
+    def _pull_one(browser_ctx, sec: str) -> list[str]:
         got: list[str] = []
         page = browser_ctx.new_page()
 
@@ -1774,15 +1758,13 @@ async def hl_funnel_topics(ctx, payload: dict) -> dict:
         page.close()
         return got
 
-    interesting = tuple(_HL_ACT) + tuple(_HL_TOPIC)
-    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = launch(p)
         mctx = browser.new_context(user_agent=_HL_MOBILE_UA, locale="zh-CN",
                                    viewport={"width": 390, "height": 844}, is_mobile=True)
         for i, (sec, nick) in enumerate(batch):
             try:
-                descs = await asyncio.to_thread(_pull_one, mctx, sec, nick)
+                descs = _pull_one(mctx, sec)
             except Exception:
                 descs = []
             for dsc in descs:
@@ -1795,9 +1777,34 @@ async def hl_funnel_topics(ctx, payload: dict) -> dict:
             if i % 10 == 0:
                 ctx.set_progress(15 + int(45 * (i + 1) / len(batch)),
                                  f"拉取 {i + 1}/{len(batch)}（新动作样本 {len(samples)}）")
-            await asyncio.sleep(random.uniform(1.8, 2.8))
+            time.sleep(random.uniform(1.8, 2.8))
         browser.close()
+    return samples, seen_new
 
+
+@register_executor("hl_funnel_topics")
+async def hl_funnel_topics(ctx, payload: dict) -> dict:
+    """组局号漏斗选题引擎（每晚调度）：名单号最新作品 → 活动动作样本 →
+    LLM 转成你的活动漏斗五形态切角 → 获客库待审（line=leadgen，source=funnel）。"""
+    import hashlib as _hl
+    from ..tenant_brand import brand_of
+
+    ctx.set_progress(5, "收集跟踪名单")
+    with Session(engine) as s:
+        rows = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
+            WatchCandidate.keyword == "搜索矩阵",  # type: ignore[attr-defined]
+            WatchCandidate.status.in_(["open", "added"]))).all()  # type: ignore[attr-defined]
+        tracked = list({(c.sec_uid, c.name) for c in rows if c.sec_uid})
+    if not tracked:
+        raise TransientError("跟踪名单为空（搜索矩阵候选未入库），稍后自动重试")
+    day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
+    start = (day_idx * _HL_FUNNEL_TRACK) % len(tracked)
+    batch = tracked[start:start + _HL_FUNNEL_TRACK]
+
+    seen = _hl_funnel_seen()
+    ctx.set_progress(15, f"拉取 {len(batch)} 个名单号最新作品…")
+    samples, seen_new = await asyncio.to_thread(
+        _hl_funnel_pull_sync, ctx, batch, tuple(_HL_ACT) + tuple(_HL_TOPIC), seen)
     _hl_funnel_seen_save(seen | seen_new)
     if not samples:
         ctx.set_progress(100, f"跟踪 {len(batch)} 号，无新活动动作（名单号本周未更新）")
