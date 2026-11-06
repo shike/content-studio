@@ -62,6 +62,7 @@ export interface Topic {
   audience: 'boss' | 'fde' | 'both'
   source_type: string
   score: number | null
+  sharpness: number | null
   status: string
   evidence: Record<string, any>
   score_breakdown?: Record<string, any>

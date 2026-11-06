@@ -576,12 +576,15 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(25, "按读者受众预筛热点")
     screen = await gateway.complete_json(
         [{"role": "user", "content":
-          "读者画像：不懂技术的实体老板/普通人，他们关心生意成本、用人、赚钱、避坑，"
-          "正在考虑要不要学 AI 落地相关技能。\n下面是候选热点清单（JSON）。"
-          "判断每条是否值得写给他们看：需要写代码/调 API/懂模型圈才能用得上的话题一律不相关；"
-          "涉及生意成本、用人决策、门店经营、政策对生意的影响、普通人机会的才算相关。"
+          "本号的生意：卖一门 1999 元的线下课，教不懂技术的普通人做 AI 落地（FDE）。"
+          "读者=这类人：实体老板、想转行的普通人，关心生意成本、用人、赚钱、职业机会。\n"
+          "候选热点必须过**双锚**，缺一即剔除：\n"
+          "① 受众锚：他们（不懂技术）看得懂、用得上；需要写代码/调 API/懂模型圈的话题剔除\n"
+          "② 主题锚：话题必须长在 AI 上——AI 对生意的影响、AI 落地的坑、AI 带来的职业机会、"
+          "学 AI 落地的价值。跟 AI 无关的话题（哪怕受众完全对，如汽车/餐饮/房产本身）一律剔除\n"
+          "（真实教训：《甲醇混动车成本账》受众对但主题是汽车，与目标零关系）\n"
           '\n清单：\n' + json.dumps(items, ensure_ascii=False) +
-          '\n输出 JSON：{"relevant": [命中的序号数组]}。一条都没有就给空数组。'}],
+          '\n输出 JSON：{"relevant": [双锚都命中的序号数组]}。一条都没有就给空数组。'}],
         purpose="discover_keywords", max_tokens=1024, thinking="disabled")
     keep = {int(x) for x in (screen.get("relevant") or []) if str(x).strip().isdigit()}
     items = [x for i, x in enumerate(items) if (i + 1) in keep] if keep else []
