@@ -94,15 +94,13 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
   const [error, setError] = useState('')
 
   const LIMIT = 20
-  const [sharpOnly, setSharpOnly] = useState(true) // 默认只看锐度≥7（今日三锐口径，2026-11-05）
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [drafts, setDrafts] = useState<Topic[]>([])
 
   const loadTable = useCallback(async () => {
-    const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset), order: sharpOnly ? 'sharp' : order })
-    if (sharpOnly) params.set('sharp_min', '7')
+    const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset), order })
     if (status) params.set('status', status)
     if (source) params.set('source', source)
     if (audience) params.set('audience', audience)
@@ -467,16 +465,6 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
 
       {/* 状态 chips + 来源 + 批量 */}
       <div className="mt-4 flex flex-wrap items-center gap-1.5">
-        <button
-          onClick={() => { setSharpOnly(!sharpOnly); setOffset(0) }}
-          className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${
-            sharpOnly
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-          }`}
-        >
-          ✦ 三锐视图（锐度≥7）
-        </button>
         {['', 'draft', 'approved', 'rejected', 'produced'].map((s) => (
           <button
             key={s || 'all'}

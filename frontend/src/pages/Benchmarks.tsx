@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, FileVideo, Inbox, Lightbulb, Scissors, Sparkles, Trash2 } from 'lucide-react'
+import { FileVideo, Inbox, Lightbulb, Scissors, Sparkles, Trash2 } from 'lucide-react'
 import { api, waitJob } from '../api'
 import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import type { SectionKey } from '../App'
@@ -37,7 +37,6 @@ const analyzed = (b: Benchmark) =>
 
 export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
   const [items, setItems] = useState<Benchmark[]>([])
-  const [url, setUrl] = useState('')
   const [filter, setFilter] = useState('')
   const [author, setAuthor] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -154,19 +153,6 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
       await reload()
     })
 
-  const analyzeOnline = () =>
-    guard(async () => {
-      if (!url.trim()) return
-      const r = await api<{ job_id: number; crawl_warning?: string }>('/analyze/video', {
-        method: 'POST',
-        body: JSON.stringify({ url: url.trim() }),
-      })
-      if (r.crawl_warning) setBusy(r.crawl_warning)
-      setUrl('')
-      await waitJob(r.job_id, (j) => setBusy(`拆解中：${j.progress}% ${j.message}`))
-      await reload()
-    })
-
   const analyzeLocal = (file: File) =>
     guard(async () => {
       const form = new FormData()
@@ -200,28 +186,18 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
       <PageHeader
         icon={Scissors}
         title="拆解库"
-        desc="贴链接 / 传本地视频，自动下载转写拆解，沉淀选题候选"
+        desc="监控账号自动拆解 · 本地视频上传拆解，沉淀选题候选"
       />
 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
 
-      {/* hero：拆解入口 */}
+      {/* hero：拆解入口（贴链在线拆解已砍 2026-11-07 ⑫：在线内容走监控账号自动拆解；本地视频=视频号唯一拆解通道） */}
       <div className="card border-sky-200/70 bg-gradient-to-br from-sky-50/80 to-white p-4">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <div className="relative flex-1">
-            <Download size={15} className="absolute top-1/2 left-3 -translate-y-1/2 text-sky-500" />
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && analyzeOnline()}
-              placeholder="粘贴抖音视频分享链接，回车自动拆解"
-              className="input border-sky-200 pl-9"
-            />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex-1 text-sm text-slate-500">
+            在线内容由监控账号自动拆解入库；视频号无公开接口，走本地上传
           </div>
-          <button onClick={analyzeOnline} disabled={!url.trim()} className="btn-accent justify-center disabled:opacity-40 sm:w-32">
-            在线拆解
-          </button>
           <input
             ref={fileRef}
             type="file"
@@ -233,7 +209,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
               e.target.value = ''
             }}
           />
-          <button onClick={() => fileRef.current?.click()} className="btn-ghost justify-center sm:w-36">
+          <button onClick={() => fileRef.current?.click()} className="btn-accent justify-center sm:w-40">
             <FileVideo size={15} /> 本地视频拆解
           </button>
         </div>
@@ -285,7 +261,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
             <EmptyState
               icon={Inbox}
               title="还没有拆解样本"
-              desc="贴一条对标视频链接，或上传本地视频，系统自动转写并拆解。对标账号的批量扫描在「同行监测」页。"
+              desc="监控账号的新视频会自动转写拆解；也可上传本地视频（视频号唯一拆解通道）。对标账号管理在「监控清单」。"
             />
           </div>
         ) : (

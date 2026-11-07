@@ -15,7 +15,6 @@ interface AppSettings {
   asr_model: string
   watch_scan_enabled: boolean
   watch_scan_hour: number
-  watch_discover_keywords: string
   auto_dissect_enabled: boolean
   auto_dissect_min_score: number
   auto_dissect_daily_cap: number
@@ -57,7 +56,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   const [search, setSearch] = useState('')
   const [scanEnabled, setScanEnabled] = useState(true)
   const [scanHour, setScanHour] = useState(1)
-  const [discoverKw, setDiscoverKw] = useState('')
   const [autoDissect, setAutoDissect] = useState(true)
   const [autoMinScore, setAutoMinScore] = useState(8)
   const [autoCap, setAutoCap] = useState(4)
@@ -78,7 +76,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     setSearch(c.search_provider)
     setScanEnabled(c.watch_scan_enabled)
     setScanHour(c.watch_scan_hour)
-    setDiscoverKw(c.watch_discover_keywords ?? '')
     setAutoDissect(c.auto_dissect_enabled)
     setAutoMinScore(c.auto_dissect_min_score)
     setAutoCap(c.auto_dissect_daily_cap)
@@ -113,7 +110,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     guard(async () => {
       if (!conf) return
       setBusy('保存中（运行时生效）…')
-      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, watch_discover_keywords: discoverKw, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap }
+      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
       setPingReply('')
@@ -324,15 +321,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                   />
                   条
                 </div>
-              </div>
-              <div className="space-y-1">
-                <label className="block text-sm text-slate-700">每日发现的关键词池</label>
-                <input
-                  value={discoverKw}
-                  onChange={(e) => setDiscoverKw(e.target.value)}
-                  placeholder="逗号分隔，如：行业动态, 商业观察, 技术应用（按你的行业填）（留空用平台默认）"
-                  className="input w-full"
-                />
               </div>
             </div>
           </div>

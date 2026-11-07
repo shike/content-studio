@@ -3,8 +3,6 @@ import type { Article, Script, Topic } from './api'
 
 /** 流水线待办统计（工作台卡片数据源）。 */
 export interface TodoStats {
-  sharpPersona: number // 三锐池（draft 且锐度≥7）· 人设线
-  sharpLeadgen: number // 三锐池 · 获客线
   draftTopics: number // 待审选题（两线合计）
   draftTopicsPersona: number // 待审选题·人设库
   draftTopicsLeadgen: number // 待审选题·获客库

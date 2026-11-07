@@ -514,55 +514,6 @@ async def watch_resolve(ctx, payload: dict) -> dict:
 _DISCOVER_SAMPLE_CAP = 10  # 最多反查的视频页数（控任务时长 ~2min）
 _DISCOVER_QUALITY_FANS = 10000  # 「清单外高赞同行」质量线：候选粉丝 ≥1 万才进周报（2026-10-03）
 # 每日发现的关键词轮换：一天一个词，省搜索配额也保证覆盖面按天展开。
-# 优先级：设置页「发现关键词」> 对标圈近 30 天标题动态提炼（LLM 小调用）> 下面的静态扩容池。
-# （2026-10-10 扩容+动态化：原 4 词池轮换两周就把同行发现拧成同质循环——发现池窄=拆解素材窄=选题趋同）
-DISCOVER_DAILY_KEYWORDS = [
-    "行业 AI 应用", "企业 数字化转型", "AI 提效", "人工智能 落地",
-    "AI 质检", "数字员工", "智能工厂", "AI 获客",
-    "大模型 企业应用", "AI 培训", "AI 工具 推荐", "传统企业 AI",
-]
-
-
-async def pick_discover_keyword(day_idx: int | None = None) -> str:
-    """今天的发现关键词：设置页配置 > 对标圈动态提炼 > 静态池轮换。"""
-    if day_idx is None:
-        day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
-    configured = [k.strip() for k in
-                  (getattr(settings, "watch_discover_keywords", "") or "")
-                  .replace("，", ",").replace("、", ",").split(",") if k.strip()]
-    if configured:
-        return configured[day_idx % len(configured)]
-
-    titles: list[str] = []
-    try:
-        from ..models import BenchmarkVideo
-
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None)  # 对标圈近 30 天标题
-        with Session(engine) as s:
-            rows = s.exec(
-                select(BenchmarkVideo.title).where(  # type: ignore[attr-defined]
-                    BenchmarkVideo.created_at >= cutoff,  # type: ignore[attr-defined]
-                    BenchmarkVideo.title != "",
-                )).all()
-        titles = [str(t) for t in rows if t][:40]
-    except Exception:  # noqa: BLE001 动态提炼失败回落静态池
-        titles = []
-    if titles:
-        try:
-            from ..llm import gateway
-            from ..prompts import render
-
-            data = await gateway.complete_json(
-                [{"role": "user", "content": render(
-                    "discover_keywords",
-                    TITLES="\n".join(f"- {t[:50]}" for t in titles))}],
-                purpose="discover_keywords", max_tokens=1024, thinking="disabled")
-            kws = [str(k).strip() for k in (data.get("keywords") or []) if str(k).strip()]
-            if kws:
-                return kws[day_idx % len(kws)]
-        except Exception:  # noqa: BLE001 静态池兜底
-            pass
-    return DISCOVER_DAILY_KEYWORDS[day_idx % len(DISCOVER_DAILY_KEYWORDS)]
 _DISCOVER_TOP_N = 8        # 最终保留的候选账号数（按粉丝数）
 
 
@@ -711,17 +662,6 @@ def _probe_leadgen_signal(video_id: str) -> dict:
     density = round(leadgen / len(comments), 2)
     return {"comments": len(comments), "leadgen": leadgen, "density": density,
             "matched": matched[:8]}
-
-
-@register_executor("watch_discover_daily")
-
-async def watch_discover_daily(ctx, payload: dict) -> dict:
-    """每日发现清单外同行：关键词按天轮换（省 DDG 配额），产出进候选表待人工定夺。"""
-    day_idx = int(datetime.now(timezone.utc).timestamp() // 86400)
-    keyword = DISCOVER_DAILY_KEYWORDS[day_idx % len(DISCOVER_DAILY_KEYWORDS)]
-    ctx.set_progress(1, f"今日关键词：{keyword}")
-    r = await watch_discover(ctx, {"keyword": keyword})
-    return {**r, "keyword": keyword}
 
 
 @register_executor("watch_discover")
@@ -890,115 +830,6 @@ def _count_recent_same(entries: list[dict], days: int = 30) -> int:
         if any(w.lower() in title for w in _PATROL_BUSINESS_WORDS):
             n += 1
     return n
-
-
-@register_executor("leadgen_hunt")
-async def leadgen_hunt(ctx, payload: dict) -> dict:
-    """获客号挖掘 v2：评论区求带驱动（用户定版：把评论区当搜索源）。
-
-    ① 种子池=监测话题最新视频 + 拆解库近 14 天已批准视频（AI/FDE/OPC 相关场）
-    ② 逐视频拦评论区：求带评论 ≥3 条 → 视频作者即获客号候选（求带数=转化规模）
-    ③ 持续性验证：作者近 30 天同类视频 ≥3 条（锚点分享页路线，失败标未验证不强拦）
-    ④ 入候选表：求带评论数为主排序，粉丝数仅展示。"""
-    import random
-
-    notes: list[str] = []
-    with Session(engine) as s:
-        seeds: dict[str, str] = {}
-        from ..models import RadarTopic
-        for rt in s.exec(select(RadarTopic).where(RadarTopic.enabled == True)).all():  # noqa: E712
-            for h in (rt.hits or [])[:10]:
-                vid = str((h or {}).get("id") or "")
-                if vid:
-                    seeds.setdefault(vid, f"话题#{rt.name}")
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-        for b in s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
-                BenchmarkVideo.scan_status == "approved")).all():  # type: ignore[attr-defined]
-            if b.created_at and b.created_at >= cutoff.replace(tzinfo=None) and b.url:
-                m = re.search(r"/video/(\d+)", b.url)
-                if m:
-                    seeds.setdefault(m.group(1), "拆解库")
-    if not seeds:
-        raise TransientError("种子池为空（监测话题无命中且无近期拆解样本），稍后自动重试")
-    ids = list(seeds)
-    random.shuffle(ids)  # 轮换种子，避免每天扫同一批
-    ids = ids[:_LEADGEN_HUNT_SEED_CAP]
-
-    with Session(engine) as s:
-        known = {
-            (c.url, c.sample_video_id)
-            for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
-        }
-
-    found: list[dict] = []
-    scanned = failed = already = 0
-    probe_fails: dict[str, int] = {}  # 失败原因→次数（不静默吞，聚合进 notes）
-    for i, vid in enumerate(ids):
-        if any(svid == vid for (_u, svid) in known):
-            continue  # 该视频已产出过候选
-        ctx.set_progress(int(85 * i / len(ids)),
-                         f"扫评论 {i + 1}/{len(ids)}（候选 {len(found)}）")
-        try:
-            sig = await asyncio.to_thread(_probe_leadgen_signal, vid)
-        except Exception as e:
-            failed += 1
-            reason = str(e)[:60] or type(e).__name__
-            probe_fails[reason] = probe_fails.get(reason, 0) + 1
-            continue
-        scanned += 1
-        if sig["leadgen"] < _LEADGEN_HUNT_MIN_COMMENTS:
-            continue
-        info, err = await asyncio.to_thread(_probe_video_author, vid)
-        if info is None:
-            notes.append(f"种子 {vid}：求带 {sig['leadgen']} 条但反查作者失败（{err}）")
-            continue
-        if (info["url"], vid) in known:
-            already += 1
-            continue
-        recent_same = None
-        entries, lerr, _ = await asyncio.to_thread(
-            _list_author_videos_via_share_page, info["url"])
-        if entries:
-            recent_same = _count_recent_same(entries)
-        found.append({**info,
-                      "leadgen_comments": sig["leadgen"],
-                      "leadgen_density": sig["density"],
-                      "recent_same": recent_same if recent_same is not None else 0})
-        notes.append(f"{info['name']}：求带 {sig['leadgen']} 条"
-                     + (f"，近 30 天同类 {recent_same} 条" if entries else "（持续性未验证）"))
-        await asyncio.sleep(2)
-
-    for reason, n in probe_fails.items():
-        notes.append(f"{n} 条种子评论探测失败：{reason}")
-    found.sort(key=lambda d: (d["recent_same"] >= 3, d["leadgen_comments"]), reverse=True)
-    new_cnt = added_cnt = 0
-    with Session(engine) as s:
-        for d in found[:_DISCOVER_TOP_N]:
-            dup = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
-                WatchCandidate.url == d["url"])).first()  # type: ignore[attr-defined]
-            if dup is not None:
-                added_cnt += 1
-                continue
-            s.add(WatchCandidate(
-                keyword="leadgen_hunt", name=d["name"], url=d["url"],
-                sec_uid=d.get("sec_uid") or "",
-                signature=d.get("signature") or "",
-                follower_count=d.get("follower_count") or 0,
-                sample_video_id=d["video_id"], sample_title=d.get("title") or "",
-                sample_stats=json.dumps({"digg": d.get("digg") or 0,
-                                         "comment": d.get("comment") or 0,
-                                         "share": d.get("share") or 0,
-                                         "collect": d.get("collect") or 0}),
-                account_type="leadgen",
-                leadgen_density=round(d.get("leadgen_density") or 0, 2),
-                leadgen_comments=d["leadgen_comments"],
-                recent_same=d["recent_same"],
-            ))
-            new_cnt += 1
-        s.commit()
-    ctx.set_progress(100, f"扫描 {scanned} 条种子，候选 {len(found)}，新增 {new_cnt}")
-    return {"scanned": scanned, "candidates": len(found), "new": new_cnt,
-            "already": added_cnt, "skipped": failed, "notes": notes}
 
 
 # ---- 纯获客号挖掘（2026-11-02 用户定版；判定标准 V4：入表一律 LLM 终审）----
@@ -1204,6 +1035,198 @@ def resolve_author_by_share_url(url: str) -> tuple[Optional[dict], Optional[str]
     if info is None:
         return None, "主页资料未取到（等待窗内数据未到，可重试）"
     return info, None
+
+_HL_CITIES = ["苏州", "上海", "杭州", "南京", "无锡", "宁波", "温州", "常州", "南通",
+              "嘉兴", "绍兴", "湖州", "金华", "台州", "昆山", "吴江"]
+_HL_KEYWORDS = ["线下沙龙", "组局", "AI沙龙", "同城聚会", "主理人", "AI活动", "创业沙龙",
+                "读书会", "女性创业", "破圈", "私董会", "资源对接", "AI互助", "同城创业",
+                "AI圈子", "饭局"]
+_HL_SEARCH_BUDGET = 12      # 每晚搜索数（全矩阵 ~9 晚轮完，账号会长新）
+_HL_VERIFY_BUDGET = 25      # 每晚取证作者数
+_HL_SEEN_KEY = "hl_search_seen"
+_HL_SEEN_CAP = 4000
+_HL_MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 "
+                 "(KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1")
+_HL_ACT = ["沙龙", "组局", "聚会", "线下", "圈子", "社群", "主理人", "读书会", "共创",
+           "同城", "活动", "交流"]
+_HL_SIGNUP = ["报名", "➕", "☎", "电话", "微信", "加V", "wx", "私信", "加我", "领取", "留电", "VX"]
+_HL_TOPIC = ["AI", "Ai", "ai", "人工智能", "创业", "副业", "成长", "IP", "赚钱", "生意",
+             "财商", "认知", "链接", "资源", "搞钱", "自由职业", "出海"]
+_HL_NEG = ["金价", "美业", "护肤", "探店", "好物", "穿搭", "美食", "带货", "橱窗",
+           "餐饮", "婚纱", "装修", "驾校", "海鲜", "黄金"]
+
+
+def _hl_setting(key: str, default: list[str]) -> list[str]:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, key)
+    try:
+        v = json.loads(row.value) if row is not None and row.value else default
+        return v if isinstance(v, list) and v else default
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _hl_get_cursor() -> list[str]:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, "hl_search_cursor")
+    try:
+        v = json.loads(row.value) if row is not None and row.value else []
+        return v if isinstance(v, list) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _hl_save_cursor(done: list[str]) -> None:
+    from ..models import AppSetting
+    with Session(engine) as s:
+        row = s.get(AppSetting, "hl_search_cursor")
+        val = json.dumps(done, ensure_ascii=False)
+        if row is None:
+            s.add(AppSetting(key="hl_search_cursor", value=val))
+        else:
+            row.value = val
+            s.add(row)
+        s.commit()
+
+
+def _hl_classify(nick: str, sig: str, descs: list[str]):
+    text_all = f"{nick} {sig} {' '.join(descs)}"
+    if any(w in text_all for w in _HL_NEG):
+        return None
+    act = [w for w in _HL_ACT if w in text_all]
+    signup = [w for w in _HL_SIGNUP if w in sig]
+    topic = [w for w in _HL_TOPIC if w in text_all]
+    if act and signup and topic:
+        return "A"
+    if len(act) >= 2 and topic:
+        return "B"
+    if act and topic:
+        return "B"
+    return None
+
+
+def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: list[str],
+                   n_search: int, n_verify: int) -> dict:
+    """同步爬取体（executor 在线程池里调用）：搜索矩阵 → 逐号取证 → 分类。"""
+    from playwright.sync_api import sync_playwright
+
+    matrix = [f"{c} {k}" for c in cities for k in keywords]
+    todo = [m for m in matrix if m not in done_queries]
+    if not todo:  # 一轮走完：重置游标，账号会长新
+        done_queries = []
+        todo = matrix[:]
+    batch, todo = todo[:n_search], todo[n_search:]
+
+    authors: dict[str, dict] = {}
+    searched = []
+    with sync_playwright() as p:
+        browser = launch(p)
+        ctxm = browser.new_context(user_agent=_HL_MOBILE_UA, locale="zh-CN",
+                                   viewport={"width": 390, "height": 844}, is_mobile=True)
+        page = ctxm.new_page()
+
+        def walk(o, bag):
+            if isinstance(o, dict):
+                sec = o.get("sec_uid")
+                if sec:
+                    prev = bag.get(sec, {})
+                    bag[sec] = {"nick": (o.get("nickname") or prev.get("nick") or "")[:24],
+                                "signature": (o.get("signature") or prev.get("signature") or "")[:100]}
+                for v in o.values():
+                    walk(v, bag)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v, bag)
+
+        def on_resp(r):
+            u = r.url
+            if ("search" in u and "aweme" in u) or "general/search" in u \
+                    or "search/item" in u or "search/user" in u:
+                try:
+                    body = r.text()
+                    if body.strip().startswith("{"):
+                        walk(json.loads(body), authors)
+                except Exception:
+                    pass
+
+        page.on("response", on_resp)
+        for m in batch:
+            try:
+                page.goto(f"https://www.douyin.com/search/{quote(m)}", timeout=30000,
+                          wait_until="domcontentloaded")
+                page.wait_for_timeout(6000)
+                try:
+                    tab = page.locator("text=用户").first
+                    if tab.count() > 0:
+                        tab.click(timeout=2000)
+                        page.wait_for_timeout(3500)
+                except Exception:
+                    pass
+                for _ in range(2):
+                    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(2000)
+                searched.append(m)
+                ctx.set_progress(int(50 * len(searched) / max(len(batch), 1)),
+                                 f"搜索 {len(searched)}/{len(batch)}：{m}（作者池 {len(authors)}）")
+            except Exception as e:  # noqa: BLE001 单查询失败不断轮
+                ctx.set_progress(10, f"搜索失败 {m}：{type(e).__name__}")
+            time.sleep(random.uniform(3.5, 5.0))
+        try:
+            page.remove_listener("response", on_resp)
+        except Exception:
+            pass
+
+        # ---- 逐号取证 ----
+        verified: list[dict] = []
+        seen_mark: set[str] = set()
+
+        def on_w(r, rec):
+            if "aweme/post" in r.url and "/web/api/v2/" in r.url:
+                try:
+                    d = r.json()
+                    for a in (d.get("aweme_list") or [])[:15]:
+                        dsc = (a.get("desc") or "").strip()[:60]
+                        if dsc:
+                            rec["works"].append(dsc)
+                except Exception:
+                    pass
+
+        for i, sec in enumerate(list(authors.keys())[:n_verify]):
+            rec = {"sec": sec, "nick": authors[sec].get("nick", ""), "signature": "", "works": []}
+
+            def on_w2(r, rec=rec):
+                on_w(r, rec)
+
+            page.on("response", on_w2)
+            try:
+                page.goto(f"https://www.douyin.com/share/user/{sec}", timeout=30000,
+                          wait_until="domcontentloaded")
+                page.wait_for_timeout(5000)
+                head = page.evaluate("() => document.body.innerText.slice(0, 320)")
+                m2 = re.search(r"([\u4e00-\u9fa5A-Za-z0-9_·]{2,24})\n抖音号\s*([^\n]+)\n([^\n]+)", head)
+                if m2:
+                    rec["nick"] = rec["nick"] or m2.group(1)
+                    rec["signature"] = m2.group(3)[:100]
+                for _ in range(2):
+                    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1800)
+                verified.append(rec)
+                seen_mark.add(sec)
+            except Exception:
+                pass
+            finally:
+                try:
+                    page.remove_listener("response", on_w2)
+                except Exception:
+                    pass
+            ctx.set_progress(50 + int(45 * (i + 1) / max(n_verify, 1)),
+                             f"取证 {i + 1}/{min(n_verify, len(authors))}（候选 {len(verified)}）")
+            time.sleep(random.uniform(2.2, 3.5))
+        browser.close()
+    return {"searched": searched, "todo_left": todo, "done_queries": done_queries,
+            "authors": authors, "verified": verified, "seen_mark": seen_mark}
 
 
 @register_executor("hl_search_matrix")

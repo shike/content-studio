@@ -31,7 +31,7 @@ else:
     topic_id = r["topic_id"]
     job = poll_job(r["job_id"], timeout=600)
     check("深研任务完成", job is not None and job.get("status") == "succeeded",
-          (job or {}).get("error") or ("" if job else "360s 超时"))
+          (job or {}).get("error") or ("" if job else "600s 超时"))
     status, t = request("GET", f"/api/topics/{topic_id}")
     ok = (status == 200 and t.get("title") and t.get("angle")
           and t.get("audience") in ("boss", "fde", "both")
@@ -108,7 +108,7 @@ else:
         check(f"精品质量评审·第{i + 1}版（单项≥6 总评≥7）", ok_q, note)
     status, fr = request("POST", f"/api/scripts/{script_id}/finalize", timeout=240)
     check("定稿任务受理 202", status == 202 and fr.get("job_id"), f"status={status}")
-    job = poll_job(fr.get("job_id"), timeout=360)
+    job = poll_job(fr.get("job_id"), timeout=600)
     check("定稿任务完成", job is not None and job.get("status") == "succeeded",
           f"status={job.get('status') if job else '超时'}")
     status, s = request("GET", f"/api/scripts/{script_id}")
@@ -135,11 +135,14 @@ else:
     a_md = a.get("md") or ""
     banned_a = quality.banned_words(a_md)
     check("长文违禁词检查（合规红线）", not banned_a, f"命中：{banned_a}" if banned_a else "干净")
-    ok_q, note = quality.judge(a_md, kind="feed")  # 公众号版用推荐流尺（开头即答案/可扫读/人味）
+    ok_q, note = quality.judge(a_md, kind="article")  # 深度版唯一档位（2026-11-02 定版 feed 退役）：用深度长文尺
     check("长文质量评审（单项≥6 总评≥7）", ok_q, note)
-    check("公众号版长度档（800~3600 字，1200~1800 正文+图表图解标记）",
-          status == 200 and 800 <= len(a_md) <= 3600,
-          f"md长度={len(a_md)}")
+    import re as _re
+    _plain = _re.sub(r'\[CHART[^\]]*\]', '', a_md, flags=_re.S)
+    _han = len(_re.findall(r'[\u4e00-\u9fff]', _plain))
+    check("深度版长度档（3000~5000 字，剥图表/标记按汉字计，容差 ±25%）",
+          status == 200 and 2250 <= _han <= 6250,
+          f"汉字数={_han}")
     status, _ = request("PUT", f"/api/articles/{article_id}",
                         body={"md": (a.get("md") or "") + "\n\n（验收追加段落）"})
     check("人工改稿保存（PUT）", status == 200, f"status={status}")

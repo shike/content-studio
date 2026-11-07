@@ -362,10 +362,20 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         # 「长文风格」框架暂不进分节 prompt：article_section.md 里没有 {{STYLE_GUIDE}} 占位符
         # （此处原有注入一直是静默失效的，风格只经大纲影响正文）——2026-09-27 待用户拍板：
         # 补占位符让风格贯穿正文，还是维持"风格只定大纲"。定了再改，别再留无声 replace。
+        # 全文预算折算进每节（2026-11-07 修超长）：节数规格内部矛盾（5~7 节 × 每节 700~1100，
+        # 上限算术可到 7700 > 总上限 5000）——模型逐节守规格但加总超规（实证两轮 6272/5100 字）。
+        # 按实际节数把 3000~5000 总预算折算成本节篇幅，替换档位里的静态节长。
+        sec_spec = length_spec["section"]
+        if length == "deep":
+            per_lo, per_hi = max(400, 3000 // n), max(450, 5000 // n)
+            replaced = sec_spec.replace("篇幅 700~1100 字",
+                                        f"篇幅 {per_lo}~{per_hi} 字（全文共 {n} 节、总预算 3000~5000 字）", 1)
+            assert replaced != sec_spec, "deep 档 section 规格缺「篇幅 700~1100 字」锚点，替换静默失效"
+            sec_spec = replaced
         sec_prompt = (render("article_section", PERSONA=persona_text,
                              HEADING=str(sec.get("heading") or ""),
                              POINTS=json.dumps(sec.get("points") or [], ensure_ascii=False),
-                             SECTION_SPEC=length_spec["section"])
+                             SECTION_SPEC=sec_spec)
                       + "\n\n选题与素材（JSON）：\n" + json.dumps(material, ensure_ascii=False))
         part = await gateway.complete(
             [{"role": "system", "content": sec_prompt}],

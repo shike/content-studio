@@ -119,7 +119,7 @@ async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
 def list_topics(status: Optional[str] = None, source: Optional[str] = None,
                 audience: Optional[str] = None, min_score: Optional[float] = None,
                 line: Optional[str] = None,
-                order: str = "new", limit: int = 50, offset: int = 0, sharp_min: float = 0) -> dict:
+                order: str = "new", limit: int = 50, offset: int = 0) -> dict:
     """三库独立（2026-11-02）：line 必传 persona/leadgen，两库互不可见。"""
     with Session(engine) as s:
         if line not in ("persona", "leadgen"):
@@ -138,9 +138,6 @@ def list_topics(status: Optional[str] = None, source: Optional[str] = None,
             q = q.where(Topic.audience == audience)
         if min_score is not None:
             q = q.where(Topic.score >= min_score)  # type: ignore[attr-defined]
-        if sharp_min > 0:
-            q = q.where(Topic.sharpness >= sharp_min)  # type: ignore[attr-defined]
-            q = q.order_by(Topic.sharpness.desc().nulls_last(), Topic.id.desc())  # type: ignore[attr-defined]
         total = len(s.exec(q).all())
         rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         from sqlmodel import func

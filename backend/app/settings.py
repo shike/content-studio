@@ -44,7 +44,6 @@ class Settings(BaseSettings):
     watch_scan_enabled: bool = True   # 定时同行扫描（PRD R3.4c）
     creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
-    watch_discover_keywords: str = ""  # 每日同行发现的关键词池（逗号/顿号分隔；空=平台默认轮换词）
     # 全自动拆解闸（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：达标作品自动批准进拆解
     auto_dissect_enabled: bool = True
     auto_dissect_min_score: float = 8.0  # 放行门槛：内容热度分（2026-11-05 进料门槛大幅提高 6→8，宁缺勿滥）

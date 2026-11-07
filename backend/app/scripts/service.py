@@ -122,20 +122,6 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                     if account_type == "leadgen"
                     else "。本条面向【人设号】：结尾判断之外允许带一句自然的关注/合集引导（软引导 2026-11-02 放开），"
                          "仍禁评论区扣字/私信领取/卖课导流")
-    # 活动漏斗形态分支（2026-11-05 ③ 获客号产线）：漏斗选题生成时按形态指定内容结构
-    funnel_form = ""
-    if account_type == "leadgen" and topic is not None:
-        ff = ((topic.evidence or {}).get("funnel_form") or "")
-        guide = {
-            "邀约": "结尾行动指令直接给报名动作（评论区扣关键词/私信『报名』），正文给到场理由（谁来/聊什么/得到什么），时间地点写【时间】【地点】占位",
-            "见证": "主体=上一次活动的真实结果（来了谁、聊出什么、当场定了什么），用数字落差呈现，结尾引导预约下一场",
-            "逼单": "主体=下场活动名额稀缺+报名截止，利他包装（帮你留位/别错过），结尾明确报名动作与截止",
-            "背书": "主体=嘉宾与背书资源介绍（谁来讲、什么背景、做成过什么），借势立信任，结尾引导报名",
-            "打法": "主体=把同行验证过的获客打法拆成可复制步骤，结尾自然过渡到『这套打法怎么用到你的生意上』",
-        }
-        if ff in guide:
-            funnel_form = ff
-            account_mode += f"。本条是「{ff}」形态的活动漏斗内容：{guide[ff]}"
     prompt = render("script_generate", LENGTH=length_spec,
                     MY_STYLE=build_my_style(use_style),
                     ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,

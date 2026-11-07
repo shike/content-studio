@@ -5,8 +5,8 @@ import { fetchMenuStats } from './counts'
 
 interface OpenCand { id: number; name: string; follower_count: number; signature: string; keyword: string }
 
-/** 手机轻量页（2026-11-05 ⑤，/?view=m）：今日三锐（批准定审）· 贴链入库（视频→拆解 · 主页→判号）
-· 候选一键定夺 · 今日长文状态。只做拍板动作，产线与设置留在电脑端。moxt 主题。 */
+/** 手机轻量页（2026-11-05 ⑤，/?view=m）：候选一键定夺 · 今日长文状态。
+只做拍板动作，产线与设置留在电脑端。三锐/贴链已砍（2026-11-07 用户逐组拍板）。moxt 主题。 */
 export default function Mobile({ onExit }: { onExit: () => void }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -50,7 +50,7 @@ export default function Mobile({ onExit }: { onExit: () => void }) {
           <img src="/icon.svg" alt="" className="size-9 shrink-0 rounded-xl" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-[#f0e9d5]">跃迁内容工作室</div>
-            <div className="text-[10px] text-[#9dbba9]/80">移动拍板 · 三锐与贴链</div>
+            <div className="text-[10px] text-[#9dbba9]/80">移动拍板 · 候选与长文</div>
           </div>
           <button onClick={onExit} className="shrink-0 rounded-full border border-[rgba(240,233,213,0.25)] px-3 py-1 text-[11px] text-[#cfe0d6]">
             回电脑版

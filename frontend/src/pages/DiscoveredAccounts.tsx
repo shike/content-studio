@@ -129,7 +129,7 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
 
   return (
     <div>
-      {/* 贴链判号入口已上收到 LineIntel 顶部的统一贴链框（2026-11-03 IA 收敛去重） */}
+      {/* 贴链判号入口已砍（2026-11-07 用户拍板 ⑫）：判号走搜索矩阵挖掘与监控链自动化 */}
 
       {/* 手动挖掘：关键词搜账号 */}
       <div className="card space-y-2 p-4">

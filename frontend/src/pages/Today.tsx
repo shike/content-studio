@@ -10,10 +10,10 @@ interface ArtRow { id: number; title: string; status: string }
 
 type CandType = 'persona' | 'leadgen'
 
-const PIPELINES = ['article_hotspots_daily', 'watch_discover_daily', 'hl_search_daily', 'hl_funnel_daily', 'topic_sharp_daily']
+const PIPELINES = ['article_hotspots_daily', 'watch_discover_daily', 'hl_search_daily']
 const PIPE_LABEL: Record<string, string> = {
   article_hotspots_daily: '公众号直出', watch_discover_daily: '获客挖掘',
-  hl_search_daily: '组局号搜索', hl_funnel_daily: '漏斗切角', topic_sharp_daily: '锐度评分',
+  hl_search_daily: '组局号搜索',
 }
 
 /** 迷你趋势条：纯 SVG，无依赖，数据=近 N 天数值。 */
@@ -248,7 +248,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
               </div>
             )}
           </div>
-          <div className="mt-2 text-[11px] text-slate-300">行悬停出操作 · 锐度=四问评分（角度/可争议/口播落点/业务关联）</div>
+          <div className="mt-2 text-[11px] text-slate-300">行悬停出操作</div>
         </div>
 
         {/* 右侧栏 */}
