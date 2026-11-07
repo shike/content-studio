@@ -57,6 +57,15 @@ else:
     items = listing.get("items", []) if isinstance(listing, dict) else []
     check("拆解产出选题候选（source=benchmark ≥1）", status == 200 and len(items) >= 1,
           f"候选数={len(items)}")
+    # 翻页断言需 ≥3 样本自给自足（隔离库继承生产数据时代有存量；全新库必饿死——2026-11-07 服务器实测）
+    for k in range(2):
+        with open(video, "rb") as f:
+            blob = f.read()
+        status, r = request("POST", "/api/analyze/local",
+                            files={"file": (f"sample_speech_{k}.mp4", blob, "video/mp4")},
+                            timeout=300)
+        if status == 202 and r.get("job_id"):
+            poll_job(r["job_id"], timeout=600)
 
 section("P2 · 结构模板库")
 status, r = request("POST", "/api/scripts/templates", body={
