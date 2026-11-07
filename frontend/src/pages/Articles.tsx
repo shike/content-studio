@@ -133,7 +133,7 @@ function ImageHints({ md, articleId }: { md: string; articleId: number }) {
 /**
  * 公众号 · 深度长文线（2026-11-02 三线定版）：
  * 报题即建草稿（无选题阶段）→ 深度长文（唯一档位）→ 改稿渲染 → 一键复制（发布人工）。
- * 独立热点报题任务每晚 0 点自动跑，产出待写草稿；独立风格画像从已发长文提取。
+ * 独立热点报题任务每晚 0 点自动跑，产出待写草稿；风格画像为独立叶子页 ArticleStyle（2026-11-07 产线树拆出）。
  */
 export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
   const [articles, setArticles] = useState<Article[]>([])
@@ -141,8 +141,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
   const [quickNote, setQuickNote] = useState('')
   const [draftBusy, setDraftBusy] = useState('')
   const [hotBusy, setHotBusy] = useState('')
-  const [styleNote, setStyleNote] = useState('')
-  const [styleBusy, setStyleBusy] = useState('')
   const [writeStyle, setWriteStyle] = useState<Record<number, string>>({})
 
   const [booted, setBooted] = useState(false)
@@ -163,14 +161,10 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
   const reload = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
     if (filter) params.set('status', filter)
-    const [a, st] = await Promise.all([
-      api<{ items: Article[]; total: number; counts?: Record<string, number> }>(`/articles?${params}`),
-      api<{ note: string }>('/articles/style-summary'),
-    ])
+    const a = await api<{ items: Article[]; total: number; counts?: Record<string, number> }>(`/articles?${params}`)
     setArticles(a.items)
     setTotal(a.total)
     if (a.counts) setCounts(a.counts)
-    setStyleNote(st.note || '')
     return a.items
   }, [offset, filter])
 
@@ -219,18 +213,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
         if (titles.length === 0) setError('提炼完成但没有产出草稿（看任务详情）')
       } finally {
         setHotBusy('')
-      }
-    })
-
-  const extractStyle = () =>
-    guard(async () => {
-      setStyleBusy('风格提取中…')
-      try {
-        const { job_id } = await api<{ job_id: number }>('/articles/extract-style', { method: 'POST' })
-        const job = await waitJob(job_id, (j) => setStyleBusy(`风格提取：${j.progress}% ${j.message}`))
-        setStyleNote(String(job.result?.note ?? ''))
-      } finally {
-        setStyleBusy('')
       }
     })
 
@@ -345,22 +327,6 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
         </div>
         {draftBusy && <div className="mt-2"><Busy text={draftBusy} /></div>}
         {hotBusy && <div className="mt-2"><Busy text={hotBusy} /></div>}
-      </div>
-
-      {/* 公众号独立风格画像（从已发长文提取，长文生成自动套用） */}
-      <div className="card mt-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-sm font-semibold text-slate-800">公众号风格画像</div>
-          <span className="text-[11px] text-slate-400">从已发长文提取的表达习惯，生成长文时自动注入</span>
-          <button onClick={extractStyle} disabled={!!styleBusy} className="btn-ghost btn-xs ml-auto disabled:opacity-40">
-            {styleBusy ? styleBusy : styleNote ? '重新提取' : '从已发长文提取'}
-          </button>
-        </div>
-        {styleNote ? (
-          <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[13px] leading-relaxed text-slate-600">{styleNote}</div>
-        ) : (
-          !styleBusy && <div className="mt-2 text-xs text-slate-400">还没有画像——写出第一篇后点「从已发长文提取」。</div>
-        )}
       </div>
 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}

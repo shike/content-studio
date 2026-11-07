@@ -554,7 +554,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                           </ul>
                         )}
                         {onNavigate && (
-                          <button onClick={() => onNavigate('benchmarks')} className="btn-ghost btn-xs mt-2">
+                          <button onClick={() => onNavigate(accountType === 'leadgen' ? 'l_bench' : 'p_bench')} className="btn-ghost btn-xs mt-2">
                             去拆解库看全部 →
                           </button>
                         )}

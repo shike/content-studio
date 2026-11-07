@@ -110,7 +110,7 @@ function objectLabel(payload: Record<string, any>): string {
 
 type Tab = 'run' | 'sched' | 'history'
 
-export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
+export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [items, setItems] = useState<TaskRow[]>([])
   const [counts, setCounts] = useState<Counts>({
     running: 0, parked: 0, queued: 0, superseded: 0, failed: 0, succeeded: 0,
@@ -497,7 +497,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: SectionKey) => 
                               <div className="mb-3 flex flex-wrap items-center gap-2">
                                 <span className="text-sm font-semibold text-zinc-900">任务 #{t.id}</span>
                                 {(() => {
-                                  const links: [SectionKey, string][] = []
+                                  const links: [string, string][] = []  // 旧键字符串，navTo 经 NAVMAP 路由到新叶子
                                   if (t.payload?.benchmark_id != null) links.push(['benchmarks', '查看拆解样本 →'])
                                   if (t.payload?.script_id != null) links.push(['scripts', '查看脚本 →'])
                                   if (t.payload?.article_id != null) links.push(['articles', '查看长文 →'])

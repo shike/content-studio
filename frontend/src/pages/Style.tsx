@@ -134,7 +134,7 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
           />
           {onNavigate && (
             <div className="flex justify-center">
-              <button onClick={() => onNavigate('watch')} className="btn-accent">去监测账号添加 →</button>
+              <button onClick={() => onNavigate('p_watch')} className="btn-accent">去监测账号添加 →</button>
             </div>
           )}
         </div>

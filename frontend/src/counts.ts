@@ -15,7 +15,7 @@ export interface TodoStats {
   pendingArticles: number // 待写长文
   openCandidatesPersona: number // 候选账号待定夺·人设线
   openCandidatesLeadgen: number // 候选账号待定夺·获客线
-  finalScripts: number // 已定稿脚本（发布台可生成物料包）
+  finalScripts: number // 已定稿脚本
 }
 
 export async function fetchTodoStats(): Promise<TodoStats> {
@@ -24,63 +24,50 @@ export async function fetchTodoStats(): Promise<TodoStats> {
   return api<TodoStats>('/stats/todos')
 }
 
-/** 菜单徽章统计：每个可积压页面的"待处理数"，App 层 60s 刷新。 */
-export interface MenuStats extends TodoStats {
-  publishing: number // 已定稿可生成物料包
-  benchmarks: number // 待拆解视频（待定夺 + 已批准待拆，两线合计——兼容旧 Dashboard 页）
-  benchmarksPending: number // 其中待定夺
-  benchmarksTodo: number // 其中已批准待拆
-  benchPendingPersona: number // 拆解待定夺·人设线
-  benchPendingLeadgen: number // 拆解待定夺·获客线（打法卡）
-  watch: number // 监控中账号数
-  style: number // 待拆解风格视频
-  failed: number // 终态失败（安静可见，慢巡自愈中）
-  tasks: number // 运行中 + 排队 + 待处置任务（待处置非空 = 系统带病运行，必须可见）
+/** 菜单徽章统计（2026-11-07 产线树定版）：徽章落在每个叶子页面自身，
+不再做产线合计——树组徽章由 App 按子叶求和。过程性数字（生成中/排队/待拆）不上菜单。 */
+export interface MenuStats {
+  today: number // 今天=待审选题合计
+  p_topics: number // 人设选题库=待审选题·人设
+  p_content: number // 内容看板=待定稿脚本·人设
+  p_bench: number // 对标拆解=拆解待定夺·人设
+  p_cand: number // 候选定夺=候选待定夺·人设
+  l_topics: number // 获客选题=待审选题·获客
+  l_scripts: number // 脚本工场=待定稿脚本·获客
+  l_cand: number // 纯获客候选=候选待定夺·获客
+  l_bench: number // 打法卡库=拆解待定夺·获客
+  article: number // 报题与长文=待写长文
+  tasks: number // 在途（运行中+排队+失败）
+  failed: number // 终态失败计数（Today 待办卡用）
+  tasks_alert: number // 失败>0 → 徽章变红
 }
 
 export async function fetchMenuStats(): Promise<MenuStats> {
-  const [todo, bm, bmP, bmL, acc, styleOv, jobs] = await Promise.all([
+  const [todo, bmP, bmL, jobs] = await Promise.all([
     fetchTodoStats(),
-    api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1'),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=persona'),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=leadgen'),
-    api<{ items: { enabled: boolean }[] }>('/watch/accounts'),
-    api<{ stats: { pending: number } }>('/style/overview'),
     api<{ counts: { running: number; queued: number; parked?: number; failed: number } }>('/jobs?limit=1'),
   ])
   return {
-    ...todo,
-    publishing: todo.finalScripts,
-    benchmarksPending: bm.counts.pending,
-    benchmarksTodo: bm.counts.todo,
-    benchmarks: bm.counts.pending + bm.counts.todo,
-    benchPendingPersona: bmP.counts.pending,
-    benchPendingLeadgen: bmL.counts.pending,
-    watch: acc.items.filter((a) => a.enabled).length,
-    style: styleOv.stats.pending,
+    today: todo.draftTopics,
+    p_topics: todo.draftTopicsPersona,
+    p_content: todo.pendingScriptsPersona,
+    p_cand: todo.openCandidatesPersona,
+    p_bench: bmP.counts.pending,
+    l_topics: todo.draftTopicsLeadgen,
+    l_scripts: todo.pendingScriptsLeadgen,
+    l_cand: todo.openCandidatesLeadgen,
+    l_bench: bmL.counts.pending,
+    article: todo.pendingArticles,
     // 在途 + 失败（失败是异常不是工作流：可见但不建流程，瞬时类由每日慢巡自愈）
     tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.failed || 0),
     failed: jobs.counts.failed || 0,
+    tasks_alert: (jobs.counts.failed || 0) > 0 ? 1 : 0,
   }
 }
 
-/** 菜单徽章数字（2026-09-28 定版口径；2026-11-02 三线拆分；2026-11-03 IA 收敛——
- *  情报中心解散并入产线，候选待定夺/拆解待定夺随线并进人设号/获客号徽章）：
- *  人设号=人设待审选题+待定稿脚本+候选待定夺+拆解待定夺 · 获客号同口径 ·
- *  公众号=待写长文 · 任务=在途（待处置红警）。过程性数字（生成中/排队/待拆）不上菜单。 */
+/** 菜单徽章数字：键与 App 树叶子一一对应，透传即可。 */
 export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
-  return {
-    today: s.draftTopics,                           // 今日工作台徽章 = 待审选题（每日动线口径）
-    persona: s.draftTopicsPersona + s.pendingScriptsPersona
-      + s.openCandidatesPersona + s.benchPendingPersona,   // 人设号：本线全部待人工
-    leadgen: s.draftTopicsLeadgen + s.pendingScriptsLeadgen
-      + s.openCandidatesLeadgen + s.benchPendingLeadgen,   // 获客号：本线全部待人工
-    article: s.pendingArticles,                     // 公众号：待写长文
-    benchmarks: s.benchmarksPending + s.benchmarksTodo, // 兼容旧 Dashboard 页
-    style: s.style,                                 // 风格视频待定夺
-    // 任务徽章（2026-10-07 三次调整）：恒显在途数（运行中+排队+挂起）——待处置优先会把它
-    // 顶掉、漏掉 parked 会少算风控窗等待的活任务；待处置>0 由 tasks_alert 让徽章变红警示
-    tasks: s.tasks,
-    tasks_alert: s.failed > 0 ? 1 : 0,
-  }
+  return { ...s }
 }

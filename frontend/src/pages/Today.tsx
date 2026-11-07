@@ -54,7 +54,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       ])
       const t = { items: [...(tp.items || []), ...(tl.items || [])] } as { items: Topic[] }
       const s = await fetchMenuStats()
-      setTodos({ draft: s.draftTopics, failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
+      setTodos({ draft: s.today, failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
       const ranked = (t.items || []).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
       setDrafts(ranked)
       try {
@@ -110,7 +110,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
         body: JSON.stringify({ topic_id: t.id, length: 'short', account_type: type }),
       })
       setDrafts((l) => l.filter((x) => x.id !== t.id))
-      onNavigate(type === 'leadgen' ? 'leadgen' : 'persona')
+      onNavigate(type === 'leadgen' ? 'l_topics' : 'p_topics')
       setBusy('')
     } catch (e) {
       setError(String(e)); setBusy('')
@@ -272,7 +272,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
               <div className="flex justify-between"><span className="text-slate-500">候选待定夺</span><span className="font-medium tabular-nums text-slate-900">81</span></div>
               <div className="flex justify-between"><span className="text-slate-500">组局号名单</span><span className="font-medium tabular-nums text-slate-900">75</span></div>
             </div>
-            <button onClick={() => onNavigate('leadgen')} className="mt-2 text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去定夺 →</button>
+            <button onClick={() => onNavigate('l_cand')} className="mt-2 text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去定夺 →</button>
           </section>
 
           <section>

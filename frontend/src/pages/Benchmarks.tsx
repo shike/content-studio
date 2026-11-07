@@ -470,7 +470,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
                             <Lightbulb size={14} />
                             已沉淀选题候选「{detail.analysis.topic_candidate.title}」
                             {onNavigate && (
-                              <button onClick={() => onNavigate('topics')} className="ml-1 font-semibold underline hover:text-emerald-900">
+                              <button onClick={() => onNavigate(accountType === 'leadgen' ? 'l_topics' : 'p_topics')} className="ml-1 font-semibold underline hover:text-emerald-900">
                                 去选题库定审 →
                               </button>
                             )}

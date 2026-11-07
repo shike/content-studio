@@ -674,7 +674,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
                             <div className="flex justify-between"><span className="text-slate-400">受众</span><span>{AUDIENCE_LABELS[t.audience] || t.audience}</span></div>
                             <div className="flex justify-between"><span className="text-slate-400">评分</span><span>{t.score != null ? t.score.toFixed(1) : '—'}</span></div>
                             <div className="flex justify-between"><span className="text-slate-400">来源</span><span>{SOURCE_LABELS[t.source_type] || t.source_type || '—'}</span></div>
-                            <button onClick={(e) => { e.stopPropagation(); onNavigate?.('topics') }} className="btn-ghost btn-xs w-full justify-center">
+                            <button onClick={(e) => { e.stopPropagation(); onNavigate?.(accountType === 'leadgen' ? 'l_topics' : 'p_topics') }} className="btn-ghost btn-xs w-full justify-center">
                               去选题库看全量
                             </button>
                           </div>
