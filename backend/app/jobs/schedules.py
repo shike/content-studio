@@ -189,20 +189,6 @@ async def _run_article_hotspots() -> str:
 # 钟点 0 点（错峰窗 0-6 内最前，与 1:00 扫描错开；不可 hour_from_settings，同 watch_discover 理由）
 register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点报题（独立提炼）",
                            daily_hour=0, run=_run_article_hotspots))
-async def _run_watch_discover() -> str:
-    from .runner import runner
-
-    job = await runner.submit("leadgen_harvest", {"auto": True},
-                              dedup_key=f"1:leadgenharvest:{datetime.now():%Y%m%d}",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（纯获客号挖掘：评论区顺藤+转化痕迹判定，小预算限速版）"
-
-
-# 钟点 2 点与扫描错峰（不可 hour_from_settings：全局 watch_scan_hour 恒有值会把它永久
-# 覆盖成 1 点——2026-10-06 四项任务挤在 1 点、发现任务"每日 2 点"设计失效的根因）
-register_schedule(Schedule(key="watch_discover_daily", label="纯获客号挖掘（评论区顺藤）",
-                           daily_hour=2,
-                           enabled_by="watch_scan_enabled", run=_run_watch_discover))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))
@@ -275,25 +261,5 @@ register_schedule(Schedule(key="hl_search_daily", label="同城组局号搜索�
                            daily_hour=2, run=_run_hl_search))
 
 
-async def _run_hl_funnel() -> str:
-    from .runner import runner
-    job = await runner.submit("hl_funnel_topics", {"auto": True},
-                              dedup_key=f"1:hlfunnel:{datetime.now():%Y%m%d}",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（组局号漏斗选题引擎）"
 
 
-register_schedule(Schedule(key="hl_funnel_daily", label="组局号漏斗选题引擎（名单跟踪→五形态切角）",
-                           daily_hour=2, run=_run_hl_funnel))
-
-
-async def _run_topic_sharp() -> str:
-    from .runner import runner
-    job = await runner.submit("topic_sharpness_score", {"auto": True},
-                              dedup_key=f"1:topicsharp:{datetime.now():%Y%m%d}",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（选题锐度批量评分）"
-
-
-register_schedule(Schedule(key="topic_sharp_daily", label="选题锐度批量评分（每日三锐排序键）",
-                           daily_hour=2, run=_run_topic_sharp))

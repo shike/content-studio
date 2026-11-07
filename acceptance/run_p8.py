@@ -26,10 +26,10 @@ from app.articles.service import length_specs as _ls  # noqa: E402
 from app.jobs.runner import RETRY_LADDER, _ladder_delay, policy_of as _policy_of  # noqa: E402
 
 class _FakeRow:  # effective_hour 只读 key/hour
-    key = "watch_discover_daily"
+    key = "hl_search_daily"
     hour = None
 
-check("发现任务生效钟点=2（不被全局扫描钟点覆盖）", _sched.effective_hour(_FakeRow()) == 2)
+check("组局号搜索挖掘生效钟点=2（不被全局扫描钟点覆盖）", _sched.effective_hour(_FakeRow()) == 2)
 check("验证码失败分类为 captcha（可挂起重试）",
       _classify(Exception("页面未吐出视频数据（可能触发验证码）")) == "captcha")
 _p = _policy_of("benchmark_analyze")
@@ -111,7 +111,7 @@ code, d = request("GET", "/api/schedules")
 items = d.get("items") if isinstance(d, dict) else []
 keys = {it.get("key") for it in items} if isinstance(items, list) else set()
 check("调度中心列表（内置任务+探针+每日发现）",
-      code == 200 and len(items) >= 7 and "crawl_probe" in keys and "watch_discover_daily" in keys,
+      code == 200 and len(items) >= 7 and "crawl_probe" in keys and "hl_search_daily" in keys,
       f"code={code}, keys={sorted(keys)}")
 target = "crawl_probe" if "crawl_probe" in keys else (sorted(keys)[0] if keys else "")
 code, d = request("POST", f"/api/schedules/{target}/toggle")
@@ -220,10 +220,10 @@ from app.articles.service import length_specs as _ls  # noqa: E402
 from app.jobs.runner import RETRY_LADDER, _ladder_delay, policy_of as _policy_of  # noqa: E402
 
 class _FakeRow:  # effective_hour 只读 key/hour
-    key = "watch_discover_daily"
+    key = "hl_search_daily"
     hour = None
 
-check("发现任务生效钟点=2（不被全局扫描钟点覆盖）", _sched.effective_hour(_FakeRow()) == 2)
+check("组局号搜索挖掘生效钟点=2（不被全局扫描钟点覆盖）", _sched.effective_hour(_FakeRow()) == 2)
 check("验证码失败分类为 captcha（可挂起重试）",
       _classify(Exception("页面未吐出视频数据（可能触发验证码）")) == "captcha")
 _p = _policy_of("benchmark_analyze")
@@ -332,7 +332,7 @@ code, d = request("GET", "/api/schedules")
 items = d.get("items") if isinstance(d, dict) else []
 keys = {it.get("key") for it in items} if isinstance(items, list) else set()
 check("调度中心列表（内置任务+探针+每日发现）",
-      code == 200 and len(items) >= 7 and "crawl_probe" in keys and "watch_discover_daily" in keys,
+      code == 200 and len(items) >= 7 and "crawl_probe" in keys and "hl_search_daily" in keys,
       f"code={code}, keys={sorted(keys)}")
 target = "crawl_probe" if "crawl_probe" in keys else (sorted(keys)[0] if keys else "")
 code, d = request("POST", f"/api/schedules/{target}/toggle")

@@ -332,16 +332,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                   if candidate.get("title") else None)
         if dup_of is not None:
             analysis["topic_candidate_suppressed"] = f"与近期选题 #{dup_of} 撞车，候选未入库"
-        # 锐度闸（2026-11-05 进料门槛大幅提高）：拆解 LLM 的锐度自评低于阈值不入库——
-        # 宁缺勿滥，防止「又一个 AI 话题」式平庸候选淹没定审队列
-        try:
-            sharp = float(candidate.get("sharpness") or 0)
-        except (TypeError, ValueError):
-            sharp = 0.0
-        if candidate.get("title") and dup_of is None and sharp < settings.auto_topic_min_sharpness:
-            analysis["topic_candidate_suppressed"] = (
-                f"锐度 {sharp:g} < {settings.auto_topic_min_sharpness:g}，候选未入库（进料门槛）")
-        if candidate.get("title") and dup_of is None and sharp >= settings.auto_topic_min_sharpness:
+        if candidate.get("title") and dup_of is None:
             audience = candidate.get("audience")
             judged_line = "leadgen" if judged == "leadgen" else "persona"
             topic = Topic(
@@ -352,7 +343,6 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                 source_ref=f"benchmark:{benchmark_id}",
                 line=judged_line,  # 三库独立：按判定分流（2026-11-02）
                 score=_safe_score(analysis.get("score")),
-                sharpness=sharp or None,
                 evidence={
                     "summary": analysis.get("summary", ""),
                     "replicable_points": analysis.get("replicable_points") or [],

@@ -73,8 +73,10 @@ export async function fetchMenuStats(): Promise<MenuStats> {
 export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
   return {
     today: s.draftTopics,                           // 今日工作台徽章 = 待审选题（每日动线口径）
-    persona: s.sharpPersona ?? 0,   // 人设号徽章=今日三锐池（2026-11-05 ④ 定版：只提醒该干的）
-    leadgen: s.sharpLeadgen ?? 0,   // 获客号徽章=今日三锐池
+    persona: s.draftTopicsPersona + s.pendingScriptsPersona
+      + s.openCandidatesPersona + s.benchPendingPersona,   // 人设号：本线全部待人工
+    leadgen: s.draftTopicsLeadgen + s.pendingScriptsLeadgen
+      + s.openCandidatesLeadgen + s.benchPendingLeadgen,   // 获客号：本线全部待人工
     article: s.pendingArticles,                     // 公众号：待写长文
     benchmarks: s.benchmarksPending + s.benchmarksTodo, // 兼容旧 Dashboard 页
     style: s.style,                                 // 风格视频待定夺

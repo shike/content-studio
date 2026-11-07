@@ -114,14 +114,6 @@ async def create_idea(body: IdeaIn, user: User = Depends(require_user)) -> dict:
     return {"topic_id": topic_id, "job_id": job.id}
 
 
-@router.get("/picks")
-def daily_picks(line: str = "persona", offset: int = 0) -> dict:
-    """今日三锐：锐度≥阈值的 draft 选题按锐度降序取 3 条（offset 换一批）。"""
-    if line not in ("persona", "leadgen"):
-        raise HTTPException(status_code=400, detail="line 必须是 persona|leadgen")
-    from ..topics.service import daily_picks as _picks
-    return _picks(line, max(0, offset))
-
 
 @router.get("")
 def list_topics(status: Optional[str] = None, source: Optional[str] = None,

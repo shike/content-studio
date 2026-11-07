@@ -10,21 +10,33 @@ interface ArtRow { id: number; title: string; status: string }
 
 type CandType = 'persona' | 'leadgen'
 
-const LINE_TAG: Record<CandType, { label: string; cls: string }> = {
-  persona: { label: '人设', cls: 'bg-slate-100 text-slate-600' },
-  leadgen: { label: '获客', cls: 'bg-[#fef3c7] text-amber-800' },
-}
-
 const PIPELINES = ['article_hotspots_daily', 'watch_discover_daily', 'hl_search_daily', 'hl_funnel_daily', 'topic_sharp_daily']
 const PIPE_LABEL: Record<string, string> = {
   article_hotspots_daily: '公众号直出', watch_discover_daily: '获客挖掘',
   hl_search_daily: '组局号搜索', hl_funnel_daily: '漏斗切角', topic_sharp_daily: '锐度评分',
 }
 
+/** 迷你趋势条：纯 SVG，无依赖，数据=近 N 天数值。 */
+function Spark({ data, w = 96, h = 28 }: { data: number[]; w?: number; h?: number }) {
+  if (!data.length) return null
+  const max = Math.max(...data, 1)
+  const min = Math.min(...data, 0)
+  const span = max - min || 1
+  const step = w / Math.max(data.length - 1, 1)
+  const pts = data.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
+  return (
+    <svg width={w} height={h} className="overflow-visible">
+      <polyline points={pts.join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1].split(',')[0]} cy={pts[pts.length - 1].split(',')[1]} r="2" fill="currentColor" />
+    </svg>
+  )
+}
+
 export default function Today({ onNavigate }: { onNavigate: (k: string) => void }) {
   const [kpis, setKpis] = useState({ fans: 0, fansDelta: 0, play: 0, profileViews: 0 })
+  const [fansHist, setFansHist] = useState<number[]>([])
+  const [playHist, setPlayHist] = useState<number[]>([])
   const [todos, setTodos] = useState({ draft: 0, failed: 0, active: 0 })
-  const [sharp, setSharp] = useState({ persona: 0, leadgen: 0 })
   const [drafts, setDrafts] = useState<Topic[]>([])
   const [filter, setFilter] = useState<'all' | CandType>('all')
   const [quick, setQuick] = useState('')
@@ -43,15 +55,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       const t = { items: [...(tp.items || []), ...(tl.items || [])] } as { items: Topic[] }
       const s = await fetchMenuStats()
       setTodos({ draft: s.draftTopics, failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
-      setSharp({ persona: s.sharpPersona ?? 0, leadgen: s.sharpLeadgen ?? 0 })
-      const ranked = (t.items || []).slice().sort((a, b) => {
-        const sa = a.sharpness ?? -1
-        const sb = b.sharpness ?? -1
-        if (sa !== sb) return sb - sa
-        const qa = Number(a.evidence?.benchmark_quality_score ?? 0)
-        const qb = Number(b.evidence?.benchmark_quality_score ?? 0)
-        return qb - qa
-      })
+      const ranked = (t.items || []).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
       setDrafts(ranked)
       try {
         const sch = await api<{ items?: SchedRow[] } | SchedRow[]>('/schedules')
@@ -75,6 +79,8 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           play: last?.play ?? 0,
           profileViews: last?.profile_views ?? 0,
         })
+        setFansHist(items.map((x) => x.fans ?? 0).slice(-30))
+        setPlayHist(items.map((x) => x.play ?? 0).slice(-14))
       } catch { /* 指标卡保持 0 */ }
     } catch (e) {
       setError(String(e))
@@ -143,166 +149,157 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">今日工作台</h2>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">指标 04:00 · 管线 02:00 · 雷达 06:00 已跑</span>
-          <button onClick={trending} className="btn-accent btn-sm">热点雷达</button>
+      <div className="mb-5 flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">今日工作台</h1>
+          <p className="mt-1 text-[13px] text-slate-400">管线 02:00 自动运转 · 指标 04:00 回流 · 雷达 06:00 已跑</p>
+        </div>
+        <button onClick={trending} className="rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-slate-700">热点雷达</button>
+      </div>
+      {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
+      {busy && <div className="mb-3 text-sm text-sky-700">{busy}</div>}
+
+      {/* ── 指标区：大数字 + 迷你趋势，无框，靠留白分隔 ── */}
+      <div className="grid grid-cols-2 gap-x-8 gap-y-6 lg:grid-cols-4">
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">粉丝 · 施可号</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="num-serif text-[30px] font-semibold leading-none tracking-tight text-slate-900">{kpis.fans.toLocaleString()}</span>
+            {kpis.fansDelta > 0 && <span className="text-[12px] font-medium text-emerald-600">+{kpis.fansDelta}</span>}
+          </div>
+          <div className="mt-2 text-slate-300"><Spark data={fansHist} /></div>
+        </div>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">昨日播放</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="num-serif text-[30px] font-semibold leading-none tracking-tight text-slate-900">{kpis.play.toLocaleString()}</span>
+          </div>
+          <div className="mt-2 text-slate-300"><Spark data={playHist} /></div>
+        </div>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">主页访问</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="num-serif text-[30px] font-semibold leading-none tracking-tight text-slate-900">{kpis.profileViews.toLocaleString()}</span>
+          </div>
+          <div className="mt-2 text-[11px] text-slate-300">平台 T-1 数据</div>
+        </div>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">本周成片</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="num-serif text-[30px] font-semibold leading-none tracking-tight text-slate-900">3</span>
+          </div>
+          <div className="mt-2 text-[11px] text-slate-300">人设 2 · 获客 1</div>
         </div>
       </div>
-      {error && <div className="mb-2 text-sm text-red-600">{error}</div>}
-      {busy && <div className="mb-2 text-sm text-sky-700">{busy}</div>}
 
-      {/* ── 指标带：一张卡，竖线分隔六格 ── */}
-      <div className="mb-4 grid grid-cols-2 divide-[#e8ecf0] rounded-2xl border border-[#e8ecf0] bg-white sm:grid-cols-3 sm:divide-x lg:grid-cols-6">
-        {[
-          { l: '粉丝（施可号）', v: kpis.fans, d: kpis.fansDelta > 0 ? `+${kpis.fansDelta} 昨日` : '—', good: kpis.fansDelta > 0 },
-          { l: '昨日播放', v: kpis.play, d: '平台 T-1', dim: true },
-          { l: '主页访问', v: kpis.profileViews, d: '近 30 天序列', dim: true },
-          { l: '三锐池（待拍）', v: sharp.persona + sharp.leadgen, d: `人设 ${sharp.persona} · 获客 ${sharp.leadgen}`, dim: false },
-          { l: '候选待定夺', v: todos.draft, d: '全部 draft 选题', dim: true },
-          { l: '本周成片', v: 3, d: '人设 2 · 获客 1', dim: true },
-        ].map((x, i) => (
-          <div key={x.l} className={`px-4 py-3 ${i >= 2 ? 'hidden sm:block' : ''} ${i >= 4 ? 'hidden lg:block' : ''}`}>
-            <div className="text-[11px] text-slate-400">{x.l}</div>
-            <div className="num-serif mt-0.5 text-[22px] font-semibold tabular-nums text-slate-900">{x.v}</div>
-            <div className={`text-[11px] ${x.good ? 'text-emerald-600' : 'text-slate-400'}`}>{x.d}</div>
-          </div>
-        ))}
-      </div>
+      <div className="my-6 border-t border-slate-100" />
 
-      {/* ── 主区：左「今天要拍」7 列 + 右「情报/系统」5 列 ── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <div className="lg:col-span-7">
-          {/* 快速记题 */}
-          <div className="mb-3 flex gap-2">
-            <input
-              value={quick}
-              onChange={(e) => setQuick(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') quickAdd() }}
-              placeholder="快速记选题：想到什么直接打一句话，回车入库…"
-              className="w-full rounded-xl border border-[#e8ecf0] bg-white px-4 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-sky-300"
-            />
-            <button onClick={quickAdd} disabled={!quick.trim()} className="btn-accent btn-sm disabled:opacity-40">入库</button>
-          </div>
-
-          <div className="mb-2 flex items-center gap-2">
-            <b className="text-sm font-semibold text-zinc-900">今天要拍</b>
-            <span className="rounded-full bg-[#0a2f24] px-2 py-0.5 text-[10px] font-medium text-[#e8c97f]">按锐度排序</span>
-            <div className="ml-auto flex gap-1.5">
-              {[['all', '全部'], ['persona', '人设'], ['leadgen', '获客']].map(([k, label]) => (
-                <button key={k} onClick={() => setFilter(k as 'all' | CandType)}
-                  className={`rounded-full px-3 py-1 text-xs ${filter === k ? 'bg-zinc-900 text-white' : 'border border-[#e8ecf0] bg-white text-slate-500'}`}>
-                  {label}
+      {/* ── 主区：左「今天要拍」+ 右侧栏 ── */}
+      <div className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-12">
+        <div className="lg:col-span-8">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[15px] font-semibold text-slate-900">今天要拍</h2>
+            <div className="flex items-center gap-1">
+              {(['all', 'persona', 'leadgen'] as const).map((k) => (
+                <button key={k} onClick={() => setFilter(k)}
+                  className={`rounded-md px-2.5 py-1 text-[12px] ${filter === k ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  {k === 'all' ? `全部 ${drafts.length}` : k === 'persona' ? `人设 ${nPersona}` : `获客 ${nLeadgen}`}
                 </button>
               ))}
             </div>
           </div>
 
-          {shown.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#e3e8ed] bg-white p-8 text-center text-sm text-slate-400">
-              待拍清单已清零——批准的选题已进入对应产线；明晨管线会带来新一批。
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-2xl border border-[#e8ecf0] bg-white">
-              {shown.map((t, idx) => {
-                const type: CandType = (t.evidence?.account_type === 'leadgen' ? 'leadgen' : 'persona')
-                const q = Number(t.evidence?.benchmark_quality_score ?? 0)
-                const sharp = t.sharpness
-                const isNew = (t.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)
-                return (
-                  <div key={t.id} className={`flex items-center gap-2.5 px-3.5 py-2.5 ${idx > 0 ? 'border-t border-[#f1f4f7]' : ''}`}>
-                    {isNew && <span className="shrink-0 rounded-full bg-emerald-500 px-1.5 py-px text-[10px] text-white">NEW</span>}
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${LINE_TAG[type].cls}`}>{LINE_TAG[type].label}</span>
-                    <div className="min-w-0 flex-1">
-                      <b className="block truncate text-[13px] font-medium">{t.title}</b>
-                      <span className="text-[11px] text-slate-400">
-                        {(t.created_at || '').slice(5, 16).replace('T', ' ')}
-                        {type === 'leadgen' && ' · 获客打法'}
-                      </span>
-                    </div>
-                    {sharp != null ? (
-                      <span className={`shrink-0 rounded-lg px-2 py-0.5 text-xs font-semibold tabular-nums ${sharp >= 8 ? 'bg-[#0a2f24] text-[#e8c97f]' : sharp >= 7 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
-                        锐 {sharp}
-                      </span>
-                    ) : q > 0 ? (
-                      <span className="shrink-0 rounded-lg bg-slate-100 px-2 py-0.5 text-xs tabular-nums text-slate-500">热度 {q.toFixed(1)}</span>
-                    ) : null}
-                    <button onClick={() => approveAndGenerate(t)} className="btn-accent btn-xs shrink-0">拍这条</button>
-                    <button onClick={() => act(t, 'reject')} className="btn-ghost btn-xs shrink-0">不做</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-          <div className="mt-2 px-1 text-[11px] text-slate-400">
-            候选由同行扫描、热点雷达与漏斗引擎自动入库；「拍这条」= 批准并排队生成一版精品脚本。
+          <div className="mt-3 flex gap-2">
+            <input
+              value={quick}
+              onChange={(e) => setQuick(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') quickAdd() }}
+              placeholder="快速记选题，回车入库…"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm outline-none placeholder:text-slate-300 focus:border-slate-400"
+            />
+            <button onClick={quickAdd} disabled={!quick.trim()} className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">入库</button>
           </div>
+
+          <div className="mt-3">
+            {shown.length === 0 ? (
+              <div className="py-10 text-center text-sm text-slate-300">待拍清单已清零——明晨管线会带来新一批</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {shown.map((t) => {
+                  const type: CandType = (t.evidence?.account_type === 'leadgen' ? 'leadgen' : 'persona')
+                                  return (
+                    <div key={t.id} className="group flex items-center gap-3 py-2.5">
+                      <span className={`w-8 shrink-0 text-[11px] ${type === 'leadgen' ? 'text-amber-600' : 'text-slate-400'}`}>{LINE_TAG_ZH[type]}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13.5px] font-medium text-slate-800">{t.title}</div>
+                      </div>
+                      <span className="shrink-0 text-[11px] text-slate-300">{(t.created_at || '').slice(5, 10)}</span>
+                      <button onClick={() => approveAndGenerate(t)}
+                        className="shrink-0 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[12px] text-slate-600 opacity-0 transition group-hover:opacity-100 hover:border-slate-400 hover:text-slate-900">
+                        生成脚本
+                      </button>
+                      <button onClick={() => act(t, 'reject')}
+                        className="shrink-0 rounded-md px-1.5 py-1 text-[12px] text-slate-300 opacity-0 transition group-hover:opacity-100 hover:text-slate-600">
+                        ✕
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 text-[11px] text-slate-300">行悬停出操作 · 锐度=四问评分（角度/可争议/口播落点/业务关联）</div>
         </div>
 
-        <div className="space-y-4 lg:col-span-5">
-          {/* 公众号今日长文 */}
-          <section className="rounded-2xl border border-[#e8ecf0] bg-white p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="rounded bg-[#0a2f24] px-2 py-0.5 text-[10px] font-medium text-[#e8c97f]">每日一篇</span>
-              <span className="text-[11px] text-slate-400">凌晨直出 · 改稿发布在公众号线</span>
-            </div>
+        {/* 右侧栏 */}
+        <div className="space-y-8 lg:col-span-4">
+          <section>
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-400">每日一篇 · 公众号</h3>
             {article
-              ? <>
-                <div className="text-[15px] font-semibold leading-snug text-slate-900">{article.title}</div>
-                <div className={`mt-1.5 text-xs ${article.status === 'generating' ? 'text-sky-600' : 'text-emerald-600'}`}>
-                  {article.status === 'generating' ? '生成中——明早来看成稿' : '已成文 · 去公众号线改稿渲染后发布'}
+              ? <div className="mt-2">
+                <div className="text-[13.5px] font-medium leading-snug text-slate-800">{article.title}</div>
+                <div className={`mt-1 text-xs ${article.status === 'generating' ? 'text-sky-600' : 'text-emerald-600'}`}>
+                  {article.status === 'generating' ? '生成中' : '已成文'}
                 </div>
-                <button onClick={() => onNavigate('article')} className="btn-accent btn-xs mt-2.5">去改稿</button>
-              </>
-              : <div className="text-[13px] text-slate-400">今天还没有直出长文（没有值得写的热点会空过）</div>}
+                <button onClick={() => onNavigate('article')} className="mt-2 text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去改稿 →</button>
+              </div>
+              : <div className="mt-2 text-[13px] text-slate-300">今天没有直出（无相关热点空过）</div>}
           </section>
 
-          {/* 情报速览 */}
-          <section className="rounded-2xl border border-[#e8ecf0] bg-white p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900">情报速览</span>
-              <span className="text-[11px] text-slate-400">凌晨管线产出</span>
+          <section>
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-400">情报速览</h3>
+            <div className="mt-2 space-y-1.5 text-[13px]">
+              <div className="flex justify-between"><span className="text-slate-500">候选待定夺</span><span className="font-medium tabular-nums text-slate-900">81</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">组局号名单</span><span className="font-medium tabular-nums text-slate-900">75</span></div>
             </div>
-            <div className="space-y-2 text-[13px]">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">候选待定夺</span>
-                <span className="tabular-nums font-medium text-slate-900">{todos.draft > 0 ? drafts.length : 0} 新 + 存量</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">名单号（组局同行）</span>
-                <span className="text-slate-900">75</span>
-              </div>
-              <button onClick={() => onNavigate('leadgen')} className="btn-ghost btn-xs w-full">去挖号情报定夺</button>
-            </div>
+            <button onClick={() => onNavigate('leadgen')} className="mt-2 text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去定夺 →</button>
           </section>
 
-          {/* 昨夜管线 */}
-          <section className="rounded-2xl border border-[#e8ecf0] bg-white p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900">昨夜管线</span>
-              <span className="ml-auto text-[11px] text-slate-400">
-                {todos.failed > 0 ? <span className="text-red-500">{todos.failed} 失败</span> : <span className="text-emerald-600">全部正常</span>}
-                {' · '}进行中 {todos.active}
-              </span>
-            </div>
-            <div className="space-y-1.5">
+          <section>
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-400">昨夜管线</h3>
+            <div className="mt-2 space-y-1.5">
               {pipes.map((p) => {
                 const ok = (p.last_status || '').startsWith('ok')
                 return (
-                  <div key={p.key} className="flex items-center gap-2 text-[12.5px]">
+                  <div key={p.key} className="flex items-center gap-2 text-[13px]">
                     <span className={`size-1.5 shrink-0 rounded-full ${ok ? 'bg-emerald-500' : 'bg-red-400'}`} />
                     <span className="text-slate-600">{PIPE_LABEL[p.key] || p.label}</span>
-                    <span className="ml-auto text-[11px] text-slate-300">{(p.last_run_at || '').slice(5, 16).replace('T', ' ')}</span>
+                    <span className="ml-auto text-[11px] text-slate-300">{(p.last_run_at || '').slice(11, 16)}</span>
                   </div>
                 )
               })}
-              {pipes.length === 0 && <div className="text-xs text-slate-300">加载中…</div>}
+              {pipes.length === 0 && <div className="text-[13px] text-slate-300">—</div>}
             </div>
-            <button onClick={() => onNavigate('tasks')} className="btn-ghost btn-xs mt-2.5 w-full">去任务页</button>
+            <div className="mt-2 flex items-center gap-3 text-[12px]">
+              <span className="text-slate-400">进行中 {todos.active}</span>
+              {todos.failed > 0 && <span className="text-red-500">失败 {todos.failed}</span>}
+              <button onClick={() => onNavigate('tasks')} className="ml-auto text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">任务页 →</button>
+            </div>
           </section>
         </div>
       </div>
     </div>
   )
 }
+
+const LINE_TAG_ZH: Record<CandType, string> = { persona: '人设', leadgen: '获客' }
