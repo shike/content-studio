@@ -144,7 +144,11 @@ def server_down() -> bool:
 
 
 def ensure_speech_video(path: str) -> str | None:
-    """生成带中文语音的测试视频，返回路径；依赖缺失返回 None。"""
+    """生成带中文语音的测试视频，返回路径；依赖缺失返回 None。
+    已存在真语音版（随仓库同步，>200KB；无 say 环境生成的无声版 ~130KB）直接复用，
+    别在服务器上覆盖成 ASR 必空的正弦音视频（2026-11-07 服务器 P2 实测教训）。"""
+    if os.path.exists(path) and os.path.getsize(path) > 200_000:
+        return path
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "make_video.py")
     ret = subprocess.run(
         [sys.executable, script, "--out", path, "--speech",

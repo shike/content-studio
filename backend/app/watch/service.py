@@ -304,6 +304,9 @@ async def watch_scan(ctx, payload: dict) -> dict:
                 known.add(f"douyin:{m.group(1)}")
 
     backfilled = 0  # 整个扫描任务级累计（多账号循环外初始化，防部分账号无新增时未定义）
+    # 质量闸候选：任务级累计所有账号的新行（循环外初始化——此前定义在循环体内，
+    # 全账号抓取失败时 NameError；且质量闸只看最后一个账号，2026-11-07 P2 实测修）
+    new_row_ids: list[int] = []
     for i, acc in enumerate(douyin_accounts):
         ctx.set_progress(
             5 + int(85 * i / max(1, len(douyin_accounts))),
@@ -332,7 +335,6 @@ async def watch_scan(ctx, payload: dict) -> dict:
             continue
 
         created = 0
-        new_row_ids: list[int] = []
         for e in entries:
             vid = str(e.get("id") or "")
             stats = e.get("stats") or {}

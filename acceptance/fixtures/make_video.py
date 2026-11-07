@@ -60,6 +60,11 @@ def main() -> int:
                 print(f"say 生成语音失败: {ret.stderr.strip()[:200]}", file=sys.stderr)
                 return 1
             audio_args = ["-i", aiff]
+        elif args.speech:
+            # 要语音而没有 say（Linux）：响亮失败，绝不静默降级为无声正弦音——
+            # 那会生成 ASR 必空的视频，让 P2 拆解链断言全部饿死成 FAIL（2026-11-07 服务器实测）
+            print("要生成中文语音但缺 macOS say：语音 fixture 不可用（应跳过而非生成无声视频）", file=sys.stderr)
+            return 1
         else:
             audio_args = ["-f", "lavfi", "-i", "sine=frequency=440:duration=6"]
 
