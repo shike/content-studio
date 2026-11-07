@@ -83,14 +83,10 @@ def overview() -> dict:
         profile = s.exec(
             select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
         ).first()
-        history = s.exec(
-            select(StyleProfile).order_by(StyleProfile.version.desc()).limit(20)  # type: ignore[attr-defined]
-        ).all()
 
         return {
             "account": acc.model_dump() if acc else None,
             "profile": _profile_dict(profile) if profile else None,
-            "profile_history": [_profile_dict(p) for p in history],
             "videos": [{
                 "id": v.id, "title": v.title, "url": v.url,
                 "analyzed": v.analyzed_at is not None,
@@ -123,12 +119,3 @@ async def update_profile(user: User = Depends(require_user)) -> dict:
         raise HTTPException(status_code=400, detail="还没有已分析的视频，先扫描我的账号")
     job = await runner.submit("self_profile_update", {}, dedup_key=f"{user.tenant_id}:profile:update")
     return {"job_id": job.id}
-
-
-@router.get("/profile/history")
-def profile_history() -> dict:
-    with Session(engine) as s:
-        rows = s.exec(
-            select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
-        ).all()
-        return {"items": [_profile_dict(p) for p in rows]}

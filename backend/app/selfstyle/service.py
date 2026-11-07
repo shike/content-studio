@@ -139,6 +139,22 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
 
     notes: list[str] = []
     queued = 0
+    # 存量 pending 自动转拆解（2026-11-07 用户定版：自己账号的视频默认全部自动拆解，
+    # 不再有待定夺态——每次扫描先把历史 pending 批准并排队分析，积压自动消化）
+    with Session(engine) as s:
+        backlog = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
+            SelfVideo.scan_status == "pending")).all()  # type: ignore[attr-defined]
+        for v in backlog:
+            v.scan_status = "approved"
+            s.add(v)
+        s.commit()
+        backlog_ids = [(v.tenant_id, v.id) for v in backlog]
+    for tid, vid in backlog_ids:
+        await runner.submit("self_analyze", {"video_id": vid},
+                            dedup_key=f"{tid}:selfanalyze:{vid}")
+    if backlog_ids:
+        notes.append(f"存量待定夺 {len(backlog_ids)} 条已自动转拆解")
+
     with Session(engine) as s:
         known = {v.aweme_id for v in s.exec(select(SelfVideo)).all() if v.aweme_id}
 
@@ -157,6 +173,7 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                 entries, err = None, str(e)
             if entries is not None:
                 created = updated = 0
+                new_ids: list[tuple[int, int]] = []
                 with Session(engine) as s:
                     for e in entries:
                         vid = str(e.get("id") or "")
@@ -165,14 +182,17 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                         row = s.exec(select(SelfVideo).where(
                             SelfVideo.aweme_id == vid)).first()  # type: ignore[attr-defined]
                         if row is None:
-                            s.add(SelfVideo(tenant_id=acc.tenant_id,  # 父账号继承（调度上下文无 ACTOR 归属）
-                                            url=f"https://www.douyin.com/video/{vid}",
-                                            aweme_id=vid,
-                                            title=str(e.get("title") or "")[:80],
-                                            stats=e.get("stats") or {},
-                                            published_at=str(e.get("published_at") or ""),
-                                            duration=int(e.get("duration") or 0),
-                                            scan_status="pending"))  # 待定夺，批准后进风格分析
+                            nv = SelfVideo(tenant_id=acc.tenant_id,  # 父账号继承（调度上下文无 ACTOR 归属）
+                                           url=f"https://www.douyin.com/video/{vid}",
+                                           aweme_id=vid,
+                                           title=str(e.get("title") or "")[:80],
+                                           stats=e.get("stats") or {},
+                                           published_at=str(e.get("published_at") or ""),
+                                           duration=int(e.get("duration") or 0),
+                                           scan_status="approved")  # 自动拆解（2026-11-07 定版，无待定夺态）
+                            s.add(nv)
+                            s.flush()  # 先取 id 再 commit（expire_on_commit 会话间属性陷阱）
+                            new_ids.append((acc.tenant_id, nv.id))
                             created += 1
                         else:
                             # 计数器单调：按字段取最大值合并（work_list 偶发吐 play=0 的滞后数据，
@@ -190,6 +210,9 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                             s.add(row)
                             updated += 1
                     s.commit()
+                for tid, vid in new_ids:
+                    await runner.submit("self_analyze", {"video_id": vid},
+                                        dedup_key=f"{tid}:selfanalyze:{vid}")
                 known |= {str(e.get("id")) for e in entries if e.get("id")}
                 queued += created
                 with Session(engine) as s:
@@ -217,9 +240,13 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                               url=f"https://www.douyin.com/video/{vid}",
                               aweme_id=vid, title=str(e.get("title") or "")[:80],
                               stats=e.get("stats") or {},
-                              scan_status="pending")  # 待定夺，批准后才风格拆解
+                              scan_status="approved")  # 自动拆解（2026-11-07 定版）
                 s.add(v)
+                s.flush()  # 先取 id 再 commit（expire_on_commit 会话间属性陷阱）
+                vid_row_id = v.id
                 s.commit()
+            await runner.submit("self_analyze", {"video_id": vid_row_id},
+                                dedup_key=f"{acc.tenant_id}:selfanalyze:{vid_row_id}")
             known.add(vid)
             created += 1
             queued += 1
@@ -229,7 +256,7 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                 row.last_scan_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 s.add(row)
                 s.commit()
-        notes.append(f"{acc.name}：新增 {created} 条（待定夺，批准后进风格分析）")
+        notes.append(f"{acc.name}：新增 {created} 条（已自动排队风格拆解）")
 
     ctx.set_progress(100, f"完成：新增 {queued} 条")
     return {"queued": queued, "notes": notes}

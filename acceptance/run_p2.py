@@ -226,7 +226,7 @@ check("self 账号创建（kind=self）", status == 201 and r.get("kind") == "se
 status, ov = request("GET", "/api/style/overview")
 ok = (status == 200 and isinstance(ov, dict)
       and (ov.get("account") or {}).get("kind") == "self"
-      and {"profile", "profile_history", "videos", "stats"} <= set(ov))
+      and {"profile", "videos", "stats"} <= set(ov))
 check("style overview 契约（含 self account/profile/videos/stats）", ok, f"status={status}")
 status, r2 = request("POST", "/api/style/profile/update")
 # 隔离库继承真实数据时可能已有已分析视频：状态自洽断言（0 条→400 拒绝；>0 条→202 受理）
@@ -241,9 +241,6 @@ if check("自我扫描任务受理（202）", status == 202 and bool(r2.get("job
     check("自我扫描任务显式终结（假链接不悬挂）",
           job is not None and job.get("status") in ("succeeded", "failed"),
           (job or {}).get("error") or ("" if job else "240s 超时"))
-status, h = request("GET", "/api/style/profile/history")
-check("画像历史接口契约", status == 200 and isinstance(h.get("items"), list),
-      f"status={status}")
 if self_id:
     status, _ = request("DELETE", f"/api/watch/accounts/{self_id}")
     check("self 账号清理", status == 200, f"status={status}")

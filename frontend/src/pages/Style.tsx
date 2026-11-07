@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
-  CircleAlert, Fingerprint, History, Play, RefreshCw, Sparkles,
+  CircleAlert, Fingerprint, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { api, waitJob } from '../api'
 import { Busy, EmptyState, ErrorLine, relTime, Pager, safeHref } from '../components'
@@ -46,10 +46,6 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
   const VLIMIT = 20
   const [busy, setBusy] = useState('')
   const [done, setDone] = useState('')
-  // 行级即时回显：拆解按钮点击后按钮自身变化+进度，不依赖页面顶部横幅（2026-10-03 用户反馈）
-  const [rowBusy, setRowBusy] = useState<{ id: number; msg: string } | null>(null)
-  const rowBusyRef = useRef<number | null>(null)
-  const [rowErr, setRowErr] = useState<{ id: number; msg: string } | null>(null)
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
@@ -85,31 +81,21 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
       const r = await api<{ job_id: number }>('/style/scan', { method: 'POST' })
       const job = await waitJob(r.job_id, (j) => setBusy(`扫描我的账号：${j.progress}% ${j.message}`))
       setBusy('')
-      setDone(`扫描完成：新增 ${job.result?.queued ?? 0} 条（待定夺，批准后进风格分析）`)
+      setDone(`扫描完成：新增 ${job.result?.queued ?? 0} 条，已自动排队风格拆解`)
       await reload()
     })
 
-  const resolveVideo = (id: number, action: 'approve' | 'ignore') =>
+  // 忽略出口只留给「无法判断」的废视频；正常视频已全自动拆解（2026-11-07 定版）
+  const ignoreVideo = (id: number) =>
     (async () => {
-      if (rowBusyRef.current !== null) return  // 防重入：已有行级任务在途（提交窗口/进行中均锁）
-      setRowErr(null)
-      rowBusyRef.current = id
-      setRowBusy({ id, msg: '提交中…' })  // 点击立即锁定（不等 POST 往返）
       try {
-        const r = await api<{ job_id?: number }>(`/style/videos/${id}/resolve`, {
+        await api(`/style/videos/${id}/resolve`, {
           method: 'POST',
-          body: JSON.stringify({ action }),
+          body: JSON.stringify({ action: 'ignore' }),
         })
-        if (r.job_id) {
-          await waitJob(r.job_id, (j) => setRowBusy({ id, msg: `拆解中 ${j.progress}%` }))
-        }
-        rowBusyRef.current = null
-        setRowBusy(null)
         await reload()
       } catch (e) {
-        rowBusyRef.current = null
-        setRowBusy(null)
-        setRowErr({ id, msg: String(e) })
+        setError(String(e))
       }
     })()
 
@@ -164,7 +150,6 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
       <div className="card mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>账号 <b className="text-zinc-900">{data?.account?.name || '—'}</b></span>
         <span>已分析 <b className="text-zinc-900">{data?.stats.analyzed ?? 0}</b> / {data?.stats.total ?? 0} 条</span>
-        {data?.stats.pending ? <span className="text-amber-600">待定夺 {data.stats.pending} 条</span> : null}
         <span>画像 <b className="text-zinc-900">{p ? `v${p.version}（基于 ${p.based_on} 条）` : '未生成'}</b></span>
         <span className="ml-auto text-[11px] text-slate-400">
           脚本生成默认注入画像，可在脚本工场按次关闭
@@ -217,7 +202,7 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
         </div>
       )}
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
+      <div className="mt-4">
         {/* 已分析视频 */}
         <div className="card overflow-hidden p-0">
           <div className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-zinc-900">
@@ -249,31 +234,15 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
                       {(() => {
                         const invalid = v.analyzed && String(v.style_analysis?.opening_pattern || '').startsWith('无法判断')
                         return (
-                        <span className={`badge shrink-0 ${invalid ? 'bg-slate-200 text-slate-500' : v.analyzed ? 'bg-emerald-100 text-emerald-700' : v.scan_status === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-500'}`}>
-                          {invalid ? '无可分析内容' : v.analyzed ? '已拆解' : v.scan_status === 'pending' ? '待定夺' : '待拆解'}
+                        <span className={`badge shrink-0 ${invalid ? 'bg-slate-200 text-slate-500' : v.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                          {invalid ? '无可分析内容' : v.analyzed ? '已拆解' : '待拆解'}
                         </span>
                         )
                       })()}
                       <span className="truncate text-[13px] text-zinc-800">{v.title || `视频 #${v.id}`}</span>
                       <span className="ml-auto shrink-0 flex items-center gap-1.5">
-                        {v.scan_status === 'pending' && !v.analyzed && (
-                          rowBusy?.id === v.id ? (
-                            <button className="btn-accent btn-xs" disabled>
-                              <span className="inline-block size-2.5 animate-spin rounded-full border border-emerald-200 border-t-emerald-600" />
-                              {rowBusy.msg}
-                            </button>
-                          ) : (
-                            <>
-                              <button onClick={(e) => { e.stopPropagation(); resolveVideo(v.id, 'approve') }} className="btn-accent btn-xs">拆解</button>
-                              <button onClick={(e) => { e.stopPropagation(); resolveVideo(v.id, 'ignore') }} className="btn-ghost btn-xs text-slate-400">忽略</button>
-                            </>
-                          )
-                        )}
-                        {rowErr?.id === v.id && (
-                          <span className="max-w-40 truncate text-[11px] text-red-500" title={rowErr.msg}>{rowErr.msg}</span>
-                        )}
                         {v.analyzed && String(v.style_analysis?.opening_pattern || '').startsWith('无法判断') && (
-                          <button onClick={(e) => { e.stopPropagation(); resolveVideo(v.id, 'ignore') }} className="btn-ghost btn-xs text-slate-400">忽略</button>
+                          <button onClick={(e) => { e.stopPropagation(); ignoreVideo(v.id) }} className="btn-ghost btn-xs text-slate-400">忽略</button>
                         )}
                         <span className="text-[11px] text-slate-400">{relTime(v.analyzed_at || undefined)}</span>
                       </span>
@@ -325,28 +294,6 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
             </div>
             <Pager total={vtotal} limit={VLIMIT} offset={voffset} onPage={setVoffset} />
             </>
-          )}
-        </div>
-
-        {/* 演化时间线 */}
-        <div className="card overflow-hidden p-0">
-          <div className="flex items-center gap-1.5 border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-zinc-900">
-            <History size={14} className="text-sky-600" /> 画像演化
-          </div>
-          {(data?.profile_history.length ?? 0) === 0 ? (
-            <div className="p-5 text-[13px] text-slate-400">首版画像生成后，这里记录每一次演化。</div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {data!.profile_history.map((h) => (
-                <details key={h.version} className="group px-4 py-2.5">
-                  <summary className="flex cursor-pointer items-center gap-2 text-[13px]">
-                    <span className="font-semibold text-zinc-800">v{h.version}</span>
-                    <span className="text-[11px] text-slate-400">{h.based_on} 条 · {relTime(h.created_at)}</span>
-                  </summary>
-                  <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{h.digest}</p>
-                </details>
-              ))}
-            </div>
           )}
         </div>
       </div>
