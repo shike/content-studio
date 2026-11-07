@@ -28,7 +28,6 @@ import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
 import Topics from './pages/Topics'
 import Scripts from './pages/Scripts'
-import Style from './pages/Style'
 import TopicInsights from './pages/TopicInsights'
 import AccountTrends from './pages/AccountTrends'
 import Benchmarks from './pages/Benchmarks'
@@ -42,13 +41,13 @@ import Mobile from './Mobile'
 /**
  * 产线树导航（2026-11-07 用户定版方案三·原型拍板）：每条线的页面直接摆在侧栏，
  * 可展开收起（记住展开态），徽章落在每个页面自身——目的地不再藏在页内 tab 里。
- * 人设号=选题库/内容看板/风格画像/账号经营/对标拆解/候选定夺/监控清单；
+ * 人设号=选题库/内容看板/账号经营（含风格画像，2026-11-07 用户拍板合并）/对标拆解/候选定夺/监控清单；
  * 获客号=获客选题/脚本工场/纯获客候选/获客监控/打法卡库；公众号=报题与长文/风格画像。
  * 旧 SectionKey 经 NAVMAP 兼容路由（内嵌页 onNavigate 不断链）。
  */
 export type SectionKey =
   | 'today' | 'tasks' | 'settings'
-  | 'p_topics' | 'p_content' | 'p_style' | 'p_own' | 'p_bench' | 'p_cand' | 'p_watch'
+  | 'p_topics' | 'p_content' | 'p_own' | 'p_bench' | 'p_cand' | 'p_watch'
   | 'l_topics' | 'l_scripts' | 'l_cand' | 'l_watch' | 'l_bench'
   | 'article' | 'a_style'
 
@@ -56,7 +55,7 @@ export type SectionKey =
 const NAVMAP: Record<string, SectionKey> = {
   dashboard: 'today', posters: 'today', publishing: 'today', digital: 'today',
   persona: 'p_topics', topics: 'p_topics', radar: 'p_topics',
-  scripts: 'p_content', style: 'p_style',
+  scripts: 'p_content', style: 'p_own',
   watch: 'p_watch', intel: 'p_cand', benchmarks: 'p_bench',
   leadgen: 'l_topics',
   articles: 'article',
@@ -82,7 +81,6 @@ const TREE: TreeGroup[] = [
     children: [
       { key: 'p_topics', label: '选题库', icon: Lightbulb },
       { key: 'p_content', label: '内容看板', icon: Clapperboard },
-      { key: 'p_style', label: '风格画像', icon: Sparkles },
       { key: 'p_own', label: '账号经营', icon: TrendingUp },
       { key: 'p_bench', label: '对标拆解', icon: Scissors },
       { key: 'p_cand', label: '候选定夺', icon: UserCheck },
@@ -316,8 +314,7 @@ export default function App() {
           {active === 'l_topics' && <Topics accountType="leadgen" />}
           {active === 'p_content' && <Scripts onNavigate={navTo} accountType="persona" />}
           {active === 'l_scripts' && <Scripts onNavigate={navTo} accountType="leadgen" />}
-          {active === 'p_style' && <Style onNavigate={navTo} />}
-          {active === 'p_own' && <AccountTrends />}
+          {active === 'p_own' && <AccountTrends onNavigate={navTo} />}
           {active === 'p_bench' && <Benchmarks accountType="persona" />}
           {active === 'l_bench' && <Benchmarks accountType="leadgen" />}
           {active === 'p_cand' && <DiscoveredAccounts accountType="persona" />}

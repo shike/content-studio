@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { TrendingUp } from 'lucide-react'
 import { api, waitJob } from '../api'
 import { PageHeader } from '../components'
+import StyleSection from './Style'
 
 interface MetricsRow {
   date: string
@@ -111,17 +112,19 @@ function WeeklyReportCard() {
   )
 }
 
-/** 账号经营（原「我的账号趋势」拆分，2026-10-30）：账号数据回流 + 视频表现周报。 */
-export default function AccountTrends() {
+/** 账号经营（2026-11-07 用户拍板与风格画像合并为一页）：自有账号数据回流 +
+视频表现周报 + 从自己作品提炼的风格画像。原两页：账号经营（2026-10-30 拆分）/ 我的风格。 */
+export default function AccountTrends({ onNavigate }: { onNavigate?: (k: string) => void }) {
   return (
     <div>
       <PageHeader
         icon={TrendingUp}
         title="账号经营"
-        desc="账号数据每日凌晨自动回流 · 视频表现周报"
+        desc="自有账号数据每日凌晨回流 · 视频表现周报 · 风格画像从自己作品提炼"
       />
       <AccountMetricsCard />
       <WeeklyReportCard />
+      <StyleSection onNavigate={onNavigate} />
     </div>
   )
 }

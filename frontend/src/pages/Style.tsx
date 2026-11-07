@@ -3,7 +3,7 @@ import {
   CircleAlert, Fingerprint, History, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { api, waitJob } from '../api'
-import { Busy, EmptyState, ErrorLine, PageHeader, relTime, Pager, safeHref } from '../components'
+import { Busy, EmptyState, ErrorLine, relTime, Pager, safeHref } from '../components'
 
 import type { SectionKey } from '../App'
 
@@ -34,7 +34,9 @@ interface Overview {
   stats: { total: number; analyzed: number; pending: number }
 }
 
-export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
+/** 风格画像区（2026-11-07 并入账号经营页，本组件不再自带页头）：
+从自己作品提炼说话方式，脚本生成时自动注入。 */
+export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
   const [data, setData] = useState<Overview | null>(null)
   const [videos, setVideos] = useState<SelfVideoRow[]>([])
   const [vtotal, setVtotal] = useState(0)
@@ -124,20 +126,17 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
 
   if (data && !data.account) {
     return (
-      <div>
-        <PageHeader icon={Fingerprint} title="我的风格" desc="持续研究自己的账号，让脚本贴近你的说话方式" />
-        <div className="card mt-4 p-6">
-          <EmptyState
-            icon={Fingerprint}
-            title="还没有标记「我的账号」"
-            desc="去「监测账号」标签添加你的账号链接，并勾选「这是我的账号」。系统会持续扫描你的新视频，提炼说话风格，生成脚本时自动贴合。"
-          />
-          {onNavigate && (
-            <div className="flex justify-center">
-              <button onClick={() => onNavigate('p_watch')} className="btn-accent">去监测账号添加 →</button>
-            </div>
-          )}
-        </div>
+      <div className="card mt-4 p-6">
+        <EmptyState
+          icon={Fingerprint}
+          title="还没有标记「我的账号」"
+          desc="去「监控清单」添加你的账号链接，并勾选「这是我的账号」。系统会持续扫描你的新视频，提炼说话风格，生成脚本时自动贴合。"
+        />
+        {onNavigate && (
+          <div className="flex justify-center">
+            <button onClick={() => onNavigate('p_watch')} className="btn-accent">去监控清单添加 →</button>
+          </div>
+        )}
         {error && <div className="mt-3"><ErrorLine text={error} /></div>}
       </div>
     )
@@ -146,24 +145,23 @@ export default function Style({ onNavigate }: { onNavigate?: (k: SectionKey) => 
   const p = data?.profile
 
   return (
-    <div>
-      <PageHeader
-        icon={Fingerprint}
-        title="我的风格"
-        desc="基于自己视频的风格画像，脚本生成时自动注入"
-        actions={
-          <div className="flex gap-2">
-            <button onClick={updateProfile} disabled={Boolean(busy) || !data?.stats.analyzed} className="btn-ghost disabled:opacity-40">
-              <RefreshCw size={14} /> 重算画像
-            </button>
-            <button onClick={scan} disabled={Boolean(busy)} className="btn-accent disabled:opacity-40">
-              <Play size={14} /> 扫描我的账号
-            </button>
-          </div>
-        }
-      />
+    <div className="mt-4">
+      {/* 小节头：标题 + 主操作（合并页内自己的动作留在自己的区块） */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Fingerprint size={16} className="text-[#0a2f24]" />
+        <span className="text-sm font-semibold text-zinc-900">风格画像</span>
+        <span className="text-[11px] text-slate-400">基于自己视频提炼说话方式，脚本生成时自动注入</span>
+        <div className="ml-auto flex gap-2">
+          <button onClick={updateProfile} disabled={Boolean(busy) || !data?.stats.analyzed} className="btn-ghost disabled:opacity-40">
+            <RefreshCw size={14} /> 重算画像
+          </button>
+          <button onClick={scan} disabled={Boolean(busy)} className="btn-accent disabled:opacity-40">
+            <Play size={14} /> 扫描我的账号
+          </button>
+        </div>
+      </div>
       {/* 状态行 */}
-      <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
+      <div className="card mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>账号 <b className="text-zinc-900">{data?.account?.name || '—'}</b></span>
         <span>已分析 <b className="text-zinc-900">{data?.stats.analyzed ?? 0}</b> / {data?.stats.total ?? 0} 条</span>
         {data?.stats.pending ? <span className="text-amber-600">待定夺 {data.stats.pending} 条</span> : null}
