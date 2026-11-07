@@ -103,11 +103,30 @@ function WeeklyReportCard() {
           ))}
         </div>
       )}
-      {Boolean(rep?.summary) && (
-        <div className="mt-3 rounded-xl bg-sky-50/70 px-3 py-2 text-[13px] leading-relaxed text-zinc-700">
-          {String(rep?.summary ?? '')}
-        </div>
-      )}
+      {Boolean(rep?.summary) && <SummaryText text={String(rep?.summary ?? '')} />}
+    </div>
+  )
+}
+
+/** 周报摘要轻量渲染：LLM 输出 **加粗**、空行分段、- 列表——原样塞 div 会被挤成
+一坨无结构纯文本（2026-11-07 用户指认格式混乱）。只处理这三样，别写通用 markdown。 */
+function SummaryText({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return (
+    <div className="mt-3 rounded-xl bg-sky-50/70 px-4 py-3 text-[13px] leading-relaxed text-zinc-700 space-y-1.5">
+      {lines.map((line, i) => {
+        const trimmed = line.trim()
+        if (!trimmed) return null
+        const isBullet = /^[-•]\s/.test(trimmed)
+        const content = isBullet ? trimmed.replace(/^[-•]\s/, '') : trimmed
+        const parts = content.split(/(\*\*[^*]+\*\*)/g).map((seg, j) =>
+          seg.startsWith('**') && seg.endsWith('**') && seg.length > 4
+            ? <strong key={j} className="font-semibold text-zinc-900">{seg.slice(2, -2)}</strong>
+            : <span key={j}>{seg}</span>)
+        return isBullet
+          ? <div key={i} className="flex gap-1.5"><span className="shrink-0 text-sky-500">•</span><span className="min-w-0">{parts}</span></div>
+          : <p key={i}>{parts}</p>
+      })}
     </div>
   )
 }
