@@ -273,7 +273,15 @@ async def self_analyze(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(10, "下载视频")
     media_path = v.media_path
     if not media_path:
-        media_path = await asyncio.to_thread(downloader.download_video, v.url, _SELF_DIR)
+        # 自有账号：匿名不可见的自家视频（私密/受限）走创作者中心登录态下载——
+        # 红线内用途（仅自有账号数据回流，他人内容仍一律匿名）；cookie 缺省=匿名路线
+        with Session(engine) as s:
+            acc = s.exec(select(WatchAccount).where(  # type: ignore[attr-defined]
+                WatchAccount.kind == "self",  # type: ignore[attr-defined]
+                WatchAccount.enabled == True,  # noqa: E712
+            )).first()
+        own_cookie = (acc.creator_cookie if acc else "") or ""
+        media_path = await asyncio.to_thread(downloader.download_video, v.url, _SELF_DIR, own_cookie)
         with Session(engine) as s:
             v = s.get(SelfVideo, video_id)
             v.media_path = media_path

@@ -27,17 +27,11 @@ _WORK_LIST_PATH = "janus/douyin/creator/pc/work_list"
 
 
 def _parse_cookie(cookie_str: str) -> list[dict]:
-    """整串 Cookie 头 → playwright cookie 列表（.douyin.com 全域）。"""
-    out: list[dict] = []
-    for part in cookie_str.replace("\n", "").split(";"):
-        if "=" not in part:
-            continue
-        k, _, v = part.strip().partition("=")
-        if not k.strip():
-            continue
-        out.append({"name": k.strip(), "value": v.strip(),
-                    "domain": ".douyin.com", "path": "/"})
-    return out
+    """整串 Cookie 头 → playwright cookie 列表（.douyin.com 全域）。
+    （2026-11-08 实现上移 browser.parse_cookie_header 供下载器登录态共用）"""
+    from ..browser import parse_cookie_header
+
+    return parse_cookie_header(cookie_str)
 
 
 def _entry_of(raw: dict) -> Optional[dict]:

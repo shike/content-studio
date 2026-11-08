@@ -35,12 +35,13 @@ def _ensure_disk_space(min_gb: int = 2) -> None:
             "请清理磁盘后在任务页按指纹复活这批任务")
 
 
-def download_video(url: str, out_dir: Path) -> str:
-    """返回本地 mp4 路径。"""
+def download_video(url: str, out_dir: Path, cookie: str = "") -> str:
+    """返回本地 mp4 路径。cookie=自有账号的创作者中心登录态（红线：仅限自有内容
+    ——匿名不可见的自家视频走登录态下载；他人内容一律匿名，永不带登录态）。"""
     _ensure_disk_space()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    path, pw_error = _try_playwright(url, out_dir)
+    path, pw_error = _try_playwright(url, out_dir, cookie)
     if path:
         return path
 
@@ -123,7 +124,7 @@ def _download_mp4(video_url: str, out_dir: Path) -> Optional[str]:
     return str(path) if path.stat().st_size > 0 else None
 
 
-def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[str]]:
+def _try_playwright(url: str, out_dir: Path, cookie: str = "") -> tuple[Optional[str], Optional[str]]:
     """真浏览器路线：打开视频页，拦页面自身发出的 aweme/detail（自带合法签名与访客身份）。
 
     2026-10-27 定论：必须用**与运行平台一致**的指纹——Mac UA 跑在 Linux 上=不一致指纹，
@@ -146,6 +147,10 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
 
             ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
                                       viewport={"width": 1280, "height": 800})
+            if cookie.strip():
+                from ..browser import parse_cookie_header
+
+                ctx.add_cookies(parse_cookie_header(cookie))  # 仅自有账号数据回流（红线）
             page = ctx.new_page()
 
             def on_response(resp):

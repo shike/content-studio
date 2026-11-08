@@ -38,6 +38,21 @@ _UA_MAC = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
            "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
 
 
+def parse_cookie_header(cookie_str: str) -> list[dict]:
+    """整串 Cookie 头 → playwright cookie 列表（.douyin.com 全域）。
+    共享基建（2026-11-08 从 creator_center 上移）：登录态仅用于自有账号数据回流（红线）。"""
+    out: list[dict] = []
+    for part in (cookie_str or "").replace("\n", "").split(";"):
+        if "=" not in part:
+            continue
+        k, _, v = part.strip().partition("=")
+        if not k.strip():
+            continue
+        out.append({"name": k.strip(), "value": v.strip(),
+                    "domain": ".douyin.com", "path": "/"})
+    return out
+
+
 def ua(mobile: bool = False) -> str:
     override = (settings.douyin_ua or "").strip()
     if override:
