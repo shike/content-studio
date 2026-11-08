@@ -229,7 +229,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
     if (filter === 'bad') return Boolean(a.last_scan_at) && isAbnormal(a)
     return true
   })
-  const APAGE = 20
+  const APAGE = 10  // 每页 10 个（2026-11-08 用户定版）
   const apages = Math.max(1, Math.ceil(filtered.length / APAGE))
   const apage = Math.min(apageRaw, apages - 1)
   const pagedAccounts = filtered.slice(apage * APAGE, (apage + 1) * APAGE)
