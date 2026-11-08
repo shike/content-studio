@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  CircleAlert, Fingerprint, Play, RefreshCw, Sparkles,
-} from 'lucide-react'
-import { api, waitJob } from '../api'
+import { CircleAlert, Fingerprint, Sparkles } from 'lucide-react'
+import { api } from '../api'
 import { Busy, EmptyState, ErrorLine, relTime, Pager, safeHref } from '../components'
 
 import type { SectionKey } from '../App'
@@ -43,9 +41,7 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
   const [voffset, setVoffset] = useState(0)
   const [vstatus, setVstatus] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
-  const VLIMIT = 20
-  const [busy, setBusy] = useState('')
-  const [done, setDone] = useState('')
+  const VLIMIT = 5  // 每页 5 条（2026-11-08 用户定版：不占页面篇幅）
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
@@ -64,27 +60,6 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
     reload().catch((e) => setError(String(e)))
   }, [reload])
 
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const scan = () =>
-    guard(async () => {
-      setDone('')
-      const r = await api<{ job_id: number }>('/style/scan', { method: 'POST' })
-      const job = await waitJob(r.job_id, (j) => setBusy(`扫描我的账号：${j.progress}% ${j.message}`))
-      setBusy('')
-      setDone(`扫描完成：新增 ${job.result?.queued ?? 0} 条，已自动排队风格拆解`)
-      await reload()
-    })
-
   // 忽略出口只留给「无法判断」的废视频；正常视频已全自动拆解（2026-11-07 定版）
   const ignoreVideo = (id: number) =>
     (async () => {
@@ -99,24 +74,13 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
       }
     })()
 
-  const updateProfile = () =>
-    guard(async () => {
-      setDone('')
-      const r = await api<{ job_id: number }>('/style/profile/update', { method: 'POST' })
-      const job = await waitJob(r.job_id, (j) => setBusy(`重算画像：${j.progress}% ${j.message}`))
-      setBusy('')
-      const v = (job.result?.version as number) ?? ''
-      setDone(`画像 v${v} 已生成`)
-      await reload()
-    })
-
   if (data && !data.account) {
     return (
       <div className="card mt-4 p-6">
         <EmptyState
           icon={Fingerprint}
           title="还没有标记「我的账号」"
-          desc="去「监控清单」添加你的账号链接，并勾选「这是我的账号」。系统会持续扫描你的新视频，提炼说话风格，生成脚本时自动贴合。"
+          desc="在「监控清单」添加你的账号并勾选「这是我的账号」——新视频每晚自动扫描拆解。"
         />
         {onNavigate && (
           <div className="flex justify-center">
@@ -132,42 +96,25 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
 
   return (
     <div className="mt-4">
-      {/* 小节头：标题 + 主操作（合并页内自己的动作留在自己的区块） */}
+      {/* 小节头 */}
       <div className="flex flex-wrap items-center gap-2">
         <Fingerprint size={16} className="text-[#0a2f24]" />
         <span className="text-sm font-semibold text-zinc-900">风格画像</span>
-        <span className="text-[11px] text-slate-400">基于自己视频提炼说话方式，脚本生成时自动注入</span>
-        <div className="ml-auto flex gap-2">
-          <button onClick={updateProfile} disabled={Boolean(busy) || !data?.stats.analyzed} className="btn-ghost disabled:opacity-40">
-            <RefreshCw size={14} /> 重算画像
-          </button>
-          <button onClick={scan} disabled={Boolean(busy)} className="btn-accent disabled:opacity-40">
-            <Play size={14} /> 扫描我的账号
-          </button>
-        </div>
+        <span className="text-[11px] text-slate-400">脚本自动贴合我的说话方式</span>
       </div>
       {/* 状态行 */}
       <div className="card mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>账号 <b className="text-zinc-900">{data?.account?.name || '—'}</b></span>
         <span>已分析 <b className="text-zinc-900">{data?.stats.analyzed ?? 0}</b> / {data?.stats.total ?? 0} 条</span>
         <span>画像 <b className="text-zinc-900">{p ? `v${p.version}（基于 ${p.based_on} 条）` : '未生成'}</b></span>
-        <span className="ml-auto text-[11px] text-slate-400">
-          脚本生成默认注入画像，可在脚本工场按次关闭
-        </span>
       </div>
 
-      {busy && <div className="mt-3"><Busy text={busy} /></div>}
-      {done && (
-        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm text-emerald-800">
-          {done}
-        </div>
-      )}
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
 
       {!p && (
         <div className="card mt-4 flex items-center gap-2.5 border-amber-200 bg-amber-50/60 px-4 py-3 text-[13px] text-amber-800">
           <CircleAlert size={15} />
-          画像还没生成：扫描拆解积累几条视频后自动出首版，也可点右上角「重算画像」手动生成。
+          画像还没生成——已分析视频里还没有足够的口播风格标注（无语音视频自动跳过），积累后自动生成。
         </div>
       )}
 
@@ -217,7 +164,7 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
             ))}
           </div>
           {videos.length === 0 ? (
-            <div className="p-5 text-[13px] text-slate-400">还没有视频，点右上角「扫描我的账号」开始。</div>
+            <div className="p-5 text-[13px] text-slate-400">还没有视频。每晚自动扫描我的账号，新视频自动进拆解。</div>
           ) : (
             <>
             <div className="divide-y divide-slate-100">

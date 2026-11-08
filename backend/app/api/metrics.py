@@ -29,6 +29,7 @@ def account_metrics(days: int = 30, user: User = Depends(require_user)) -> dict:
     for r in rows:
         items.append({
             "date": r.date, "fans": r.fans, "new_fans": r.new_fans,
+            "cancel_fans": r.cancel_fans,
             "profile_views": r.profile_views, "play": r.play,
             "digg": r.digg, "comment": r.comment, "share": r.share,
             "account_search": r.account_search, "post_search": r.post_search,
