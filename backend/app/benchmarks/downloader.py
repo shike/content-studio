@@ -186,6 +186,12 @@ def _try_playwright(url: str, out_dir: Path) -> tuple[Optional[str], Optional[st
         # 失败原因按"可观察事实"归类（2026-10-28 二次修正：页面 HTML 的 JS 里本来就
         # 带"验证码"字样，html 关键词搜出一律误判 captcha 喂熔断——只有标题/专用 DOM
         # 命中才算真验证码；有 detail 无直链=直链被限，不说成验证码）
+        # aweme_detail 为空 dict/None（2026-11-08 生产探针实证：detail XHR 正常到达但
+        # 载荷为空、页标题为通用占位）=该视频对匿名访问不可见（已删除/私密/受限），
+        # 确定性终态，重试无意义——与「有 detail 无直链」严格区分，别再误导重试
+        ad = detail.get("aweme_detail") if isinstance(detail, dict) else None
+        if detail and not ad:
+            return None, "该视频对匿名访问不可见（已删除/私密或受限）——App 内确认后可忽略，不再重试"
         if detail:
             return None, "详情数据已返回但未含播放直链（内容形态特殊或数据不完整），稍后自动重试"
         if re.search(r"安全验证|验证码|captcha", title_text, re.I):
