@@ -90,18 +90,7 @@ class ResolveIn(BaseModel):
     url: str
 
 
-def _parse_scores(note: str) -> dict | None:
-    """从备注解析实测评分文本：实测评分(相关/质量/综合)：9/7.5/9.0。"""
-    import re
 
-    m = re.search(r"实测评分\(相关/质量/综合\)：([\d.]+)/([\d.]+)/([\d.]+)", note or "")
-    if not m:
-        return None
-    try:
-        return {"relevance": float(m.group(1)), "quality": float(m.group(2)),
-                "overall": float(m.group(3))}
-    except ValueError:
-        return None
 
 
 @router.get("/accounts")
@@ -133,7 +122,6 @@ def list_accounts(account_type: str = "") -> dict:
             d["has_cookie"] = bool(r.creator_cookie)
             d["video_total"] = st["total"]
             d["video_recent_7d"] = st["recent"]
-            d["scores"] = _parse_scores(r.note or "")
             items.append(d)
     return {"items": items}
 
