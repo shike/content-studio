@@ -394,9 +394,11 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                           {acc.platform === 'douyin' ? '抖音' : '视频号'}
                         </span>
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-slate-400">
-                        {noteOf(acc.name) || acc.note || acc.url}
-                      </div>
+                      {acc.note && (
+                        <div className="mt-0.5 truncate text-xs text-slate-400">
+                          {acc.note}
+                        </div>
+                      )}
                     </div>
                     <span className="hidden w-20 shrink-0 text-right text-[11px] text-slate-400 md:inline">
                       近7天 {acc.video_recent_7d} / 共{acc.video_total}
