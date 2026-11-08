@@ -7,12 +7,6 @@ import {
   Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime, safeHref } from '../components'
 import type { SectionKey } from '../App'
 
-interface Score {
-  relevance: number
-  quality: number
-  overall: number
-}
-
 interface WatchAccount {
   id: number
   platform: string
@@ -25,7 +19,6 @@ interface WatchAccount {
   last_scan_at: string | null
   video_total: number
   video_recent_7d: number
-  scores: Score | null
 }
 
 interface ScanJob {
@@ -253,7 +246,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
       <PageHeader
         icon={Radar}
         title="监控的账号"
-        desc="对标账号管理与扫描监测：扫描自动把新视频入库拆解库「待定夺」，批准后进拆解流水线"
+        desc="监控的对标账号 · 新视频自动进拆解库"
         actions={
           <div className="flex gap-2">
             <button onClick={() => { setForm((f) => ({ ...f, account_type: accountType || 'persona' })); setShowAdd((v) => !v) }} className="btn-ghost">
@@ -271,9 +264,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
         <span>监控中 <b className="text-zinc-900">{counts.on}</b></span>
         <span>已停用 <b className="text-zinc-900">{counts.off}</b></span>
         <span>上次扫描 <b className="text-zinc-900">{lastScan ? relTime(lastScan) : '从未'}</b></span>
-        <span className="ml-auto text-[11px] text-slate-400">
-          自动扫描；每号每次最多排 10 条新视频，视频号仅支持本地上传拆解
-        </span>
       </div>
 
       {/* 添加账号（行内表单：贴链接识别 / 搜账号） */}
@@ -330,9 +320,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                 </button>
               </div>
               {resolveHint && <div className="text-xs text-sky-600">{resolveHint}</div>}
-              <div className="text-[11px] text-slate-400">
-                自动识别：贴视频链接自动反查（昵称+主页自动回填）；贴主页链接直接读主页标题。
-              </div>
             </>
         </div>
       )}
@@ -341,10 +328,10 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
       {scanBusy && <div className="mt-3"><Busy text={scanBusy} /></div>}
       {scanSummary && !scanBusy && (
         <div className="card mt-3 border-emerald-200 bg-emerald-50/50 px-4 py-2.5 text-[13px] text-emerald-800">
-          本次新入库 <b>{scanSummary.queued}</b> 条（待定夺，批准后进拆解队列）
+          本次新入库 <b>{scanSummary.queued}</b> 条
           {scanSummary.notes.length > 0 && (
             <details className="mt-1">
-              <summary className="cursor-pointer text-xs text-emerald-700">各账号路线/结果（展开）</summary>
+              <summary className="cursor-pointer text-xs text-emerald-700">展开明细</summary>
               <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
                 {scanSummary.notes.map((n, i) => (
                   <li key={i}>· {n}</li>
@@ -377,7 +364,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
             <EmptyState
               icon={Radar}
               title={accountType === 'leadgen' ? '还没有获客号监控' : '还没有对标账号'}
-              desc="点右上角「添加账号」，贴对标账号的主页链接或任意视频分享链接，自动识别昵称与主页。"
+              desc="点右上角「添加账号」，贴对标主页或任意视频分享链接。"
             />
           </div>
         ) : (
@@ -411,13 +398,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                         {noteOf(acc.name) || acc.note || acc.url}
                       </div>
                     </div>
-                    {acc.scores ? (
-                      <span className="shrink-0 text-right text-xs text-slate-500" title={`相关性 ${acc.scores.relevance} / 质量 ${acc.scores.quality}`}>
-                        综合 <b className={`text-sm ${acc.scores.overall >= 7.5 ? 'text-sky-600' : 'text-slate-400'}`}>{acc.scores.overall}</b>
-                      </span>
-                    ) : (
-                      <span className="shrink-0 text-xs text-slate-300">未评分</span>
-                    )}
                     <span className="hidden w-20 shrink-0 text-right text-[11px] text-slate-400 md:inline">
                       近7天 {acc.video_recent_7d} / 共{acc.video_total}
                     </span>
@@ -506,11 +486,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                           <div className="space-y-1 text-[13px] text-slate-600">
                             <div>链接：<a className="break-all text-sky-600 hover:underline" href={safeHref(detail.url)} target="_blank" rel="noreferrer">{detail.url}</a></div>
                             <div className="whitespace-pre-wrap">{detail.note || '（无备注）'}</div>
-                            {detail.scores && (
-                              <div className="text-xs text-slate-400">
-                                实测评分：相关性 {detail.scores.relevance} · 质量 {detail.scores.quality} · 综合 {detail.scores.overall}
-                              </div>
-                            )}
                           </div>
                         </div>
                         <div>
