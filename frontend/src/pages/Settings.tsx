@@ -15,9 +15,6 @@ interface AppSettings {
   asr_model: string
   watch_scan_enabled: boolean
   watch_scan_hour: number
-  auto_dissect_enabled: boolean
-  auto_dissect_min_score: number
-  auto_dissect_daily_cap: number
 }
 
 const MODELS = ['glm-5.3-flash', 'glm-5.3']
@@ -56,9 +53,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   const [search, setSearch] = useState('')
   const [scanEnabled, setScanEnabled] = useState(true)
   const [scanHour, setScanHour] = useState(1)
-  const [autoDissect, setAutoDissect] = useState(true)
-  const [autoMinScore, setAutoMinScore] = useState(8)
-  const [autoCap, setAutoCap] = useState(4)
   const [pingReply, setPingReply] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -76,9 +70,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     setSearch(c.search_provider)
     setScanEnabled(c.watch_scan_enabled)
     setScanHour(c.watch_scan_hour)
-    setAutoDissect(c.auto_dissect_enabled)
-    setAutoMinScore(c.auto_dissect_min_score)
-    setAutoCap(c.auto_dissect_daily_cap)
   }, [])
 
   useEffect(() => {
@@ -110,7 +101,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     guard(async () => {
       if (!conf) return
       setBusy('保存中（运行时生效）…')
-      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour, auto_dissect_enabled: autoDissect, auto_dissect_min_score: autoMinScore, auto_dissect_daily_cap: autoCap }
+      const body: Record<string, unknown> = { llm_model: model, search_provider: search, watch_scan_enabled: scanEnabled, watch_scan_hour: scanHour }
       const r = await api<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) })
       setConf(r)
       setPingReply('')
@@ -294,34 +285,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                   </select>
                 </span>
               </div>
-              <div className="space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={autoDissect}
-                    onChange={(e) => setAutoDissect(e.target.checked)}
-                    className="size-4 accent-sky-500"
-                  />
-                  质量闸自动拆解
-                </label>
-                <div className="flex items-center gap-2 text-sm text-slate-700">
-                  门槛（热度分≥）
-                  <input
-                    type="number"
-                    value={autoMinScore}
-                    onChange={(e) => setAutoMinScore(Number(e.target.value) || 0)}
-                    className="input max-w-20"
-                  />
-                  每日上限
-                  <input
-                    type="number"
-                    value={autoCap}
-                    onChange={(e) => setAutoCap(Number(e.target.value) || 0)}
-                    className="input max-w-20"
-                  />
-                  条
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -329,7 +292,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
 
       {/* 保存条 */}
       <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
-        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour || autoDissect !== conf.auto_dissect_enabled || autoMinScore !== conf.auto_dissect_min_score || autoCap !== conf.auto_dissect_daily_cap) && (
+        {conf && (model !== conf.llm_model || search !== conf.search_provider || scanEnabled !== conf.watch_scan_enabled || scanHour !== conf.watch_scan_hour) && (
           <div className="flex items-center gap-3 rounded-2xl bg-slate-900 px-5 py-3 text-sm text-slate-100 shadow-xl">
             <span>
               待保存：<b className="text-sky-400">{model}</b>

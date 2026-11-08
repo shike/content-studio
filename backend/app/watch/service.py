@@ -29,7 +29,7 @@ from ..jobs.errors import TransientError
 from ..jobs.runner import register_concurrent, register_executor, runner
 from ..models import BenchmarkVideo, HarvestProfile, Topic, WatchAccount, WatchCandidate
 
-_MAX_NEW_PER_ACCOUNT = 10  # 每账号每次扫描最多排队拆解的新视频数（控 LLM 成本）
+_MAX_NEW_PER_ACCOUNT = 0  # 已废止（2026-11-08 用户定版：监控内容全量自动拆解，不设上限）
 _LIST_LIMIT = 20          # 每账号最多看最近 N 条
 
 
@@ -291,6 +291,21 @@ async def watch_scan(ctx, payload: dict) -> dict:
     douyin_accounts = [a for a in accounts if a.platform == "douyin"]
     notes: list[str] = []
     queued = 0
+    # 存量待定夺清扫（2026-11-08 用户定版：监控内容全量自动拆解——历史 pending 一律批准排队）
+    with Session(engine) as s:
+        backlog = s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+            BenchmarkVideo.scan_status == "pending")).all()  # type: ignore[attr-defined]
+        for b in backlog:
+            b.scan_status = "approved"
+            b.notes = "自动拆解（存量清扫）"
+            s.add(b)
+        s.commit()
+        backlog_ids = [b.id for b in backlog]
+    for bid in backlog_ids:
+        await runner.submit("benchmark_analyze", {"benchmark_id": bid},
+                            dedup_key=f"bm:{bid}")
+    if backlog_ids:
+        notes.append(f"存量待定夺 {len(backlog_ids)} 条已自动转拆解")
 
     with Session(engine) as s:
         known = {b.url for b in s.exec(
@@ -351,8 +366,6 @@ async def watch_scan(ctx, payload: dict) -> dict:
                             s.commit()
                             backfilled += 1
                 continue
-            if created >= _MAX_NEW_PER_ACCOUNT:
-                break
             url = e.get("url") or f"https://www.douyin.com/video/{vid}"
             with Session(engine) as s:
                 b = BenchmarkVideo(
@@ -363,7 +376,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
                     stats=stats,
                     source="douyin",
                     account_type=acc.account_type,  # 两类号策略：拆解 prompt 按账号类型分叉
-                    scan_status="pending",  # 只发现不拆解，人工定夺后入队
+                    scan_status="pending",  # 短暂待定夺态，扫描末尾全量批准排队拆解（2026-11-08 定版）
                 )
                 s.add(b)
                 s.commit()
@@ -394,7 +407,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
             rows = [r for r in rows if r is not None]
             n_auto = await bms.auto_dissect_rows(rows, "同行扫描")
             if n_auto:
-                notes.append(f"质量闸自动拆解 {n_auto} 条（达标自动批准，超出门槛的其余保留待定夺）")
+                notes.append(f"自动拆解 {n_auto} 条（监控内容全量自动，无门槛）")
         except Exception as e:  # noqa: BLE001 自动拆解失败不影响扫描本身
             notes.append(f"质量闸自动拆解失败：{type(e).__name__}: {str(e)[:80]}")
 

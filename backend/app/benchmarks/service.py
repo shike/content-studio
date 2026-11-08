@@ -53,70 +53,23 @@ _BENCHMARK_DIR = settings.data_dir / "benchmarks"
 _BENCHMARK_DIR = settings.data_dir / "benchmarks"
 
 async def auto_dissect_rows(rows: list, source_tag: str) -> int:
-    """质量闸自动拆解（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：
-    达标行自动批准并提交拆解，其余保持待定夺。
-
-    - 评分口径 = content_score（赞粉比×赞数量结合，0~10），门槛 settings.auto_dissect_min_score
-    - 上限：今日已自动批准数 < settings.auto_dissect_daily_cap（控下载与 LLM 成本，
-      计数口径=notes 带自动批准标记且 created_at 为今天的行）
-    - 同批按分数降序取优；未达标/超限行原样保留待定夺（人不看也不碍事，想捞随时可批），
-      分数落行（quality_score）供选题库排序。
-    返回本次自动批准条数。"""
-    import json as _json
-
-    if not settings.auto_dissect_enabled or not rows:
-        return 0
-    from datetime import datetime, timezone
-
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    with Session(engine) as s:
-        already = sum(
-            1 for r in s.exec(
-                select(BenchmarkVideo).where(  # type: ignore[attr-defined]
-                    BenchmarkVideo.notes.like("%自动批准%")  # type: ignore[attr-defined]
-                )).all()
-            if (r.created_at or "")[:10] == today)
-    budget = max(0, settings.auto_dissect_daily_cap - already)
-    if budget <= 0:
-        return 0
-
-    from ..quality import content_score
-
-    def _score(r):
-        try:
-            st = _json.loads(r.stats) if isinstance(r.stats, str) else (r.stats or {})
-        except Exception:  # noqa: BLE001 stats 缺损按 0 分
-            st = {}
-        return content_score(int(st.get("digg") or 0), int(st.get("followers") or 0))
-
-    # 两类号分口径（2026-10-28）：获客型对标号的新作品豁免热度分门槛——
-    # 它们的价值是打法学习（内容数据通常不高），热度闸只用于人设型内容
-    leadgen_rows = [r for r in rows if r.account_type == "leadgen"]
-    persona_rows = [r for r in rows if r.account_type != "leadgen"]
-    ranked = sorted(persona_rows, key=_score, reverse=True)
-    queue = [(r, None) for r in leadgen_rows] + [(r, _score(r)) for r in ranked]
-    approved = 0
-    for r, score in queue:
-        if approved >= budget:
-            break
-        if score is not None and score < settings.auto_dissect_min_score:
-            continue
+    """全量自动拆解（2026-11-08 用户定版：监控账号的内容全部自动拆解——
+    质量闸退役：无分数门槛/每日上限/开关）。待定夺行自动批准并排队拆解，
+    返回本次批准条数。"""
+    n = 0
+    for r in rows:
         with Session(engine) as s:
             row = s.get(BenchmarkVideo, r.id)
             if row is None or row.scan_status != "pending":
-                continue  # 已被人工处理/重复触发
+                continue  # 已被处理/重复触发
             row.scan_status = "approved"
-            if score is not None:
-                row.quality_score = score
-            mark = f"自动批准（{source_tag}，{'获客打法样本，免热度门槛' if score is None else f'热度分 {score}'}）"
-            row.notes = mark
+            row.notes = f"自动拆解（{source_tag}）"
             s.add(row)
             s.commit()
         await runner.submit("benchmark_analyze", {"benchmark_id": r.id},
                             dedup_key=f"bm:{r.id}")
-        approved += 1
-    return approved
-
+        n += 1
+    return n
 
 
 def cleanup_completed_media() -> int:

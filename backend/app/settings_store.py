@@ -31,9 +31,6 @@ MANAGED: dict[str, str] = {
     "watch_scan_enabled": "bool",
     "creator_data_enabled": "bool",
     "watch_scan_hour": "int",
-    "auto_dissect_enabled": "bool",
-    "auto_dissect_min_score": "float",
-    "auto_dissect_daily_cap": "int",
 }
 SECRET_KEYS = {k for k, t in MANAGED.items() if t == "secret"}
 
