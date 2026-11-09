@@ -50,6 +50,10 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
         pending_articles = s.execute(text(
             "SELECT COUNT(*) FROM articles WHERE status='pending' AND tenant_id=:tid"
         ), {"tid": tid}).scalar() or 0
+        # 知识库选题待拍板（2026-11-09 选题线上产品：选用/不做是本线唯一人工闸门）
+        kb_topics = s.execute(text(
+            "SELECT COUNT(*) FROM kb_topics WHERE status='new' AND tenant_id=:tid"
+        ), {"tid": tid}).scalar() or 0
         # 候选账号待定夺（2026-11-03 IA 收敛：情报并入产线，徽章随线走）
         cand_open_persona = s.execute(text(
             "SELECT COUNT(*) FROM watch_candidates WHERE status='open' AND account_type='persona' AND tenant_id=:tid"
@@ -65,6 +69,7 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
             "unwrittenTopics": unwritten,
             "unwrittenPersona": unwritten_persona, "unwrittenLeadgen": unwritten_leadgen,
             "pendingArticles": pending_articles,
+            "kbTopics": kb_topics,
             "openCandidatesPersona": cand_open_persona,
             "openCandidatesLeadgen": cand_open_leadgen,
             "finalScripts": final_scripts}

@@ -265,13 +265,22 @@ article:    draft ──► edited ──► rendered ──► published（由 
   全接口失败=TransientError 走退避。素材清单落 `articles.kb_sources`（JSON）随 GET 返回。
   开关关/未配置=旧行为（无 ima 依赖）。
 - `POST /api/articles/kb-topics` → 202 `{job_id}`（知识库选题线，R5.6）：遍历 ima 核心目录
-  （ima_topic_folders，默认 12 个核心区目录；轮换游标存 app_settings.ima_topic_cursor）→
-  文档台账 `kb_documents`（media_id 唯一，new/mined 状态机，一轮读完自动重置）→ 每轮取
-  12 篇标题+3 篇全文摘录 → LLM 产 ≤2 个「判断+绑定依据文档」选题（依据对不上文档的丢弃，
-  近期标题近义排除）→ pending 草稿（kb_doc_ids 落库）并自动链写 article_generate
-  （payload 带 kb_doc_ids：按绑定文档全文取材，优先级高于 kb_grounding 检索路径）。
+  （ima_topic_folders；轮换游标存 app_settings.ima_topic_cursor）→
+  文档台账 `kb_documents`（media_id 唯一，new/mined 状态机，断点续跑）→ 每轮取
+  12 篇标题+3 篇全文摘录 → LLM 产 ≤2 个「判断+绑定依据文档」选题（判断禁止复述依据文档
+  自身论点；依据对不上文档的丢弃，近期标题近义排除）→ 入 `kb_topics` 选题池（new 待选）。
   无合格选题=任务成功返回 topics:0（不硬凑）。调度 `article_kb_topics_daily` 每日凌晨 3 点
   （ima_kb_enabled 门控）。
+- `GET /api/articles/kb-topics?status=` 池列表；`POST /api/articles/kb-topics/{id}/select`
+  → 建 pending 草稿（kb_doc_ids 落库，topic 转 selected）并链写 `article_kb_write`：
+  依据文档全文取材 → 作者案头简报（增量判断，禁复述素材原论点）→ 带范本成文
+  （两篇认可稿全文进 prompt，1900~2200 字）→ 文风禁令机检（_kb_style_violations）→
+  命中定向重写（article_kb_polish）→ 图表/头图 → draft；topic 转 written。
+  `POST /api/articles/kb-topics/{id}/dismiss` 转 dismissed（留痕防回灌）。
+- 前端（2026-11-09 链路连贯性改造）：公众号组单叶「内容工场」`Workshop.tsx` 一页链完——
+  今天带（待拍板/待写/待改/待发）→ 选题池段（选用成文→页级成稿 callout「去审稿 ↓」）→
+  草稿箱段（来源标 知识库/报题、定位高亮、改稿渲染复制）；旧 Articles/KbTopics 两页删除，
+  旧 SectionKey 经 NAVMAP 兼容到 article。徽章=待拍板选题+待写报题稿（stats/todos.kbTopics）。
 
 ### 发布台（极简：只做物料包，发布人工）
 - `POST /api/publishing/packages` `{asset_type(script/article), asset_id}` → `{douyin_title, douyin_title_alt, douyin_tags[], channels_caption, cover_text, wechat_html?}`

@@ -13,6 +13,7 @@ export interface TodoStats {
   unwrittenPersona: number
   unwrittenLeadgen: number
   pendingArticles: number // 待写长文
+  kbTopics: number // 知识库选题待拍板
   openCandidatesPersona: number // 候选账号待定夺·人设线
   openCandidatesLeadgen: number // 候选账号待定夺·获客线
   finalScripts: number // 已定稿脚本
@@ -36,7 +37,7 @@ export interface MenuStats {
   l_scripts: number // 脚本工场=待定稿脚本·获客
   l_cand: number // 纯获客候选=候选待定夺·获客
   l_bench: number // 打法卡库=拆解待定夺·获客
-  article: number // 报题与长文=待写长文
+  article: number // 内容工场=待拍板选题+待写报题稿（2026-11-09 两页合并后本页全部待人工入口）
   tasks: number // 在途（运行中+排队+失败）
   failed: number // 终态失败计数（Today 待办卡用）
   tasks_alert: number // 失败>0 → 徽章变红
@@ -59,7 +60,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     l_scripts: todo.pendingScriptsLeadgen,
     l_cand: todo.openCandidatesLeadgen,
     l_bench: bmL.counts.pending,
-    article: todo.pendingArticles,
+    article: todo.kbTopics + todo.pendingArticles,
     // 在途 + 失败（失败是异常不是工作流：可见但不建流程，瞬时类由每日慢巡自愈）
     tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.failed || 0),
     failed: jobs.counts.failed || 0,
