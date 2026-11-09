@@ -544,6 +544,43 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         return {"article_id": article_id, "title": title, "style": style, "length": length}
 
 
+_KB_BAN_CONNECTORS = ("综上所述", "由此可见", "说到底", "总而言之")
+
+
+def _kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
+    """成文文风禁令机检：返回违规描述清单（空=干净）。提示词里的禁令靠模型自觉
+    不可靠（#8 实测「不是X而是Y」×5）——代码正则兜底，命中走定向重写。"""
+    out: list[str] = []
+    bs = re.findall(r"不是[^。！？\n]{1,24}[，,][^。！？\n]{0,6}?(而是|是)", md)
+    if len(bs) >= 2:
+        out.append(f"「不是X，而是/是Y」式对仗出现 {len(bs)} 次（全文至多 1 次），保留最关键的一处，其余改写为直陈句")
+    paras = [p.strip() for p in md.split("\n\n")]
+    singles = [p for p in paras[1:-1]
+               if 8 <= len(p) <= 30 and not p.startswith(("#", "|", "!", "-", "*"))
+               and p.count("。") <= 1 and "：" not in p]
+    if len(singles) >= 2:
+        out.append(f"单句成段的戏剧化排版出现 {len(singles)} 处（如「{singles[0][:20]}」），并回上下文段落")
+    if re.search(r"\*\*[^*\n]{1,24}\*\*[：:]", md):
+        out.append("存在「加粗论点+冒号」的要点句式，改为正常陈述句")
+    hits = [c for c in _KB_BAN_CONNECTORS if c in md]
+    if hits:
+        out.append(f"出现报告腔连接词 {'、'.join(hits)}，删除或改为直陈")
+    if re.search(r"最[^。，\n]{1,8}的一种", md):
+        out.append("出现「最X的一种」式标签，改为直陈")
+    heads = re.findall(r"^##+\s*\d", md, flags=re.M)
+    all_heads = re.findall(r"^##+ ", md, flags=re.M)
+    if len(heads) >= 3 and len(heads) == len(all_heads):
+        out.append("全部小节都是数字编号（01/02/03 模板骨架），改为直陈内容的小节标题或取消编号")
+    import difflib
+
+    for at in anchor_texts:
+        m = difflib.SequenceMatcher(None, md, at).get_matching_blocks()
+        longest = max(m, key=lambda b: b.size) if m else None
+        if longest is not None and longest.size >= 40:
+            out.append(f"正文与范本存在 {longest.size} 字连续重复（「{md[longest.a:longest.a + 30]}…」），必须改为原创表达")
+    return out
+
+
 @register_executor("article_kb_write", on_fail=_article_generate_fail)
 async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     """知识库选题成文：绑定依据文档全文，单遍写出书面语 1900~2200 字规格。
@@ -590,8 +627,25 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     if not got_any:
         raise TransientError("依据文档全文全部获取失败（ima 限流或文档不可读），稍后自动重试")
 
-    # 标题组（与主线同一 prompt：标题+备选）→ 正文单遍成文
-    ctx.set_progress(20, "起标题")
+    # 作者案头：先把"要说的一句新话"想出来（增量判断+主证据+砍料+带走动作）——
+    # 没有这道，成稿必然沦为对单篇依据文档的改写（#8 教训：判断=文档标题复述）
+    ctx.set_progress(18, "作者案头：提炼增量判断与主证据")
+    brief = None
+    try:
+        brief = await gateway.complete_json(
+            [{"role": "user", "content": render("article_kb_brief", MATERIAL=material)}],
+            purpose="article_kb_brief", max_tokens=4000, thinking="disabled")
+    except Exception as e:  # noqa: BLE001 简报失败降级回选题判断，不阻塞成文
+        print(f"[kb-write] 简报失败，降级用选题判断: {type(e).__name__}: {str(e)[:80]}")
+    b_judgment = str((brief or {}).get("judgment") or "").strip()
+    if not b_judgment:
+        b_judgment = judgment
+        print("[kb-write] 增量判断为空，降级用选题判断")
+    brief_text = json.dumps(brief, ensure_ascii=False) if brief else json.dumps(
+        {"judgment": b_judgment, "evidence": [], "cut": [], "takeaway": ""}, ensure_ascii=False)
+
+    # 标题组（与主线同一 prompt：标题+备选）
+    ctx.set_progress(30, "起标题")
     title_data = await gateway.complete_json(
         [{"role": "user", "content": render("article_title", PERSONA=persona_text,
                                             TITLE_SPEC=length_spec["title"])
@@ -600,10 +654,12 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     title_from_call = str(title_data.get("title") or "").strip()
     title_alts = [t for t in (title_data.get("title_alts") or []) if t][:2]
 
-    ctx.set_progress(40, "单遍成文（对抗性单论点规格）")
+    # 带范本成文：两篇认可稿全文进提示词——模型先见过"好长什么样"，再谈规则
+    ctx.set_progress(45, "成文（范本对齐+硬红线）")
+    anchors_text = load("article_kb_anchors")
     body = await gateway.complete(
-        [{"role": "user", "content": render("article_kb_write", JUDGMENT=judgment,
-                                            MATERIAL=material)}],
+        [{"role": "user", "content": render("article_kb_write", ANCHORS=anchors_text,
+                                            BRIEF=brief_text, MATERIAL=material)}],
         purpose="article_kb_write", max_tokens=8192, thinking="disabled")
     body = (body or "").strip()
     if body.startswith("```"):  # 剥掉模型偶发的代码围栏
@@ -617,6 +673,32 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     n_chars = len(re.sub(r"\s", "", md_text))
     if n_chars < 1500:
         raise TransientError(f"成文仅 {n_chars} 字（规格 1900~2200、下限 1500），疑似截断，稍后自动重试")
+
+    # 禁令机检→定向重写（只动违规处；数字/图片标记签名守卫，变了弃用）
+    anchor_texts = [x for x in anchors_text.split("## 范本")[1:] if len(x) > 200]
+    violations = _kb_style_violations(md_text, anchor_texts)
+    if violations:
+        ctx.set_progress(75, f"机检命中 {len(violations)} 项，定向重写")
+        try:
+            polished = await gateway.complete(
+                [{"role": "user", "content": render("article_kb_polish",
+                                                    VIOLATIONS="\n".join(f"- {v}" for v in violations),
+                                                    DRAFT=md_text)}],
+                purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
+
+            def _sig(t: str) -> tuple:
+                return (sorted(re.findall(r"\d+(?:\.\d+)?", t)), t.count("!["))
+
+            polished = (polished or "").strip()
+            if polished and _sig(polished) == _sig(md_text):
+                remain = _kb_style_violations(polished, anchor_texts)
+                print(f"[kb-write] 定向重写完成，剩余违规 {len(remain)} 项"
+                      + (f"：{remain[0][:40]}" if remain else ""))
+                md_text = polished
+            else:
+                print("[kb-write] 重写稿签名不符（数字/图片变化），保留原稿")
+        except Exception as e:  # noqa: BLE001 重写失败不阻塞成文
+            print(f"[kb-write] 定向重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
 
     # 数据图表：与主线同一套后处理；提取不到就不加，绝不编造
     from ..articles.charts import render_chart, validate_spec

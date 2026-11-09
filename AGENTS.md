@@ -24,7 +24,7 @@
 
 ## LLM 硬规矩（思考型模型，Coding Plan 端点）
 
-- **max_tokens = 实测输出 × 2**：贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。现行值：article 分段式（title 8192 / outline 8192 / section 12000/节 / editor 20000 / charts 4000，均 thinking disabled）· article_kb_write 单遍 8192 · article_kb_topic 4000· kg_spec 4000 · poster 3000/8000/6000 · script_generate/polish 20000 · script_finalize 8000 · idea_research/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · discover_keywords 1024 · ping 1024。
+- **max_tokens = 实测输出 × 2**：贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。现行值：article 分段式（title 8192 / outline 8192 / section 12000/节 / editor 20000 / charts 4000，均 thinking disabled）· article_kb_write 单遍 8192 · article_kb_brief 4000 · article_kb_polish 8192 · article_kb_topic 4000· kg_spec 4000 · poster 3000/8000/6000 · script_generate/polish 20000 · script_finalize 8000 · idea_research/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · discover_keywords 1024 · ping 1024。
 - httpx 超时 300s；验收轮询常规 ≥600s、脚本生成（三版+自动打磨）≥900s。空正文（推理耗尽预算）必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定；密钥/模型/检索通道走设置页运行时改（存 app_settings，.env 只留引导项）。
 - 成本台账已拆除（2026-10-27 用户裁定 2B）：系统不再记录任何成本；要花销概算直接看服务商控制台。
