@@ -34,6 +34,21 @@ _CONCURRENT_TYPES: set[str] = set()
 # 表示"这类实体应该有活跃任务但现在没有"；reaper 周期性检查并补队
 _OWNED: dict[str, Callable[[], list[tuple[dict, str]]]] = {}
 
+# 死任务（2026-11-09 用户定版：永不可成的终态失败当场归档，不在失败清单挂红 7 天）。
+# 内容已死 = 平台侧内容不存在/无可用语音（重试永不改变结果）；类型已死 = 功能退役残渣。
+# 标记串对应各执行器的诚实终态文案（downloader/ASR），改文案须同步这里。
+_DEAD_ERROR_MARKERS = (
+    "对匿名访问不可见",  # 视频已删除/私密/受限（登录态与匿名返回一致，平台侧内容已死）
+    "视频已删除或不可见",  # 毒视频（页面明示不存在/审核中/暂无内容）
+    "转写结果为空",  # 无可识别语音
+)
+
+
+def _is_dead_task(job_type: str, error: str) -> bool:
+    if job_type not in _EXECUTORS:
+        return True  # 类型已死：处理函数都不在了（退役功能残渣）
+    return any(m in error for m in _DEAD_ERROR_MARKERS)
+
 
 @dataclass
 class RetryPolicy:
@@ -557,7 +572,14 @@ class JobRunner:
                 job.status = "failed"
                 job.retry_count = count
                 job.next_retry_at = None
-                job.message = "确定性错误（不重试）：查看错误详情定位原因"
+                if _is_dead_task(job_type, str(e)):
+                    # 死任务当场归档（2026-11-09 用户定版）：内容不存在/无可用语音/
+                    # 功能退役——重试永不改变结果，不当红警挂 7 天。行保留库中供
+                    # 失败指纹统计；界面（含历史记录）即查即无
+                    job.archived = 1
+                    job.message = "已归档：内容不存在或无可用语音，不会再尝试"
+                else:
+                    job.message = "确定性错误（不重试）：查看错误详情定位原因"
             elif count <= policy.max_retries:
                 delay = _ladder_delay(count)
                 job.status = "failed"  # 失败但已排期：next_retry_at 到点由重试循环放行
