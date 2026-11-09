@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ClipboardCheck, Eye, FileText, Inbox, Newspaper, Save, Trash2 } from 'lucide-react'
+import { BookOpen, ClipboardCheck, Eye, FileText, Inbox, Newspaper, Save, Trash2 } from 'lucide-react'
 import { api, apiErrText, Article, waitJob } from '../api'
 import type { SectionKey } from '../App'
 import { copyRichHtml } from '../clipboard'
@@ -317,6 +317,11 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
               title="独立热点报题任务：站外热点 × 画像 → 3 篇待写草稿（每晚 0 点也自动跑）">
               <Newspaper size={14} /> {hotBusy ? '报题中…' : '提炼今日热点'}
             </button>
+            <button onClick={() => _onNavigate && _onNavigate('kb_topics')}
+              className="btn-ghost justify-center border-emerald-300 text-emerald-700 sm:w-36"
+              title="知识库选题：遍历 ima 知识库产选题，选用后自动成文">
+              <BookOpen size={14} /> 知识库选题
+            </button>
           </div>
           <input
             value={quickNote}
@@ -353,7 +358,7 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
             <EmptyState
               icon={Inbox}
               title="草稿箱是空的"
-              desc="报题一句话建草稿，或点「提炼今日热点」——每晚 0 点也会自动报题。待写草稿在行上「写长文」。"
+              desc="报题一句话建草稿，或点「提炼今日热点」/「知识库选题」——选题进下方选题池，选用后自动成文。每晚 0 点/3 点各自动跑一轮。"
             />
           </div>
         ) : (
@@ -440,6 +445,19 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
                           <div className="rounded-lg bg-slate-50 p-3 text-[13px] leading-relaxed text-slate-600">
                             {art.note || '（无备注）'}
                           </div>
+                          {(art.kb_doc_ids?.length ?? 0) > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                              <span className="shrink-0">依据文档：</span>
+                              {art.kb_doc_ids!.map((k, i) => (
+                                <span
+                                  key={i}
+                                  className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-emerald-700"
+                                >
+                                  {k.title || k.media_id}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="shrink-0 text-xs font-semibold text-slate-500">写作透镜</span>
                             <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
@@ -500,6 +518,20 @@ export default function Articles({ onNavigate: _onNavigate }: { onNavigate?: (k:
                                     >
                                       {t}
                                     </button>
+                                  ))}
+                                </div>
+                              )}
+                              {(art.kb_sources?.length ?? 0) > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                                  <span className="shrink-0">知识库素材：</span>
+                                  {art.kb_sources!.map((k, i) => (
+                                    <span
+                                      key={i}
+                                      title="成文时从 ima 知识库抽取的素材（事实唯一来源）"
+                                      className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-emerald-700"
+                                    >
+                                      {k.title || k.media_id}
+                                    </span>
                                   ))}
                                 </div>
                               )}

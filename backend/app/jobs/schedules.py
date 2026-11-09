@@ -189,6 +189,20 @@ async def _run_article_hotspots() -> str:
 # 钟点 0 点（错峰窗 0-6 内最前，与 1:00 扫描错开；不可 hour_from_settings，同 watch_discover 理由）
 register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点报题（独立提炼）",
                            daily_hour=0, run=_run_article_hotspots))
+async def _run_kb_topics() -> str:
+    """知识库选题线：体系化遍历 ima 核心目录 → 带判断选题 → 草稿并自动链写成文。"""
+    from .runner import runner
+
+    job = await runner.submit("article_kb_topics", {},
+                              dedup_key=f"1:kbtopics:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（知识库选题 → 草稿）"
+
+
+# 知识库选题线（2026-11-09）：与热点报题错峰，3 点半跑，早晨草稿箱多一批库内真货支撑的选题
+register_schedule(Schedule(key="article_kb_topics_daily", label="知识库选题（遍历 ima 产选题）",
+                           daily_hour=3, enabled_by="ima_kb_enabled",
+                           run=_run_kb_topics))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))

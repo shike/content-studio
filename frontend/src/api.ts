@@ -96,6 +96,8 @@ export interface Script {
 export interface Article {
   title?: string
   title_alts?: string[]
+  kb_sources?: { title: string; media_id: string; kb_id?: string }[] | null
+  kb_doc_ids?: { title: string; media_id: string }[] | null
   id: number
   topic_id: number | null
   script_id: number | null
@@ -103,6 +105,19 @@ export interface Article {
   md: string
   html: string
   status: string
+  created_at?: string
+}
+
+export interface KBTopic {
+  id: number
+  title: string
+  judgment: string
+  audience: string
+  why: string
+  docs: { media_id: string; title: string }[]
+  folder_name?: string
+  status: string
+  article_id?: number | null
   created_at?: string
 }
 

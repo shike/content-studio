@@ -184,6 +184,14 @@ def _migrate(engine) -> None:
         if acols and "note" not in acols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE articles ADD COLUMN note VARCHAR DEFAULT ''"))
+        # ima 知识库取材写文（2026-11-08）：素材来源落库可审计
+        if acols and "kb_sources" not in acols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE articles ADD COLUMN kb_sources JSON DEFAULT '[]'"))
+        # 知识库选题线（2026-11-09）：选题绑定的依据文档
+        if acols and "kb_doc_ids" not in acols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE articles ADD COLUMN kb_doc_ids JSON DEFAULT '[]'"))
         # V4 判定管线（2026-11-03）：存档带自家作品 id，LLM 终审入表后雪球自喂
         hpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(harvest_profiles)"))]
         if hpcols and "sample_video_id" not in hpcols:

@@ -19,10 +19,12 @@ import {
   UserCheck,
   Users,
   ChevronRight,
+  BookOpen,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import Today from './pages/Today'
 import Articles from './pages/Articles'
+import KbTopics from './pages/KbTopics'
 import ArticleStyle from './pages/ArticleStyle'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
@@ -49,7 +51,7 @@ export type SectionKey =
   | 'today' | 'tasks' | 'settings'
   | 'p_topics' | 'p_content' | 'p_own' | 'p_bench' | 'p_cand' | 'p_watch'
   | 'l_topics' | 'l_scripts' | 'l_cand' | 'l_watch' | 'l_bench'
-  | 'article' | 'a_style'
+  | 'article' | 'a_style' | 'kb_topics'
 
 /** 旧分区键 → 新叶子（内嵌页 onNavigate 的兼容路由）。 */
 const NAVMAP: Record<string, SectionKey> = {
@@ -101,6 +103,7 @@ const TREE: TreeGroup[] = [
     key: 'article', label: '公众号', icon: Newspaper,
     children: [
       { key: 'article', label: '报题与长文', icon: PenLine },
+      { key: 'kb_topics', label: '知识库选题', icon: BookOpen },
       { key: 'a_style', label: '风格画像', icon: Sparkles },
     ],
   },
@@ -109,7 +112,7 @@ const TREE: TreeGroup[] = [
 const BADGED_LEAVES = new Set<string>([
   'today', 'p_topics', 'p_content', 'p_bench', 'p_cand',
   'l_topics', 'l_scripts', 'l_cand', 'l_bench',
-  'article', 'tasks',
+  'article', 'kb_topics', 'tasks',
 ])
 
 const TREE_KEY = 'mx-tree-open'
@@ -322,6 +325,7 @@ export default function App() {
           {active === 'p_watch' && <Watch accountType="persona" />}
           {active === 'l_watch' && <Watch accountType="leadgen" />}
           {active === 'article' && <Articles />}
+          {active === 'kb_topics' && <KbTopics />}
           {active === 'a_style' && <ArticleStyle />}
           {active === 'tasks' && <Tasks />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}

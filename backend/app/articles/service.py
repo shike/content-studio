@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import re
 from pathlib import Path
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, Article, Script, Topic
+from ..models import AppSetting, Article, KBDocument, KBTopic, Script, Topic
 from ..prompts import load, render
 
 # 长文风格库（R10）：key → 结构骨架。生成时单选，auto 交给模型按素材挑。
@@ -291,6 +292,27 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         if style_row is not None and (style_row.value or "").strip():
             material["公众号风格画像（从已发长文提取的表达习惯，行文必须贴合）"] = style_row.value[:1200]
 
+    # ima 知识库取材（2026-11-08/09）：两条路径。
+    # A. kb_doc_ids（知识库选题线）：把选题绑定的依据文档全文抽出来注入——素材在报题时就已确定。
+    # B. kb_grounding（人工报题写文链）：按报题语义检索 ima，命中注入、零命中=缺料报错不硬写。
+    # 每晚自动直出链两者都不带——热点判决走公开事实，不受知识库闸约束。
+    kb_sources: list | None = None
+    if payload.get("kb_grounding"):
+        from ..articles.ima_kb import fetch_kb_material
+
+        ctx.set_progress(6, "检索 ima 知识库素材")
+        kb_sources, kb_text = await fetch_kb_material(article.title, article.note or "")
+        if kb_sources:
+            material["知识库素材（唯一事实来源）"] = kb_text
+            material["知识库取材纪律"] = (
+                "案例/数字/流程/验收标准等事实一律只用上面素材里出现的；"
+                "素材里没有的不许编造；公开行业事件可引用但须注明是公开信息；"
+                "每个小节至少呼应一处素材内容")
+        else:
+            raise RuntimeError(
+                f"知识库缺料：ima 检索无相关素材（报题：{(article.title or '')[:40]}）。"
+                "先往 ima 知识库补料，或改报题重写")
+
     style = payload.get("style") or DEFAULT_STYLE
     length = "deep"  # 深度版唯一档位（2026-11-02 用户定版，feed 退役；payload.length 忽略）
     length_spec = length_specs(length, audience_note_of(tenant_id))
@@ -512,6 +534,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         article = s.get(Article, article_id)
         article.title = title or article.title
         article.title_alts = title_alts
+        article.kb_sources = kb_sources or []
         article.md = md_text
         article.status = "draft"
         s.add(article)
@@ -519,6 +542,141 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
 
         ctx.set_progress(100, "完成")
         return {"article_id": article_id, "title": title, "style": style, "length": length}
+
+
+@register_executor("article_kb_write", on_fail=_article_generate_fail)
+async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
+    """知识库选题成文：绑定依据文档全文，单遍写出书面语 1900~2200 字规格。
+
+    与 article_generate 的分节流水线不同——素材在选用时已锁定（kb_doc_ids），
+    配方的关键是单遍成文让全分辨率细节不被大纲切碎（配方见 prompts/article_kb_write.md，
+    由两篇认可稿反推固化）。失败回退复用 _article_generate_fail（文章不得卡"生成中"）。
+    """
+    article_id = payload["article_id"]
+    with Session(engine) as s:
+        article = s.get(Article, article_id)
+        if article is None:
+            raise RuntimeError(f"article {article_id} 不存在")
+        tenant_id = article.tenant_id
+        article_title0 = article.title or ""
+        article_note = article.note or ""
+        docs = [d for d in (article.kb_doc_ids or []) if isinstance(d, dict) and d.get("media_id")]
+        topic = s.exec(select(KBTopic).where(KBTopic.article_id == article_id)).first()  # type: ignore[attr-defined]
+        judgment = (f"论点：{topic.judgment}\n读者：{topic.audience}\n为什么值得写：{topic.why}"
+                    if topic is not None else (article_note or article_title0))
+        from ..tenant_brand import audience_note_of, brand_of
+
+        persona_text = brand_of(tenant_id)["persona"]
+        length_spec = length_specs("deep", audience_note_of(tenant_id))
+        from ..articles.ima_kb import kb_config
+
+        cfg = kb_config(s)
+    if not docs:
+        raise RuntimeError("知识库成文缺少依据文档（kb_doc_ids 为空），无法按素材成文")
+    if cfg is None:
+        raise RuntimeError("ima 知识库未启用或凭证不全，无法取依据文档全文")
+
+    # 依据文档全文（ima COS 直链逐篇拉取）；全空=多半是 403 限流窗，走退避梯子
+    from ..articles.ima_kb import fetch_full_doc
+
+    ctx.set_progress(8, f"取依据文档全文（{len(docs)} 篇）")
+    parts: list[str] = []
+    got_any = False
+    for i, d in enumerate(docs, 1):
+        text = await fetch_full_doc(cfg["client_id"], cfg["api_key"], str(d["media_id"]))
+        got_any = got_any or bool(text.strip())
+        parts.append(f"【文档{i}】{str(d.get('title') or '').strip()}\n{text}")
+    material = "\n\n".join(parts)
+    if not got_any:
+        raise TransientError("依据文档全文全部获取失败（ima 限流或文档不可读），稍后自动重试")
+
+    # 标题组（与主线同一 prompt：标题+备选）→ 正文单遍成文
+    ctx.set_progress(20, "起标题")
+    title_data = await gateway.complete_json(
+        [{"role": "user", "content": render("article_title", PERSONA=persona_text,
+                                            TITLE_SPEC=length_spec["title"])
+          + "\n\n选题素材：\n" + material[:9000]}],
+        purpose="article_title", max_tokens=8192, thinking="disabled")
+    title_from_call = str(title_data.get("title") or "").strip()
+    title_alts = [t for t in (title_data.get("title_alts") or []) if t][:2]
+
+    ctx.set_progress(40, "单遍成文（对抗性单论点规格）")
+    body = await gateway.complete(
+        [{"role": "user", "content": render("article_kb_write", JUDGMENT=judgment,
+                                            MATERIAL=material)}],
+        purpose="article_kb_write", max_tokens=8192, thinking="disabled")
+    body = (body or "").strip()
+    if body.startswith("```"):  # 剥掉模型偶发的代码围栏
+        body = re.sub(r"^```[a-z]*\n?", "", body)
+        body = re.sub(r"\n?```$", "", body).strip()
+    lines = body.split("\n")
+    if not lines or not lines[0].lstrip().startswith("# "):
+        raise TransientError("成文输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
+    title = lines[0].lstrip()[2:].strip() or title_from_call or article_title0
+    md_text = "\n".join(lines[1:]).strip()
+    n_chars = len(re.sub(r"\s", "", md_text))
+    if n_chars < 1500:
+        raise TransientError(f"成文仅 {n_chars} 字（规格 1900~2200、下限 1500），疑似截断，稍后自动重试")
+
+    # 数据图表：与主线同一套后处理；提取不到就不加，绝不编造
+    from ..articles.charts import render_chart, validate_spec
+    if md_text.strip():
+        try:
+            spec_resp = await gateway.complete_json(
+                [{"role": "system", "content": load("article_charts")},
+                 {"role": "user", "content": md_text[:8000]}],
+                purpose="article_charts", max_tokens=4000,
+                thinking="disabled")
+            specs = [x for x in (spec_resp.get("charts") or []) if isinstance(x, dict)][:3]
+        except Exception as e:  # noqa: BLE001
+            specs = []
+            print(f"[kb-write] 图表提取失败（跳过）: {type(e).__name__}: {str(e)[:80]}")
+        rendered = []
+        for k, sp in enumerate(specs):
+            try:
+                sp = validate_spec(json.dumps(sp))
+                sp.setdefault("after_section", k + 1)
+                from ..tenant_brand import primary_of
+
+                path = await asyncio.to_thread(render_chart, sp, primary_of(tenant_id))
+                rendered.append((min(int(sp.get("after_section") or k + 1), 6), sp, Path(path).name))
+            except Exception as e:  # noqa: BLE001
+                print(f"[kb-write] 图表 {k} 渲染失败跳过: {type(e).__name__}: {str(e)[:60]}")
+        for sec_no, sp, name in sorted(rendered, key=lambda x: -x[0]):
+            t = str(sp.get("title") or "图表").replace('"', '')
+            md_text = _insert_chart_after_section(md_text, sec_no, t, name)
+
+    # 头图（渲染失败不影响正文）
+    ctx.set_progress(92, "渲染头图")
+    try:
+        from ..articles.charts import render_cover
+        from ..tenant_brand import cover_slogan_of, primary_of
+
+        signature = brand_of(tenant_id)["signature"]
+        cover_path = await asyncio.to_thread(
+            render_cover, title or "深度分析", signature, primary_of(tenant_id),
+            cover_slogan_of(tenant_id))
+        md_text = f"![头图](cover:{Path(cover_path).name})\n\n" + md_text
+    except Exception as e:  # noqa: BLE001
+        print(f"[kb-write] 头图渲染失败: {type(e).__name__}: {str(e)[:80]}")
+
+    with Session(engine) as s:
+        article = s.get(Article, article_id)
+        if article is None:
+            raise RuntimeError(f"article {article_id} 不存在（落稿时已被删除）")
+        article.title = title or article.title
+        article.title_alts = title_alts
+        article.kb_sources = docs
+        article.md = md_text
+        article.status = "draft"
+        s.add(article)
+        topic = s.exec(select(KBTopic).where(KBTopic.article_id == article_id)).first()  # type: ignore[attr-defined]
+        if topic is not None and topic.status == "selected":
+            topic.status = "written"
+            s.add(topic)
+        s.commit()
+        ctx.set_progress(100, "完成")
+        return {"article_id": article_id, "title": title, "style": "kb_write"}
 
 
 def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str) -> str:
@@ -689,3 +847,193 @@ async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
         s.commit()
     ctx.set_progress(100, "公众号风格画像已更新")
     return {"note": note[:120]}
+
+
+# ---- 知识库选题线（2026-11-09）：体系化遍历 ima 目录 → 带判断选题 → 报题即草稿链写 ----
+
+_KB_TOPIC_BATCH = 12       # 每轮用于选题的文档数
+_KB_TOPIC_FULLTEXT = 3     # 其中取全文摘录的篇数
+
+
+def _kb_upsert_docs(s: Session, kb_id: str, folder_id: str, folder_name: str,
+                    docs: list[dict]) -> int:
+    """目录清单并入 kb_documents 台账，返回新入库（status=new）数量。"""
+    new_cnt = 0
+    for d in docs:
+        mid = d.get("media_id") or ""
+        if not mid:
+            continue
+        exists = s.exec(select(KBDocument).where(
+            KBDocument.media_id == mid)).first()  # type: ignore[attr-defined]
+        if exists is not None:
+            continue
+        s.add(KBDocument(kb_id=kb_id, folder_id=folder_id, folder_name=folder_name,
+                         media_id=mid, title=d.get("title") or "", status="new"))
+        new_cnt += 1
+    s.commit()
+    return new_cnt
+
+
+@register_executor("article_kb_topics")
+async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
+    """体系化全量遍历 ima 核心目录 → 按批提炼选题 → 全部入选题池（KBTopic，待选）。
+
+    与抽卡式不同：按目录顺序全库遍历，单次运行带时间预算（可断点续跑——kb_documents
+    的 mined 标记记住进度，下次运行从断点继续），跑完全库后选题池即全量选题目录。
+    素材纪律：选题必须绑定具体库内文档；文档不足以支撑合格选题时跳过，不产泛主题；
+    与已有选题/文章近义去重；用户「不做」过的题不复活。"""
+    from ..articles.ima_kb import fetch_full_doc, kb_config, list_folder_docs, topic_folders, topic_kb_id
+    from ..models import KBDocument, KBTopic
+
+    budget_sec = int(payload.get("budget_sec") or 480)
+    batch_size = int(payload.get("batch_size") or 12)
+
+    with Session(engine) as s:
+        cfg = kb_config(s)
+        if cfg is None:
+            raise RuntimeError("知识库选题线未启用：缺少 ima_kb_enabled / 凭证配置")
+        client_id, api_key = cfg["client_id"], cfg["api_key"]
+        kb_id = topic_kb_id(s)
+        folders = topic_folders(s)
+        recent = [r.title for r in s.exec(select(Article).where(
+            Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]))  # type: ignore[attr-defined]
+            .order_by(Article.id.desc()).limit(30)).all()  # type: ignore[attr-defined]
+            if r.title]
+    if not folders:
+        raise RuntimeError("选题遍历目录为空：请配置 ima_topic_folders")
+
+    def _norm(t: str) -> str:
+        return re.sub(r"[\s_\-——（）()\[\]「」《》,，。.·！!?？：:]", "", (t or "")).lower()
+
+    def _match_doc(dt: str, docs: list[dict]) -> dict | None:
+        nq = _norm(dt)
+        if len(nq) < 6:
+            return None
+        for d in docs:
+            nd = _norm(d["title"])
+            if nq == nd or (len(nq) >= 8 and (nq in nd or nd in nq)):
+                return d
+        return None
+
+    started = time.monotonic()
+    added_total = 0
+    processed_docs = 0
+    batch_no = 0
+    exhausted = False
+
+    for fid, fname in folders:
+        if time.monotonic() - started > budget_sec:
+            break
+        try:
+            docs = await list_folder_docs(client_id, api_key, kb_id, fid)
+        except Exception as e:  # noqa: BLE001
+            print(f"[kb-topics] 目录列举失败（{fname}）: {type(e).__name__}: {str(e)[:80]}")
+            continue
+        with Session(engine) as s:
+            new_cnt = 0
+            for d in docs:
+                mid = d.get("media_id") or ""
+                if not mid:
+                    continue
+                exists = s.exec(select(KBDocument).where(
+                    KBDocument.media_id == mid)).first()  # type: ignore[attr-defined]
+                if exists is None:
+                    s.add(KBDocument(kb_id=kb_id, folder_id=fid, folder_name=fname,
+                                     media_id=mid, title=d.get("title") or "", status="new"))
+                    new_cnt += 1
+            s.commit()
+            fresh = s.exec(select(KBDocument).where(
+                KBDocument.folder_id == fid,  # type: ignore[attr-defined]
+                KBDocument.status == "new")).all()  # type: ignore[attr-defined]
+            fresh = [{"title": x.title, "media_id": x.media_id, "id": x.id} for x in fresh]
+        processed_docs += len(fresh)
+        if not fresh:
+            await asyncio.sleep(0.5)
+            continue
+
+        # 本目录按批提炼
+        for i in range(0, len(fresh), batch_size):
+            if time.monotonic() - started > budget_sec:
+                break
+            chunk = fresh[i:i + batch_size]
+            batch_no += 1
+            excerpts = []
+            for d in chunk[:_KB_TOPIC_FULLTEXT]:
+                txt = await fetch_full_doc(client_id, api_key, d["media_id"], cap=3000)
+                if txt:
+                    excerpts.append(f"【{d['title']}】\n{txt}")
+                await asyncio.sleep(0.6)
+            titles_block = "\n".join(f"- {d['title']}" for d in chunk)
+            excerpts_block = "\n\n".join(excerpts) or "（本轮无全文摘录，仅按标题判断）"
+            recent_block = "\n".join(f"- {t[:40]}" for t in recent) or "（无）"
+            try:
+                pick = await gateway.complete_json(
+                    [{"role": "user", "content": render("article_kb_topic", MAX_TOPICS="2")
+                      + f"\n\n目录：{fname}\n\n文档标题清单：\n{titles_block}"
+                      + f"\n\n部分正文摘录：\n{excerpts_block}"
+                      + f"\n\n近期已报题标题（避免意思相近）：\n{recent_block}"}],
+                    purpose="article_kb_topic", max_tokens=4000, thinking="disabled")
+            except Exception as e:  # noqa: BLE001 单批 LLM 失败跳过该批
+                print(f"[kb-topics] 批 {batch_no} 提炼失败跳过: {type(e).__name__}: {str(e)[:80]}")
+                pick = {}
+            topics = [t for t in (pick.get("topics") or [])
+                      if isinstance(t, dict) and (t.get("title") or "").strip()][:2]
+
+            title_to_doc = {d["title"]: d for d in chunk}
+            added = 0
+            dropped: list[str] = []
+            with Session(engine) as s:
+                for t in topics:
+                    title = str(t.get("title") or "").strip()[:60]
+                    if not title:
+                        continue
+                    ntitle = _norm(title)
+                    dup_topic = any(_norm(x.title) == ntitle for x in s.exec(select(KBTopic)).all())  # type: ignore[attr-defined]
+                    dup_article = any(_norm(a.title) == ntitle for a in s.exec(select(Article).where(
+                        Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]))).all())  # type: ignore[attr-defined]
+                    if dup_topic or dup_article:
+                        dropped.append(f"近义重复：{title[:24]}")
+                        continue
+                    doc_ids = []
+                    for dt in [str(x) for x in (t.get("docs") or [])]:
+                        hit = _match_doc(dt, chunk)
+                        if hit:
+                            doc_ids.append({"media_id": hit["media_id"], "title": hit["title"]})
+                    if not doc_ids:
+                        dropped.append(f"依据对不上：{dt[:24]}")
+                        continue
+                    s.add(KBTopic(title=title,
+                                  judgment=str(t.get("judgment") or "")[:200],
+                                  audience=str(t.get("audience") or "")[:12],
+                                  why=str(t.get("why") or "")[:120],
+                                  docs=doc_ids,
+                                  folder_name=fname,
+                                  status="new"))
+                    added += 1
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                for row_ in s.exec(select(KBDocument).where(
+                        KBDocument.id.in_([d["id"] for d in chunk]))).all():  # type: ignore[attr-defined]
+                    row_.status = "mined"
+                    row_.last_mined_at = now
+                    s.add(row_)
+                s.commit()
+            added_total += added
+            recent = ([f"{t.get('title', '')}"] if topics else []) + recent[:20]
+            ctx.set_progress(min(95, 10 + batch_no * 3),
+                             f"批 {batch_no}（{fname}）：读 {len(chunk)} 篇 → 新选题 {added}｜累计入池 {added_total}")
+            await asyncio.sleep(0.6)
+        await asyncio.sleep(0.8)
+
+    if batch_no == 0 and processed_docs == 0:
+        exhausted = True
+
+    # 池内待选计数
+    with Session(engine) as s:
+        pool_new = len(s.exec(select(KBTopic).where(
+            KBTopic.status == "new")).all())  # type: ignore[attr-defined]
+
+    msg = (f"全量遍历{'完成' if exhausted else '进行中'}：本轮读 {processed_docs} 篇 / {batch_no} 批，"
+           f"新选题 {added_total} 个入池；池内待选 {pool_new}")
+    ctx.set_progress(100, msg[:90])
+    return {"processed_docs": processed_docs, "batches": batch_no, "added": added_total,
+            "pool_new": pool_new, "exhausted": exhausted, "message": msg}

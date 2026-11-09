@@ -258,6 +258,20 @@ article:    draft ──► edited ──► rendered ──► published（由 
 - `GET /api/public/images/{filename}?t=<签名>` → **无登录门禁**的签名配图（HMAC(文件名) 前 22 字符，
   不匹配一律 404）。存在理由：公众号编辑器从 mp.weixin.qq.com 跨域抓 `<img>` 外链再转存素材库，
   带不了本站 Cookie——粘贴载荷必须用签名地址，否则图片在公众号侧是裂图
+- `POST /api/articles/{id}/write` 载荷带 `kb_grounding: true`（仅人工报题线）：执行器先检索 ima
+  知识库（settings：ima_kb_enabled/ima_client_id/ima_api_key/ima_kb_ids，鉴权=明文头
+  ima-openapi-clientid/apikey 直发 ima.qq.com）→ 抽取原文（md/txt，单篇 4k 字、总量 16k 字）
+  注入 material 作唯一事实来源；**零命中任务失败**（error=知识库缺料，确定性失败不重试），
+  全接口失败=TransientError 走退避。素材清单落 `articles.kb_sources`（JSON）随 GET 返回。
+  开关关/未配置=旧行为（无 ima 依赖）。
+- `POST /api/articles/kb-topics` → 202 `{job_id}`（知识库选题线，R5.6）：遍历 ima 核心目录
+  （ima_topic_folders，默认 12 个核心区目录；轮换游标存 app_settings.ima_topic_cursor）→
+  文档台账 `kb_documents`（media_id 唯一，new/mined 状态机，一轮读完自动重置）→ 每轮取
+  12 篇标题+3 篇全文摘录 → LLM 产 ≤2 个「判断+绑定依据文档」选题（依据对不上文档的丢弃，
+  近期标题近义排除）→ pending 草稿（kb_doc_ids 落库）并自动链写 article_generate
+  （payload 带 kb_doc_ids：按绑定文档全文取材，优先级高于 kb_grounding 检索路径）。
+  无合格选题=任务成功返回 topics:0（不硬凑）。调度 `article_kb_topics_daily` 每日凌晨 3 点
+  （ima_kb_enabled 门控）。
 
 ### 发布台（极简：只做物料包，发布人工）
 - `POST /api/publishing/packages` `{asset_type(script/article), asset_id}` → `{douyin_title, douyin_title_alt, douyin_tags[], channels_caption, cover_text, wechat_html?}`
