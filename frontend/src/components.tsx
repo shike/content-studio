@@ -1,4 +1,5 @@
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, Loader2, Trash2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export function PageHeader({
@@ -143,6 +144,56 @@ export function relTime(iso?: string) {
   const d = Math.floor(h / 24)
   if (d < 30) return `${d} 天前`
   return `${Math.floor(d / 30)} 个月前`
+}
+
+/** 24h 内入库 = NEW 徽章（口径与 relTime 同源：UTC 无时区补 Z）。 */
+export function isNew(iso?: string) {
+  if (!iso) return false
+  const ms = Date.now() - new Date(/[Zz]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z').getTime()
+  return !Number.isNaN(ms) && ms >= 0 && ms < 24 * 3600 * 1000
+}
+
+/** 状态 counts 字典取数：不给 key = 全量合计（状态 chips 的「全部」用）。 */
+export function sumCounts(counts: Record<string, number>, key?: string): number {
+  if (key) return counts[key] || 0
+  return Object.values(counts).reduce((a, b) => a + b, 0)
+}
+
+/** 行内「确认删除」两段式按钮：先亮垃圾桶（3 秒窗口），再点才真删。
+自动 stopPropagation——表格行点击展开的场景里不会误触展开。 */
+export function ConfirmDeleteButton({ onConfirm, confirmText = '确认删除', title, size = 13 }: {
+  onConfirm: () => void
+  confirmText?: string
+  title?: string
+  size?: number
+}) {
+  const [armed, setArmed] = useState(false)
+  const timer = useRef<number | null>(null)
+  useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current) }, [])
+  const arm = () => {
+    setArmed(true)
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setArmed(false), 3000)
+  }
+  if (armed) {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); onConfirm() }}
+        className="btn-danger btn-xs shrink-0"
+      >
+        {confirmText}
+      </button>
+    )
+  }
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); arm() }}
+      title={title}
+      className="btn-ghost btn-xs shrink-0 text-slate-300 hover:text-red-500"
+    >
+      <Trash2 size={size} />
+    </button>
+  )
 }
 
 export function Pager({ total, limit, offset, onPage }: {

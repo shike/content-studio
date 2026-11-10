@@ -19,9 +19,6 @@ brand 字段（BRAND_KEYS）：
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from sqlmodel import Session
 
 from .db import engine
@@ -69,7 +66,6 @@ FOUNDER_BRAND: dict = {
 BRAND_KEYS = ("label_line1", "label_line2", "signature", "asr_vocab", "accent", "primary",
               "persona", "cover_slogan", "audience_note")
 
-_FONT_SRC = Path(__file__).resolve().parent / "assets" / "fonts" / "NotoSansSC-Bold.otf"
 _SUBSET_DIR = settings.data_dir / "label_fonts"
 
 
@@ -109,11 +105,6 @@ def brand_of(tenant_id: int) -> dict:
     return _norm_brand(brand_raw_cached(tenant_id))
 
 
-def accent_of(tenant_id: int) -> str:
-    """点缀/主色 hex（默认暖黄）。"""
-    return _norm_brand(brand_raw_cached(tenant_id)).get("accent", NEUTRAL_DEFAULT_BRAND["accent"])
-
-
 def primary_of(tenant_id: int) -> str:
     return _norm_brand(brand_raw_cached(tenant_id)).get("primary", NEUTRAL_DEFAULT_BRAND["primary"])
 
@@ -137,21 +128,6 @@ def brand_raw_cached(tenant_id: int) -> dict:
     except Exception as e:  # noqa: BLE001
         print(f"[brand] 读取租户 {tenant_id} 失败: {type(e).__name__}: {str(e)[:60]}")
         return {}
-
-
-def accent_rgb_of(tenant_id: int) -> tuple[int, int, int]:
-    """点缀色 hex → RGB 元组（角标绘制用）。"""
-    hx = (accent_of(tenant_id) or "#F2C14E").lstrip("#")
-    try:
-        return tuple(int(hx[i:i + 2], 16) for i in (0, 2, 4))
-    except ValueError:
-        return (242, 193, 78)
-
-
-def label_lines_of(tenant_id: int) -> tuple[str, str]:
-    b = brand_of(tenant_id)
-    return (b["label_line1"] or NEUTRAL_DEFAULT_BRAND["label_line1"],
-            b["label_line2"] or NEUTRAL_DEFAULT_BRAND["label_line2"])
 
 
 def cover_slogan_of(tenant_id: int) -> str:
@@ -182,26 +158,3 @@ def _clear_font_cache(tenant_id: int) -> None:
             p.unlink()
         except Exception:  # noqa: BLE001
             pass
-
-
-def label_font_path(tenant_id: int, label: str, size_hint: str = "") -> Path:
-    """按租户栏目名生成/复用字体子集（PIL 可加载；全量 Noto CJK 直接加载会缺 hmtx）。"""
-    from fontTools import subset
-
-    cache = _SUBSET_DIR / f"label_{tenant_id}_{abs(hash(label)) % 10**8}.otf"
-    if cache.exists():
-        return cache
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    import string
-
-    chars = "".join(dict.fromkeys(
-        label + string.ascii_letters + string.digits + "/ .·—：:年月日时分第条期"))
-    opts = subset.Options()
-    opts.name_IDs = [1, 2, 6]
-    opts.notdef_outline = True
-    font = subset.load_font(_FONT_SRC, opts)
-    ss = subset.Subsetter(options=opts)
-    ss.populate(text=chars)
-    ss.subset(font)
-    subset.save_font(font, cache, opts)
-    return cache

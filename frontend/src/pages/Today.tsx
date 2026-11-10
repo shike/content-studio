@@ -10,9 +10,9 @@ interface ArtRow { id: number; title: string; status: string }
 
 type CandType = 'persona' | 'leadgen'
 
-const PIPELINES = ['article_hotspots_daily', 'watch_discover_daily', 'hl_search_daily']
+const PIPELINES = ['article_hotspots_daily', 'hl_search_daily']
 const PIPE_LABEL: Record<string, string> = {
-  article_hotspots_daily: '公众号直出', watch_discover_daily: '获客挖掘',
+  article_hotspots_daily: '公众号直出',
   hl_search_daily: '组局号搜索',
 }
 
@@ -36,7 +36,8 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   const [kpis, setKpis] = useState({ fans: 0, fansDelta: 0, play: 0, profileViews: 0 })
   const [fansHist, setFansHist] = useState<number[]>([])
   const [playHist, setPlayHist] = useState<number[]>([])
-  const [todos, setTodos] = useState({ draft: 0, failed: 0, active: 0 })
+  const [todos, setTodos] = useState({ failed: 0, active: 0 })
+  const [cands, setCands] = useState({ persona: 0, leadgen: 0 })
   const [drafts, setDrafts] = useState<Topic[]>([])
   const [filter, setFilter] = useState<'all' | CandType>('all')
   const [quick, setQuick] = useState('')
@@ -54,7 +55,9 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       ])
       const t = { items: [...(tp.items || []), ...(tl.items || [])] } as { items: Topic[] }
       const s = await fetchMenuStats()
-      setTodos({ draft: s.today, failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
+      setTodos({ failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
+      // 候选待定夺两线真实数字：p_cand/l_cand 即 TodoStats.openCandidatesPersona/Leadgen 的透传
+      setCands({ persona: s.p_cand, leadgen: s.l_cand })
       const ranked = (t.items || []).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
       setDrafts(ranked)
       try {
@@ -183,13 +186,6 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           </div>
           <div className="mt-2 text-[11px] text-slate-300">平台 T-1 数据</div>
         </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">本周成片</div>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="num-serif text-[30px] font-semibold leading-none tracking-tight text-slate-900">3</span>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-300">人设 2 · 获客 1</div>
-        </div>
       </div>
 
       <div className="my-6 border-t border-slate-100" />
@@ -269,8 +265,8 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           <section>
             <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-400">情报速览</h3>
             <div className="mt-2 space-y-1.5 text-[13px]">
-              <div className="flex justify-between"><span className="text-slate-500">候选待定夺</span><span className="font-medium tabular-nums text-slate-900">81</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">组局号名单</span><span className="font-medium tabular-nums text-slate-900">75</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">候选待定夺</span><span className="font-medium tabular-nums text-slate-900">{cands.persona}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">组局号名单</span><span className="font-medium tabular-nums text-slate-900">{cands.leadgen}</span></div>
             </div>
             <button onClick={() => onNavigate('l_cand')} className="mt-2 text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去定夺 →</button>
           </section>

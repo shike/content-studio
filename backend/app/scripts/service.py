@@ -33,12 +33,13 @@ def seed_default_template() -> None:
             s.commit()
 
 
-def _pick_template() -> ScriptTemplate | None:
-    with Session(engine) as s:
-        return s.exec(
-            select(ScriptTemplate)
-            .order_by(ScriptTemplate.usage_count.desc(), ScriptTemplate.id)
-        ).first()
+def _script_length_spec(length: str) -> str:
+    """两档字数口径（单点定义，生成与打磨两处共用）。
+
+    2026-10-09 流量诊断定档：自己账号 40~70s 视频中位播放 441，<40s 只有 248，
+    >120s 更差 → 默认档锁定黄金带 240~320 字（50~70 秒）；长版保留给视频号场景。"""
+    return ("600~900 字（2~3 分钟长版）" if length == "long"
+            else "240~320 字（50~70 秒黄金档）")
 
 
 def _normalize_versions(raw: list) -> list[dict]:
@@ -101,10 +102,8 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                        + "、".join(angles))
     else:
         angles_spec = "从上面六个里挑 3 种最贴合这个选题的（每版一种）"
-    # 2026-10-09 流量诊断定档：自己账号 40~70s 视频中位播放 441，<40s 只有 248，>120s 更差
-    # → 默认档锁定黄金带 240~320 字（50~70 秒）；长版保留给视频号/数字人场景
-    length_spec = ("600~900 字（2~3 分钟长版）" if length == "long"
-                   else "240~320 字（50~70 秒黄金档）")
+    # 2026-10-09 流量诊断定档：默认档锁定黄金带 240~320 字（见 _script_length_spec）
+    length_spec = _script_length_spec(length)
     use_style = bool(payload.get("use_style", True))
     from ..tenant_brand import brand_of
 
@@ -167,8 +166,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
 async def _polish_core(versions: list[dict], use_style: bool = True,
                        length: str = "short", cta_rule: str = "全删，这是他的红线") -> list[dict]:
     """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。"""
-    length_spec = ("600~900 字（2~3 分钟长版）" if length == "long"
-                   else "240~320 字（50~70 秒黄金档）")
+    length_spec = _script_length_spec(length)
     data = await gateway.complete_json(
         [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style),
                                               LENGTH=length_spec, CTA_RULE=cta_rule)},

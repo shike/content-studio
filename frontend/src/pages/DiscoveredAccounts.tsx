@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
-import { api, waitJob } from '../api'
+import { api, apiErrText, waitJob } from '../api'
 import { Busy, ChipRow, EmptyState, relTime, safeHref } from '../components'
+import { useClientPager, usePageGuard } from '../hooks'
 
 interface WatchCandidate {
   id: number
@@ -34,14 +35,15 @@ const fmtN = (n?: number) =>
 export default function DiscoveredAccounts({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [cands, setCands] = useState<WatchCandidate[]>([])
   const [candFilter, setCandFilter] = useState('open')
-  const [cpageRaw, setCpage] = useState(0)
   const [expCand, setExpCand] = useState<number | null>(null)
   const [dform, setDform] = useState({ keyword: '', direction: '' })
   const [discoverBusy, setDiscoverBusy] = useState('')
   const [discoverSummary, setDiscoverSummary] = useState<{
     candidates: number; new: number; already: number; skipped: number; notes: string[]
   } | null>(null)
-  const [error, setError] = useState('')
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话。discover/定夺/忽略/清掉已处理全部走守卫。
+  const { guard, error, setError } = usePageGuard()
 
   const reload = useCallback(async () => {
     const p = new URLSearchParams()
@@ -52,14 +54,13 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
   }, [accountType])
 
   useEffect(() => {
-    reload().catch((e) => setError(String(e)))
+    reload().catch((e) => setError(apiErrText(e)))
   }, [reload])
 
   const discover = () =>
-    (async () => {
+    guard(async () => {
       if (!dform.keyword.trim()) return
       setDiscoverSummary(null)
-      setError('')
       try {
         const r = await api<{ job_id: number }>('/watch/discover', {
           method: 'POST',
@@ -75,46 +76,29 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
         })
         setCandFilter('open')
         await reload()
-      } catch (e) {
-        setError(String(e))
       } finally {
         setDiscoverBusy('')
       }
-    })()
+    })
 
   const addCand = (c: WatchCandidate) =>
-    (async () => {
-      setError('')
-      try {
-        await api(`/watch/discover/candidates/${c.id}/add`, { method: 'POST' })
-        await reload()
-      } catch (e) {
-        setError(String(e))
-      }
-    })()
+    guard(async () => {
+      await api(`/watch/discover/candidates/${c.id}/add`, { method: 'POST' })
+      await reload()
+    })
 
   const dismissCand = (c: WatchCandidate) =>
-    (async () => {
-      setError('')
-      try {
-        await api(`/watch/discover/candidates/${c.id}/dismiss`, { method: 'POST' })
-        await reload()
-      } catch (e) {
-        setError(String(e))
-      }
-    })()
+    guard(async () => {
+      await api(`/watch/discover/candidates/${c.id}/dismiss`, { method: 'POST' })
+      await reload()
+    })
 
   const clearCands = () =>
-    (async () => {
-      setError('')
-      try {
-        await api('/watch/discover/candidates', { method: 'DELETE' })
-        setExpCand(null)
-        await reload()
-      } catch (e) {
-        setError(String(e))
-      }
-    })()
+    guard(async () => {
+      await api('/watch/discover/candidates', { method: 'DELETE' })
+      setExpCand(null)
+      await reload()
+    })
 
   const cc = {
     open: cands.filter((c) => c.status === 'open').length,
@@ -122,10 +106,9 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
     dismissed: cands.filter((c) => c.status === 'dismissed').length,
   }
   const cf = candFilter ? cands.filter((c) => c.status === candFilter) : cands
+  // 客户端分页（hooks.ts）：每页 20 个
   const CPAGE = 20
-  const cpages = Math.max(1, Math.ceil(cf.length / CPAGE))
-  const cpage = Math.min(cpageRaw, cpages - 1)
-  const pagedC = cf.slice(cpage * CPAGE, (cpage + 1) * CPAGE)
+  const cPager = useClientPager(cf, CPAGE)
 
   return (
     <div>
@@ -202,7 +185,7 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
             <div className="px-4 pt-3">
               <ChipRow
                 active={candFilter}
-                onChange={(k) => { setCandFilter(k); setCpage(0) }}
+                onChange={(k) => { setCandFilter(k); cPager.setPage(0) }}
                 chips={[
                   { key: 'open', label: '待定夺', count: cc.open },
                   { key: 'added', label: '已加入', count: cc.added },
@@ -215,7 +198,7 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
               <div className="px-4 py-4 text-[13px] text-slate-400">该状态下暂无候选。</div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {pagedC.map((c) => {
+                {cPager.slice.map((c) => {
                   const expC = expCand === c.id
                   return (
                     <div key={c.id} className={expC ? 'bg-sky-50/40' : ''}>
@@ -311,10 +294,10 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
       </div>
       {cf.length > CPAGE && (
         <div className="mt-3 flex items-center justify-center gap-3 text-[13px] text-slate-500">
-          <button onClick={() => setCpage(Math.max(0, cpage - 1))} disabled={cpage === 0}
+          <button onClick={() => cPager.setPage(Math.max(0, cPager.page - 1))} disabled={cPager.page === 0}
             className="btn-ghost btn-xs disabled:opacity-40">← 上一页</button>
-          <span>第 {cpage * CPAGE + 1}–{Math.min((cpage + 1) * CPAGE, cf.length)} 条 · 共 {cf.length} 条</span>
-          <button onClick={() => setCpage(Math.min(cpages - 1, cpage + 1))} disabled={cpage >= cpages - 1}
+          <span>第 {cPager.page * CPAGE + 1}–{Math.min((cPager.page + 1) * CPAGE, cf.length)} 条 · 共 {cf.length} 条</span>
+          <button onClick={() => cPager.setPage(Math.min(cPager.pages - 1, cPager.page + 1))} disabled={cPager.page >= cPager.pages - 1}
             className="btn-ghost btn-xs disabled:opacity-40">下一页 →</button>
         </div>
       )}

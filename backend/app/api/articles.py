@@ -1,16 +1,14 @@
 """公众号流水线 API。"""
 import asyncio
 import re
-import time
-from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import or_, Session, select
 
 from ..articles.images import sign_image, valid_image_name
+from ..articles.service import find_pending_article
 from ..models import KBTopic
 from ..articles.renderer import render_wechat_html, sanitize_html
 from ..auth import require_user
@@ -45,10 +43,7 @@ def create_draft(body: DraftIn, user: User = Depends(require_user)) -> dict:
     if not title:
         raise HTTPException(status_code=400, detail="报题一句话不能为空")
     with Session(engine) as s:
-        dup = s.exec(select(Article).where(
-            Article.title == title,  # type: ignore[attr-defined]
-            Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]),  # type: ignore[attr-defined]
-        )).first()
+        dup = find_pending_article(title)
         if dup is not None:
             raise HTTPException(status_code=409, detail=f"同题草稿已存在（#{dup.id}）")
         row = Article(title=title, note=body.note.strip()[:300], status="pending")
@@ -143,10 +138,6 @@ async def write_draft(article_id: int, body: WriteIn,
             s.add(article)
             s.commit()
     return {"article_id": article_id, "job_id": job.id}
-
-
-class StyleSummaryOut(BaseModel):
-    pass
 
 
 @router.get("/style-summary")

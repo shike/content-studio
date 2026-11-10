@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BrainCircuit, Radar, RefreshCw, Save, Settings as SettingsIcon } from 'lucide-react'
-import { api } from '../api'
+import { api, apiErrText } from '../api'
 import { BrandForm, type BrandShape } from '../brandForm'
 import { Busy, ErrorLine, PageHeader } from '../components'
+import { usePageGuard } from '../hooks'
 
 interface AppSettings {
   llm_model: string
@@ -54,8 +55,9 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   const [scanEnabled, setScanEnabled] = useState(true)
   const [scanHour, setScanHour] = useState(1)
   const [pingReply, setPingReply] = useState('')
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
+  const { guard, busy, setBusy, error, setError } = usePageGuard()
 
   const reload = useCallback(async () => {
     const c = await api<AppSettings>('/settings')
@@ -73,19 +75,8 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   }, [])
 
   useEffect(() => {
-    reload().catch((e) => setError(String(e)))
+    reload().catch((e) => setError(apiErrText(e)))
   }, [reload])
-
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
 
   const ping = () =>
     guard(async () => {
@@ -170,7 +161,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                       setKeyMsg('密钥已保存并生效')
                       await reload()
                     } catch (e) {
-                      setKeyMsg(String(e))
+                      setKeyMsg(apiErrText(e))
                     }
                   }}
                 >保存</button>
@@ -234,7 +225,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                     setCrawl(c)
                     setError('')
                   } catch (e) {
-                    setError(String(e))
+                    setError(apiErrText(e))
                   } finally {
                     setCrawlBusy(false)
                   }
@@ -344,7 +335,7 @@ function AccountBar({ displayName, role, onLogout }: {
       }
       setMsg('密码已修改'); setOldPwd(''); setNewPwd(''); setPwdOpen(false)
     } catch (e) {
-      setErr(String(e))
+      setErr(apiErrText(e))
     } finally {
       setBusy(false)
     }

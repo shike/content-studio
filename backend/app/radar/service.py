@@ -10,7 +10,6 @@ import subprocess
 from datetime import datetime, timezone
 
 import httpx
-import re
 from playwright.sync_api import sync_playwright
 from sqlmodel import Session, select
 

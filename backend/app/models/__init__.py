@@ -298,26 +298,6 @@ class WatchCandidate(TenantScoped, TimestampMixin, table=True):
     status: str = Field(default="open", index=True)  # open 待定夺 | added 已加入 | dismissed 已忽略
 
 
-class HarvestProfile(TenantScoped, TimestampMixin, table=True):
-    """纯获客号挖掘的全量解析存档（2026-11-03）：解析到主页的号一律留档。
-
-    存档是 LLM 复判的前提——此前词表没命中的号看完即丢（只记 seen），想换判定器
-    就得重撞主页限速；存档后判定可以随时重跑，存量也能按预算回捞补档。"""
-    __tablename__ = "harvest_profiles"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    sec_uid: str = Field(default="", index=True)
-    nickname: str = ""
-    signature: str = ""
-    follower_count: int = 0
-    works_count: int = 0
-    source_video_id: str = ""  # 从哪条种子视频评论区顺藤而来（空=存量回捞补档）
-    sample_video_id: str = ""  # 该号自家最新作品 id（入表后当雪球种子，顺藤它的评论区）
-    judged_by: str = Field(default="pending", index=True)  # pending 词表未判 | lexicon | llm
-    judged_pure: bool = False
-    pure_reason: str = ""  # 最近一次判定依据（含未过原因，可观测）
-
-
 class ScheduleState(TimestampMixin, table=True):
     """统一调度中心运行态：注册表（代码）定义周期任务，本表存开关/钟点覆盖/上次下次。"""
     __tablename__ = "schedules"
@@ -329,15 +309,6 @@ class ScheduleState(TimestampMixin, table=True):
     next_run_at: Optional[datetime] = None
     last_status: str = ""
     run_count: int = 0
-
-
-class Dismissal(TenantScoped, TimestampMixin, table=True):
-    """队列「不做」出口：把某个资产从待写长文/待发布/待补数据队列里永久忽略。"""
-    __tablename__ = "dismissals"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    scope: str = Field(index=True)  # article | publish | metrics
-    asset_id: int = Field(index=True)
 
 
 class WeeklyReport(TenantScoped, TimestampMixin, table=True):

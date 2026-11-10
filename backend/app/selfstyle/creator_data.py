@@ -7,7 +7,7 @@ cookie+UA 即可，无需浏览器）。账号 = 同行监测「我的账号」�
 """
 from __future__ import annotations
 
-from datetime import date as _date, timedelta
+from datetime import date as _date
 
 import httpx
 from sqlmodel import Session, select
@@ -96,9 +96,3 @@ def collect_for_tenant(tenant_id: int) -> tuple[int, str]:
     rows = fetch_account_overview(cookie)
     n = upsert_metrics(tenant_id, rows)
     return n, f"{len(rows)} 天（{min(rows)}~{max(rows)}）" if rows else "0 天"
-
-
-def backfill_days(tenant_id: int, days: int = 7) -> int:
-    """回填近 N 天（接口最多给 7 天日序，此函数用于显式补跑）。"""
-    n, _ = collect_for_tenant(tenant_id)
-    return n

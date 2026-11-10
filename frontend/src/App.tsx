@@ -51,15 +51,13 @@ export type SectionKey =
   | 'l_topics' | 'l_scripts' | 'l_cand' | 'l_watch' | 'l_bench'
   | 'article' | 'a_style'
 
-/** 旧分区键 → 新叶子（内嵌页 onNavigate 的兼容路由）。 */
+/** 旧分区键 → 新叶子（内嵌页 onNavigate 的兼容路由）。
+2026-11-10 清理：11 个全仓零调用的旧键已删，只保留 Tasks 联动入口仍在产出的 4 键。 */
 const NAVMAP: Record<string, SectionKey> = {
-  dashboard: 'today', posters: 'today', publishing: 'today', digital: 'today',
-  persona: 'p_topics', topics: 'p_topics', radar: 'p_topics',
-  scripts: 'p_content', style: 'p_own',
-  watch: 'p_watch', intel: 'p_cand', benchmarks: 'p_bench',
-  leadgen: 'l_topics',
+  benchmarks: 'p_bench',
+  scripts: 'p_content',
   articles: 'article',
-  kb_topics: 'article', // 2026-11-09 内容工场合并：选题池/草稿箱一页链完
+  topics: 'p_topics',
 }
 
 interface LeafDef {
@@ -316,15 +314,15 @@ export default function App() {
           {active === 'p_content' && <Scripts onNavigate={navTo} accountType="persona" />}
           {active === 'l_scripts' && <Scripts onNavigate={navTo} accountType="leadgen" />}
           {active === 'p_own' && <AccountTrends onNavigate={navTo} />}
-          {active === 'p_bench' && <Benchmarks accountType="persona" />}
-          {active === 'l_bench' && <Benchmarks accountType="leadgen" />}
+          {active === 'p_bench' && <Benchmarks onNavigate={navTo} accountType="persona" />}
+          {active === 'l_bench' && <Benchmarks onNavigate={navTo} accountType="leadgen" />}
           {active === 'p_cand' && <DiscoveredAccounts accountType="persona" />}
           {active === 'l_cand' && <DiscoveredAccounts accountType="leadgen" />}
-          {active === 'p_watch' && <Watch accountType="persona" />}
-          {active === 'l_watch' && <Watch accountType="leadgen" />}
+          {active === 'p_watch' && <Watch onNavigate={navTo} accountType="persona" />}
+          {active === 'l_watch' && <Watch onNavigate={navTo} accountType="leadgen" />}
           {active === 'article' && <Workshop />}
           {active === 'a_style' && <ArticleStyle />}
-          {active === 'tasks' && <Tasks />}
+          {active === 'tasks' && <Tasks onNavigate={navTo} />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}
             onLogout={() => { setMe(null); setAuthed(false) }} />}
         </div>

@@ -1,5 +1,4 @@
 """Content Studio FastAPI 入口：路由装配 + 执行器注册 + 前端静态托管。"""
-import asyncio
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -89,7 +88,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="跃迁内容工作室", version=APP_VERSION, lifespan=lifespan)
 
-from .auth import require_admin_dep, require_ready_user, require_user
+from .auth import require_admin_dep, require_ready_user
 
 @app.middleware("http")
 async def _security_headers(request, call_next):

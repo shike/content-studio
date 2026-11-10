@@ -30,9 +30,9 @@ MANAGED: dict[str, str] = {
     "douyin_ua": "str",
     "watch_scan_enabled": "bool",
     "creator_data_enabled": "bool",
+    "ima_kb_enabled": "bool",
     "watch_scan_hour": "int",
 }
-SECRET_KEYS = {k for k, t in MANAGED.items() if t == "secret"}
 
 
 def _coerce(kind: str, raw: str):

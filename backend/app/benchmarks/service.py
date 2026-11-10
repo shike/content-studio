@@ -4,12 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
-
-import asyncio
-import json
-import os
-from pathlib import Path
 
 from sqlmodel import Session, select
 
@@ -19,7 +13,7 @@ from ..settings import settings
 from ..jobs.runner import JobContext, register_executor, register_owed, runner
 from ..llm import gateway
 from ..models import BenchmarkVideo, Topic
-from ..prompts import load, render
+from ..prompts import render
 from ..jobs.errors import CaptchaError
 from . import downloader
 

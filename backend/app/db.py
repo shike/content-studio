@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.orm import Session as SASession, with_loader_criteria
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import SQLModel, create_engine
 
 from .settings import settings
 
@@ -192,11 +192,6 @@ def _migrate(engine) -> None:
         if acols and "kb_doc_ids" not in acols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE articles ADD COLUMN kb_doc_ids JSON DEFAULT '[]'"))
-        # V4 判定管线（2026-11-03）：存档带自家作品 id，LLM 终审入表后雪球自喂
-        hpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(harvest_profiles)"))]
-        if hpcols and "sample_video_id" not in hpcols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE harvest_profiles ADD COLUMN sample_video_id VARCHAR DEFAULT ''"))
         if cols and "creator_cookie" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))
@@ -283,8 +278,10 @@ def _migrate(engine) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_active_dedup ON jobs(tenant_id, type, dedup_key)"
             " WHERE dedup_key <> '' AND status IN ('queued','running','parked')"))
         # 多租户：业务表补 tenant_id（历史数据归租户 1）
+        # （dismissals/harvest_profiles 两张死壳表已从建表管道退役 2026-11-10：模型已删，
+        #   生产库里已有行原地保留，不再迁移维护）
         for table in ("articles", "benchmark_videos",
-                      "dismissals", "media_assets", "radar_topics",
+                      "media_assets", "radar_topics",
                       "research_reports", "scripts", "self_videos", "style_profiles",
                       "topics", "watch_accounts", "watch_candidates"):
             tcols = [r[1] for r in conn.execute(sqlalchemy.text(f"PRAGMA table_info({table})"))]
@@ -301,8 +298,3 @@ def _migrate(engine) -> None:
         # （删表前启动自动快照已保现场；历史数据如需追溯用 pre-migrate 快照）
         for dead in ("tenant_memberships", "credit_transactions", "bean_ledger", "llm_calls"):
             conn.execute(sqlalchemy.text(f"DROP TABLE IF EXISTS {dead}"))
-
-
-def get_session():
-    with Session(engine) as session:
-        yield session

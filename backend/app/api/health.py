@@ -7,7 +7,6 @@ from sqlmodel import Session, text
 
 from ..db import engine
 from ..llm import gateway
-from ..settings import settings
 from ..version import APP_VERSION
 
 router = APIRouter()

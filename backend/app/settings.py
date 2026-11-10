@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
     watch_scan_enabled: bool = True   # 定时同行扫描（PRD R3.4c）
     creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
+    ima_kb_enabled: bool = True      # ima 知识库取材/选题线总开关（执行器层还要求 app_settings 里凭证配齐，两层相与）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
     # 全自动拆解闸（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：达标作品自动批准进拆解
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）

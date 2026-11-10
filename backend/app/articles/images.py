@@ -7,7 +7,6 @@ import hmac
 import json
 import secrets
 import time
-from pathlib import Path
 
 import httpx
 

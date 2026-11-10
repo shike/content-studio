@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from ..auth import (LOGIN_GUARD, SESSION_COOKIE, SESSION_DAYS, CurrentUser, _DUMMY_HASH,
+from ..auth import (LOGIN_GUARD, SESSION_COOKIE, CurrentUser, _DUMMY_HASH,
                     client_ip, create_session, hash_password, require_user, verify_password)
 from ..db import engine
 from ..models import Tenant, User, UserSession

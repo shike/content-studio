@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileVideo, Inbox, Lightbulb, Scissors, Sparkles, Trash2 } from 'lucide-react'
-import { api, waitJob } from '../api'
-import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
+import { FileVideo, Inbox, Lightbulb, Scissors, Sparkles } from 'lucide-react'
+import { api, apiErrText, waitJob } from '../api'
+import { Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
+import { usePageGuard } from '../hooks'
 import type { SectionKey } from '../App'
 
 interface BenchCounts {
@@ -41,9 +42,6 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
   const [author, setAuthor] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showTranscript, setShowTranscript] = useState(false)
-  const [confirmDel, setConfirmDel] = useState<number | null>(null)
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<BenchCounts>({
     all: 0, pending: 0, todo: 0, done: 0, ignored: 0, online: 0, local: 0,
@@ -52,6 +50,9 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
   const fileRef = useRef<HTMLInputElement>(null)
   const bootedRef = useRef(false)
   const PAGE_SIZE = 20
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
+  const { guard, busy, setBusy, error, setError } = usePageGuard()
 
   const fetchPage = useCallback(async (f: string, pg: number, au: string = author) => {
     const params = new URLSearchParams({
@@ -87,7 +88,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
           await reload()
         }
       } catch (e) {
-        setError(String(e))
+        setError(apiErrText(e))
       }
     })()
   }, [reload])
@@ -99,24 +100,12 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
   const deleteBenchmark = (id: number) =>
     guard(async () => {
       const r = await api<{ removed_candidates: number }>(`/benchmarks/${id}`, { method: 'DELETE' })
-      setConfirmDel(null)
       if (r.removed_candidates > 0) {
         setBusy(`已删除样本及其 ${r.removed_candidates} 条待审候选`)
         setTimeout(() => setBusy(''), 3000)
       }
       await reload()
     })
-
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
 
   const [rowBusy, setRowBusy] = useState<number | null>(null)
   const rowBusyRef = useRef<number | null>(null)
@@ -367,26 +356,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
                         </button>
                       </>
                     )}
-                    {confirmDel === b.id ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteBenchmark(b.id) }}
-                        className="btn-danger btn-xs shrink-0"
-                      >
-                        确认删除
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setConfirmDel(b.id)
-                          setTimeout(() => setConfirmDel((c) => (c === b.id ? null : c)), 3000)
-                        }}
-                        title="删除样本"
-                        className="btn-ghost btn-xs shrink-0 text-slate-300 hover:text-red-500"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
+                    <ConfirmDeleteButton onConfirm={() => deleteBenchmark(b.id)} title="删除样本" />
                     {typeof b.analysis?.score === 'number' && (
                       <span className="w-9 shrink-0 text-right text-sm font-bold tabular-nums text-sky-600">
                         {b.analysis.score}

@@ -15,61 +15,40 @@ from ..models import User
 router = APIRouter(prefix="/api/stats")
 
 
+def _count(s: Session, tid: int, table: str, **eq) -> int:
+    """单表计数，租户过滤只写这一遍（漏写即跨租户计数）。
+
+    table 与 eq 的键全部来自本文件内的代码字面量（非用户输入），无注入面。"""
+    conds = " AND ".join(f"{k}=:{k}" for k in eq)
+    return s.execute(text(
+        f"SELECT COUNT(*) FROM {table} WHERE {conds} AND tenant_id=:tid"
+    ), {**eq, "tid": tid}).scalar() or 0
+
+
 @router.get("/todos")
 def todo_stats(user: User = Depends(require_user)) -> dict:
     tid = user.tenant_id
     with Session(engine) as s:
-        draft_persona = s.execute(text(
-            "SELECT COUNT(*) FROM topics WHERE status='draft' AND line='persona' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-        draft_leadgen = s.execute(text(
-            "SELECT COUNT(*) FROM topics WHERE status='draft' AND line='leadgen' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-        draft_topics = draft_persona + draft_leadgen
-        pending_scripts_persona = s.execute(text(
-            "SELECT COUNT(*) FROM scripts WHERE status='generated' AND account_type='persona' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-        pending_scripts_leadgen = s.execute(text(
-            "SELECT COUNT(*) FROM scripts WHERE status='generated' AND account_type='leadgen' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-        pending_scripts = pending_scripts_persona + pending_scripts_leadgen
-        final_scripts = s.execute(text(
-            "SELECT COUNT(*) FROM scripts WHERE status='final' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-        # 待写脚本：已定审且还没生成过任何脚本（按线）
-        unwritten_persona = s.execute(text(
-            "SELECT COUNT(*) FROM topics WHERE status='approved' AND line='persona' AND tenant_id=:tid"
-            " AND id NOT IN (SELECT topic_id FROM scripts WHERE topic_id IS NOT NULL)"
-        ), {"tid": tid}).scalar() or 0
-        unwritten_leadgen = s.execute(text(
-            "SELECT COUNT(*) FROM topics WHERE status='approved' AND line='leadgen' AND tenant_id=:tid"
-            " AND id NOT IN (SELECT topic_id FROM scripts WHERE topic_id IS NOT NULL)"
-        ), {"tid": tid}).scalar() or 0
-        unwritten = unwritten_persona + unwritten_leadgen
+        draft_persona = _count(s, tid, "topics", status="draft", line="persona")
+        draft_leadgen = _count(s, tid, "topics", status="draft", line="leadgen")
+        pending_scripts_persona = _count(s, tid, "scripts",
+                                         status="generated", account_type="persona")
+        pending_scripts_leadgen = _count(s, tid, "scripts",
+                                         status="generated", account_type="leadgen")
         # 待写长文（公众号独立报题线 2026-11-02）：草稿箱里待写的报题草稿
-        pending_articles = s.execute(text(
-            "SELECT COUNT(*) FROM articles WHERE status='pending' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
+        pending_articles = _count(s, tid, "articles", status="pending")
         # 知识库选题待拍板（2026-11-09 选题线上产品：选用/不做是本线唯一人工闸门）
-        kb_topics = s.execute(text(
-            "SELECT COUNT(*) FROM kb_topics WHERE status='new' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
+        kb_topics = _count(s, tid, "kb_topics", status="new")
         # 候选账号待定夺（2026-11-03 IA 收敛：情报并入产线，徽章随线走）
-        cand_open_persona = s.execute(text(
-            "SELECT COUNT(*) FROM watch_candidates WHERE status='open' AND account_type='persona' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-        cand_open_leadgen = s.execute(text(
-            "SELECT COUNT(*) FROM watch_candidates WHERE status='open' AND account_type='leadgen' AND tenant_id=:tid"
-        ), {"tid": tid}).scalar() or 0
-    return {"draftTopics": draft_topics,
+        cand_open_persona = _count(s, tid, "watch_candidates",
+                                   status="open", account_type="persona")
+        cand_open_leadgen = _count(s, tid, "watch_candidates",
+                                   status="open", account_type="leadgen")
+    return {"draftTopics": draft_persona + draft_leadgen,
             "draftTopicsPersona": draft_persona, "draftTopicsLeadgen": draft_leadgen,
-            "pendingScripts": pending_scripts,
             "pendingScriptsPersona": pending_scripts_persona,
             "pendingScriptsLeadgen": pending_scripts_leadgen,
-            "unwrittenTopics": unwritten,
-            "unwrittenPersona": unwritten_persona, "unwrittenLeadgen": unwritten_leadgen,
             "pendingArticles": pending_articles,
             "kbTopics": kb_topics,
             "openCandidatesPersona": cand_open_persona,
-            "openCandidatesLeadgen": cand_open_leadgen,
-            "finalScripts": final_scripts}
+            "openCandidatesLeadgen": cand_open_leadgen}

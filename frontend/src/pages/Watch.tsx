@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import {
-  CircleAlert, ExternalLink, Pencil, Play, Plus, Power, Radar, Scissors, Search, Trash2, Wand2,
+  CircleAlert, ExternalLink, Pencil, Play, Plus, Power, Radar, Scissors, Search, Wand2,
 } from 'lucide-react'
-import { api, waitJob } from '../api'
+import { api, apiErrText, waitJob } from '../api'
 import {
-  Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime, safeHref } from '../components'
+  Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime, safeHref } from '../components'
+import { useClientPager, usePageGuard } from '../hooks'
 import type { SectionKey } from '../App'
 
 interface WatchAccount {
@@ -45,10 +46,8 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
   const [accounts, setAccounts] = useState<WatchAccount[]>([])
   const [history, setHistory] = useState<ScanJob[]>([])
   const [filter, setFilter] = useState('')
-  const [apageRaw, setApage] = useState(0)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [accVideos, setAccVideos] = useState<BenchmarkLite[]>([])
-  const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({ name: '', url: '', note: '', creator_cookie: '' })
   const [showAdd, setShowAdd] = useState(false)
@@ -56,8 +55,9 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
   const [resolveHint, setResolveHint] = useState('')
   const [scanBusy, setScanBusy] = useState('')
   const [scanSummary, setScanSummary] = useState<{ queued: number; notes: string[] } | null>(null)
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
+  const { guard, busy, error, setError } = usePageGuard()
 
   const reload = useCallback(async () => {
     const p = new URLSearchParams()
@@ -72,19 +72,8 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
   }, [accountType])
 
   useEffect(() => {
-    reload().catch((e) => setError(String(e)))
+    reload().catch((e) => setError(apiErrText(e)))
   }, [reload])
-
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
 
   const scanAll = () =>
     guard(async () => {
@@ -128,7 +117,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
   const removeAccount = (id: number) =>
     guard(async () => {
       await api(`/watch/accounts/${id}`, { method: 'DELETE' })
-      setConfirmDel(null)
       await reload()
     })
 
@@ -229,10 +217,9 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
     if (filter === 'bad') return Boolean(a.last_scan_at) && isAbnormal(a)
     return true
   })
-  const APAGE = 10  // 每页 10 个（2026-11-08 用户定版）
-  const apages = Math.max(1, Math.ceil(filtered.length / APAGE))
-  const apage = Math.min(apageRaw, apages - 1)
-  const pagedAccounts = filtered.slice(apage * APAGE, (apage + 1) * APAGE)
+  // 客户端分页（hooks.ts）：每页 10 个（2026-11-08 用户定版）
+  const APAGE = 10
+  const accPager = useClientPager(filtered, APAGE)
   // 上次扫描取账号级 last_scan_at 的最大值（持久事实，不随任务清理/归档消失）；
   // 扫描任务历史只用于异常判定与展开详情
   const lastScan = accounts.reduce<string | undefined>(
@@ -347,7 +334,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
       <div className="mt-4">
         <ChipRow
           active={filter}
-          onChange={(k) => { setFilter(k); setApage(0) }}
+          onChange={(k) => { setFilter(k); accPager.setPage(0) }}
           chips={[
             { key: '', label: '全部', count: counts.all },
             { key: 'on', label: '监控中', count: counts.on },
@@ -369,7 +356,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {pagedAccounts.map((acc) => {
+            {accPager.slice.map((acc) => {
               const exp = expandedId === acc.id
               const abnormal = Boolean(acc.last_scan_at) && isAbnormal(acc)
               return (
@@ -431,21 +418,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                     >
                       <Pencil size={12} /> 编辑
                     </button>
-                    {confirmDel === acc.id ? (
-                      <button onClick={() => removeAccount(acc.id)} className="btn-danger btn-xs">
-                        确认删除
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setConfirmDel(acc.id)
-                          setTimeout(() => setConfirmDel((c) => (c === acc.id ? null : c)), 3000)
-                        }}
-                        className="btn-ghost btn-xs text-slate-300 hover:text-red-500"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
+                    <ConfirmDeleteButton onConfirm={() => removeAccount(acc.id)} size={12} />
                     <a
                       href={safeHref(acc.url)}
                       target="_blank"
@@ -546,10 +519,10 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
       </div>
       {filtered.length > APAGE && (
         <div className="border-t border-slate-100 px-4 py-2.5 text-center text-[13px] text-slate-500">
-          <button onClick={() => setApage(Math.max(0, apage - 1))} disabled={apage === 0}
+          <button onClick={() => accPager.setPage(Math.max(0, accPager.page - 1))} disabled={accPager.page === 0}
             className="btn-ghost btn-xs disabled:opacity-40">← 上一页</button>
-          <span className="mx-3">第 {apage * APAGE + 1}–{Math.min((apage + 1) * APAGE, filtered.length)} 条 · 共 {filtered.length} 条</span>
-          <button onClick={() => setApage(Math.min(apages - 1, apage + 1))} disabled={apage >= apages - 1}
+          <span className="mx-3">第 {accPager.page * APAGE + 1}–{Math.min((accPager.page + 1) * APAGE, filtered.length)} 条 · 共 {filtered.length} 条</span>
+          <button onClick={() => accPager.setPage(Math.min(accPager.pages - 1, accPager.page + 1))} disabled={accPager.page >= accPager.pages - 1}
             className="btn-ghost btn-xs disabled:opacity-40">下一页 →</button>
         </div>
       )}

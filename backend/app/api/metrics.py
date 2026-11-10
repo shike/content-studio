@@ -55,12 +55,3 @@ def weekly_report(user: User = Depends(require_user)) -> dict:
     if rep is None:
         return {"week": "", "message": "还没有周报：点「生成周报」跑一次（数据来自每日回流）"}
     return rep
-
-
-@router.post("/weekly/generate", status_code=202)
-async def generate_weekly(user: User = Depends(require_user)) -> dict:
-    from ..jobs.runner import runner
-
-    job = await runner.submit("video_weekly_report", {"force": True},
-                              dedup_key=f"{user.tenant_id}:weeklyreport:manual:{__import__('datetime').datetime.now():%Y%m%d%H%M}")
-    return {"job_id": job.id}

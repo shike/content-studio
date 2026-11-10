@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api } from './api'
-import { fetchMenuStats } from './counts'
 
 interface OpenCand { id: number; name: string; follower_count: number; signature: string; keyword: string }
 
@@ -15,10 +14,9 @@ export default function Mobile({ onExit }: { onExit: () => void }) {
 
   const reload = useCallback(async () => {
     try {
-      const [c, a, s] = await Promise.all([
+      const [c, a] = await Promise.all([
         api<{ items: OpenCand[] }>('/watch/discover/candidates?status=open'),
         api<{ items: { title: string; status: string }[] }>('/articles?limit=5'),
-        fetchMenuStats(),
       ])
       setCands((c.items || []).slice(0, 10))
       const gen = (a.items || []).find((x) => x.status === 'generating')

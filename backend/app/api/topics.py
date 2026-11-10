@@ -4,13 +4,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import Article, User, Job, ResearchReport, Script, Topic
 from ..topics import service as topic_service
+from ._listing import paged_list_response
 
 router = APIRouter(prefix="/api/topics")
 
@@ -59,13 +60,6 @@ def quick_topic(body: QuickIn) -> dict:
         s.commit()
         s.refresh(topic)
         return topic.model_dump()
-
-
-class FeiguaItem(BaseModel):
-    title: str
-    url: str = ""
-    note: str = ""
-
 
 
 def _latest_report(s: Session, topic_id: int) -> str:
@@ -138,13 +132,10 @@ def list_topics(status: Optional[str] = None, source: Optional[str] = None,
             q = q.where(Topic.audience == audience)
         if min_score is not None:
             q = q.where(Topic.score >= min_score)  # type: ignore[attr-defined]
-        total = len(s.exec(q).all())
-        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
-        from sqlmodel import func
         cq = select(Topic.status, func.count(Topic.id)).group_by(Topic.status).where(  # type: ignore[arg-type]
             Topic.line == line)  # type: ignore[attr-defined]
-        counts = {st: n for st, n in s.exec(cq).all()}
-        return {"items": [_topic_out(s, t) for t in rows], "total": total, "counts": counts}
+        return paged_list_response(s, q, offset=offset, limit=limit, counts_q=cq,
+                                   serialize=lambda t: _topic_out(s, t))
 
 
 @router.get("/{topic_id}")
@@ -202,6 +193,20 @@ def _set_status(topic_id: int, status: str) -> dict:
 
 
 
+def _delete_topic_cascade(s: Session, topic: Topic) -> None:
+    """删选题连带（delete_topic 与 cleanup_rejected 单点共用）：
+    研究报告一并删；文章与脚本保留、仅解绑（FK 约束要求先解绑才能删选题）。"""
+    for rep in s.exec(select(ResearchReport).where(ResearchReport.topic_id == topic.id)).all():
+        s.delete(rep)
+    for art in s.exec(select(Article).where(Article.topic_id == topic.id)).all():
+        art.topic_id = None
+        s.add(art)
+    for sc in s.exec(select(Script).where(Script.topic_id == topic.id)).all():
+        sc.topic_id = None
+        s.add(sc)
+    s.delete(topic)
+
+
 @router.delete("/{topic_id}")
 def delete_topic(topic_id: int) -> dict:
     """删除选题（含研究报告），不可恢复。文章与脚本保留，仅解绑。"""
@@ -209,17 +214,7 @@ def delete_topic(topic_id: int) -> dict:
         topic = s.get(Topic, topic_id)
         if topic is None:
             raise HTTPException(404, detail="topic not found")
-        for rep in s.exec(select(ResearchReport).where(ResearchReport.topic_id == topic_id)).all():
-            s.delete(rep)
-        # 文章保留，仅解绑（文章本身不随选题删除）
-        for art in s.exec(select(Article).where(Article.topic_id == topic_id)).all():
-            art.topic_id = None
-            s.add(art)
-        # 脚本同理：保留脚本内容（FK 约束要求必须先解绑才能删选题）
-        for sc in s.exec(select(Script).where(Script.topic_id == topic_id)).all():
-            sc.topic_id = None
-            s.add(sc)
-        s.delete(topic)
+        _delete_topic_cascade(s, topic)
         s.commit()
     return {"ok": True}
 
@@ -237,15 +232,7 @@ def cleanup_rejected(body: dict) -> dict:
             )  # type: ignore[attr-defined]
         ).all()
         for topic in rows:
-            for rep in s.exec(select(ResearchReport).where(ResearchReport.topic_id == topic.id)).all():
-                s.delete(rep)
-            for art in s.exec(select(Article).where(Article.topic_id == topic.id)).all():
-                art.topic_id = None
-                s.add(art)
-            for sc in s.exec(select(Script).where(Script.topic_id == topic.id)).all():
-                sc.topic_id = None
-                s.add(sc)
-            s.delete(topic)
+            _delete_topic_cascade(s, topic)
         s.commit()
         return {"deleted": len(rows)}
 

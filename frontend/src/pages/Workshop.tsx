@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen, ChevronDown, ChevronRight, ClipboardCheck, Eye, Inbox, Newspaper,
-  PenLine, RefreshCw, Save, Trash2, X,
+  PenLine, RefreshCw, Save, X,
 } from 'lucide-react'
 import { api, apiErrText, Article, KBTopic, waitJob } from '../api'
 import { copyRichHtml } from '../clipboard'
-import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, Pager, relTime } from '../components'
+import {
+  Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, Pager, relTime, sumCounts,
+} from '../components'
+import { usePageGuard } from '../hooks'
 
 const AUDIENCES = ['全部', '老板', '转行者']
 const T_STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -147,8 +150,6 @@ const LIMIT = 20
  */
 export default function Workshop() {
   const [booted, setBooted] = useState(false)
-  const [error, setError] = useState('')
-  const [pageBusy, setPageBusy] = useState('')
 
   // ── 选题池段 ──
   const [topics, setTopics] = useState<KBTopic[]>([])
@@ -172,7 +173,6 @@ export default function Workshop() {
   const [writeStyle, setWriteStyle] = useState<Record<number, string>>({})
   const [copyState, setCopyState] = useState<{ id: number; kind: 'busy' | 'ok' | 'err'; msg?: string } | null>(null)
   const [renderState, setRenderState] = useState<{ id: number; kind: 'busy' | 'ok' | 'err'; msg?: string } | null>(null)
-  const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const [dBusy, setDBusy] = useState('')
   const [draftBusy, setDraftBusy] = useState('')
   const [hotBusy, setHotBusy] = useState('')
@@ -181,6 +181,15 @@ export default function Workshop() {
   const [focusId, setFocusId] = useState<number | null>(null) // 「去审稿」定位高亮
   const poolRef = useRef<HTMLElement>(null)
   const draftsRef = useRef<HTMLElement>(null)
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy（pageBusy）由 hook 持有并 finally 复位。
+  // onReset 里顺手清各段局部 busy（rowBusy/syncBusy 等）——2026-10-29 卡死 bug 修复的一部分，任何路径必须复位，不可丢。
+  const { guard, busy: pageBusy, setBusy: setPageBusy, error, setError } = usePageGuard(() => {
+    setDBusy('')
+    setDraftBusy('')
+    setRowBusy({})
+    setSyncBusy('')
+  })
 
   const loadTopics = useCallback(async (st: string) => {
     const r = await api<{ topics: KBTopic[] }>(`/articles/kb-topics?status=${st}`)
@@ -202,21 +211,6 @@ export default function Workshop() {
       .then(() => setBooted(true))
       .catch((e) => { setError(apiErrText(e)); setBooted(true) })
   }, [loadTopics, loadArticles])
-
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(apiErrText(e))
-    } finally {
-      setPageBusy('')
-      setDBusy('')
-      setDraftBusy('')
-      setRowBusy({})
-      setSyncBusy('')
-    }
-  }
 
   const scrollTo = (ref: React.RefObject<HTMLElement | null>) =>
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -327,7 +321,6 @@ export default function Workshop() {
   const deleteArticle = (id: number) =>
     guard(async () => {
       await api(`/articles/${id}`, { method: 'DELETE' })
-      setConfirmDel(null)
       setArticles((list) => list.filter((x) => x.id !== id))
       if (dExpanded === id) setDExpanded(null)
     })
@@ -385,8 +378,7 @@ export default function Workshop() {
 
   if (!booted) return null
 
-  const statusCount = (k: string) => (k ? counts[k] || 0 : Object.values(counts).reduce((a, b) => a + b, 0))
-  const pendingCount = statusCount('pending') + statusCount('generating')
+  const pendingCount = sumCounts(counts, 'pending') + sumCounts(counts, 'generating')
   const visTopics = audience === '全部' ? topics : topics.filter((t) => t.audience === audience)
 
   return (
@@ -423,11 +415,11 @@ export default function Workshop() {
             </button>
             <button onClick={() => scrollTo(draftsRef)}
               className="rounded-full border border-sky-200 bg-sky-50/60 px-3 py-1 text-xs text-sky-800 hover:border-sky-300">
-              待改稿 <b className="num-serif">{statusCount('draft') + statusCount('edited')}</b>
+              待改稿 <b className="num-serif">{sumCounts(counts, 'draft') + sumCounts(counts, 'edited')}</b>
             </button>
             <button onClick={() => scrollTo(draftsRef)}
               className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:border-slate-300">
-              已渲染待发 <b className="num-serif">{statusCount('rendered')}</b>
+              已渲染待发 <b className="num-serif">{sumCounts(counts, 'rendered')}</b>
             </button>
           </div>
 
@@ -567,12 +559,12 @@ export default function Workshop() {
                 active={filter}
                 onChange={(k) => { setFilter(k); setOffset(0); loadArticles(k, 0).catch((e) => setError(apiErrText(e))) }}
                 chips={[
-                  { key: '', label: '全部', count: statusCount('') },
-                  { key: 'pending', label: '待写', count: statusCount('pending') },
-                  { key: 'failed', label: '生成失败', count: statusCount('failed') },
-                  { key: 'draft', label: '待改稿', count: statusCount('draft') },
-                  { key: 'edited', label: '已改稿', count: statusCount('edited') },
-                  { key: 'rendered', label: '已渲染', count: statusCount('rendered') },
+                  { key: '', label: '全部', count: sumCounts(counts) },
+                  { key: 'pending', label: '待写', count: sumCounts(counts, 'pending') },
+                  { key: 'failed', label: '生成失败', count: sumCounts(counts, 'failed') },
+                  { key: 'draft', label: '待改稿', count: sumCounts(counts, 'draft') },
+                  { key: 'edited', label: '已改稿', count: sumCounts(counts, 'edited') },
+                  { key: 'rendered', label: '已渲染', count: sumCounts(counts, 'rendered') },
                 ]}
               />
             </div>
@@ -681,26 +673,7 @@ export default function Workshop() {
                               </button>
                             )
                           )}
-                          {confirmDel === art.id ? (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); deleteArticle(art.id) }}
-                              className="btn-danger btn-xs shrink-0"
-                            >
-                              确认删除
-                            </button>
-                          ) : (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setConfirmDel(art.id)
-                                setTimeout(() => setConfirmDel((c) => (c === art.id ? null : c)), 3000)
-                              }}
-                              title="删除草稿"
-                              className="btn-ghost btn-xs shrink-0 text-slate-300 hover:text-red-500"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
+                          <ConfirmDeleteButton onConfirm={() => deleteArticle(art.id)} title="删除草稿" />
                         </div>
 
                         {exp && (

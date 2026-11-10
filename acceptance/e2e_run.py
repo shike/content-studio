@@ -7,12 +7,10 @@
 
 覆盖：
 - 登录流程（错误密码拒/正确密码进）
-- 全站 14 页逐页打开，console error/pageerror 零异常，每页特征元素在位
-- 工作台快速记选题（无 LLM 的真实用户操作）→ 选题库出现
-- 公众号：fixture 文章行展开 → 渲染 → HTML 预览出现
-- 管理后台：品牌卡九字段在位、改头图口号保存成功回显
-- 租户白名单：成员账号无管理后台入口
-- 登出
+- 全站 16 页逐页打开（今天+产线树 13 叶+任务/设置），console error/pageerror 零异常，每页特征元素在位
+- 今天页快速记选题（无 LLM 的真实用户操作）→ 待拍清单出现
+- 内容工场：fixture 文章行展开 → md 编辑器 → 渲染公众号格式
+- 账号经营：品牌卡字段在位、改头图口号保存成功回显
 """
 import os
 import sys
@@ -119,76 +117,90 @@ def main() -> int:
         page.fill('input[placeholder="密码"]', ADMIN_PWD)
         page.click('button:has-text("登录")')
         page.wait_for_selector('nav', timeout=8000)
-        check("正确密码进入工作台", "工作台" in page.inner_text("nav"))
+        check("正确密码进入工作台（侧栏「今天」在位）", "今天" in page.inner_text("nav"))
 
         # ---------- 全站逐页零报错 + 页头断言 ----------
-        section("E2E · 全站逐页零报错（14 页）")
+        section("E2E · 全站逐页零报错（16 页）")
 
         def goto_page(label: str) -> None:
             """locator 点击侧栏菜单（evaluate 的 .click() 不触发 React 导航，勿用）。"""
             page.locator('aside button', has_text=label).first.click(timeout=6000)
             page.wait_for_timeout(900)
 
-        PAGES = ["工作台", "选题库", "脚本工场", "公众号", "发布台",
-                 "海报提示词", "同行监测", "我的风格", "拆解库", "话题雷达", "任务",
-                 "设置", "管理后台"]
-        for label in PAGES:
+        # （侧栏叶按钮, 页头期望）：现行侧栏=今天 + 产线树三组（App.tsx TREE，默认全展开）+ 任务/设置。
+        # 有 PageHeader 的页面期望=第一个 main h2（title 常与侧栏叶不同名，如 内容看板→脚本工场）；
+        # 候选两页（DiscoveredAccounts）无页级标题，改验页内签名文本。
+        PAGES = [
+            ("今天", "今天要拍"),
+            ("选题库", "选题库"),
+            ("内容看板", "脚本工场"),
+            ("账号经营", "账号经营"),
+            ("对标拆解", "拆解库"),
+            ("候选定夺", "开始搜索"),
+            ("监控清单", "监控的账号"),
+            ("获客选题", "选题库"),
+            ("脚本工场", "脚本工场"),
+            ("纯获客候选", "开始搜索"),
+            ("获客监控", "监控的账号"),
+            ("打法卡库", "拆解库"),
+            ("内容工场", "公众号内容工场"),
+            ("风格画像", "公众号风格画像"),
+            ("任务", "任务"),
+            ("设置", "设置"),
+        ]
+        for label, want in PAGES:
             goto_page(label)
             h2 = page.locator("main h2")
-            got = h2.first.inner_text().strip() if h2.count() else "(无页头)"
-            check(f"页面打开：{label}", got == label, f"页头={got!r}")
-            if label == "工作台":
-                check("工作台含同行监测周报卡", "同行监测周报" in page.inner_text("main"))
+            if h2.count():
+                got = h2.first.inner_text().strip()
+                check(f"页面打开：{label}", got == want, f"页头={got!r} 期望={want!r}")
+            else:
+                check(f"页面打开：{label}", want in page.inner_text("main"),
+                      f"页内未见签名 {want!r}（该页无页级标题）")
 
-        # ---------- 工作台快速记选题 ----------
-        section("E2E · 工作台快速记选题")
-        goto_page("工作台")
-        page.click('button:has-text("快速记选题")')
-        page.fill('input[placeholder*="一句话记下"]', f"E2E 快速记选题 {stamp}")
-        page.click('button:has-text("记下来")')
-        page.wait_for_timeout(1000)
-        check("快速记选题成功回显", "已记" in page.inner_text("main") or "记下来" not in page.inner_text("main"))
+        # ---------- 今天页快速记选题 ----------
+        section("E2E · 今天页快速记选题")
+        goto_page("今天")
+        page.fill('input[placeholder*="快速记选题"]', f"E2E 快速记选题 {stamp}")
+        page.click('button:has-text("入库")')
+        page.wait_for_timeout(1500)
+        check("快速记选题成功回显（待拍清单出现）",
+              f"E2E 快速记选题 {stamp}" in page.inner_text("main"))
 
-        # ---------- 公众号：文章展开与渲染 ----------
-        section("E2E · 公众号文章展开与渲染")
-        goto_page("公众号")
-        # 行标题在无脚本关联时显示兜底文案「文章 #N」——按行内稳定标记点行展开
-        page.locator('text=/文章 #\\d+/').first.click()
+        # ---------- 内容工场：文章展开与渲染 ----------
+        section("E2E · 内容工场文章展开与渲染")
+        goto_page("内容工场")
+        # 种子文章按标题点行展开（现行行兜底文案是「草稿 #N」，不再是「文章 #N」）
+        page.locator(f'text={article_title}').first.click()
         page.wait_for_timeout(800)
         check("文章行展开（md 编辑器出现）", page.locator("textarea").count() >= 1)
         render_btn = page.locator('button:has-text("渲染公众号格式")')
         if render_btn.count() == 0:
-            render_btn = page.locator('button:has-text("已渲染")')
+            render_btn = page.locator('button:has-text("已渲染 ✓")')
         render_btn.first.click()
         page.wait_for_timeout(1200)
         check("渲染交互出 HTML 预览", page.locator("text=复制公众号 HTML").count() >= 1
-              or page.locator("text=已渲染").count() >= 1)
+              or page.locator("text=已渲染 ✓").count() >= 1)
 
-        # ---------- 设置页：品牌卡九字段 ----------
-        section("E2E · 设置页品牌卡")
-        goto_page("设置")
-        page.wait_for_timeout(900)
-        check("品牌卡九字段在位",
+        # ---------- 账号经营页：品牌卡（BrandForm 已从设置页迁到账号经营） ----------
+        section("E2E · 账号经营页品牌卡")
+        goto_page("账号经营")
+        page.locator('label', has_text='角标 · 第一行').first.wait_for(state='visible', timeout=8000)
+        check("品牌卡字段在位",
               all(page.locator(f'text={t}').count() >= 1 for t in
-                  ["角标栏目 · 第一行", "头图口号", "受众域口径", "ASR 领域词表", "图表主色"]))
-        l1 = page.locator('label', has_text='角标栏目 · 第一行').locator('input').input_value()
-        check("品牌卡回显已配置内容（栏目第一行=示例种子值）", l1 == "跃迁", f"label_line1={l1!r}")
+                  ["角标 · 第一行", "头图口号", "受众域口径", "ASR 领域词表", "图表主色"]))
+        l1 = page.locator('label', has_text='角标 · 第一行').locator('input').input_value()
+        check("品牌卡回显已配置内容（栏目第一行=中性默认值）", l1 == "跃迁", f"label_line1={l1!r}")
         kw_input = page.locator('label', has_text='头图口号').locator('input')
         kw_input.wait_for(state='visible', timeout=8000)
         kw_input.fill('E2E口号 ' + stamp)
-        page.evaluate(
-            """() => {
-                const b = [...document.querySelectorAll('button')]
-                    .find(x => x.textContent.includes('保存品牌配置'));
-                if (b) b.click();
-            }""")
+        page.locator('button:has-text("保存品牌配置")').first.click()
         page.wait_for_timeout(1200)
-        check("品牌保存成功回显", "品牌已保存" in page.inner_text("main"))
+        check("品牌保存成功回显", "已保存" in page.inner_text("main"))
 
 
         # ---------- 汇总 ----------
-        # 预期噪声：未登录探活/登出后的 401；无蝉镜凭证实例上数字人页 balance 探询的
-        # 400（合法降级路径，前端有"未配置"回显）——浏览器把 4xx 响应自动记 console.error
+        # 预期噪声：未登录探活/登出后的 401——浏览器把 4xx 响应自动记 console.error
         real_errors = [e for e in errors
                        if "favicon" not in e and "401 (Unauthorized)" not in e
                       ]

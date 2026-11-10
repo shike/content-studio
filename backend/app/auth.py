@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 from sqlmodel import Session, select
 
 from .db import engine

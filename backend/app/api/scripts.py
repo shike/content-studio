@@ -1,13 +1,14 @@
 """脚本工场 API。"""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import Article, Script, ScriptTemplate, Topic, User
 from ..scripts import service as script_service
+from ._listing import paged_list_response
 
 router = APIRouter(prefix="/api/scripts")
 
@@ -81,14 +82,10 @@ def list_scripts(status: str = "", limit: int = 50, offset: int = 0,
         # 两类号产线分视图（2026-11-02）：产线页各看各的类型；兜底口径与前端一致（空=persona）
         if account_type in ("persona", "leadgen"):
             q = q.where(Script.account_type == account_type)  # type: ignore[attr-defined]
-        total = len(s.exec(q).all())
-        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
-        from sqlmodel import func
         cq = select(Script.status, func.count(Script.id)).group_by(Script.status)  # type: ignore[arg-type]
         if account_type in ("persona", "leadgen"):
             cq = cq.where(Script.account_type == account_type)  # type: ignore[attr-defined]
-        counts = {st: n for st, n in s.exec(cq).all()}
-        return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
+        return paged_list_response(s, q, offset=offset, limit=limit, counts_q=cq)
 
 
 @router.get("/templates")

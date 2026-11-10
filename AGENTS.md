@@ -1,6 +1,6 @@
 # 跃迁内容工作室 · Agent 工作规约
 
-单管理员内容生产流水线（登录门禁，PRD R11/TDD §15；多租户/积分体系已于 2026-10-27 拆除）：选题 → 三版口播脚本 → 公众号长文 → 发布物料包（发布永远人工；口播数字人功能已于 2026-10-29 整体退役）。
+单管理员内容生产流水线（登录门禁，PRD R11/TDD §15；多租户/积分体系已于 2026-10-27 拆除）：选题 → 口播脚本（一版精品直出）→ 公众号长文（报题/知识库选题直出）（发布永远人工；口播数字人功能已于 2026-10-29 整体退役）。
 
 - 架构：FastAPI + SQLModel + SQLite（`backend/app/`，24 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）
 - 五大文档（英文文件名，规格型：不含版本号、不含完成情况）：`docs/PRD.md`（需求总账，改需求先改它）· `docs/TDD.md`（技术契约）· `docs/TEST.md`（验收合同）· `docs/AUDIT.md`（审计规程）· `docs/MRD.md`（市场调研存档）。现状只看运行中的应用。
@@ -14,7 +14,7 @@
 
 ## 验收纪律（违反 = 白干）
 
-- `acceptance/run_p0.py…run_p8.py`（纯标准库；run_p5 已随数字人退役删除；P6=任务 P7=认证与单管理员）。**任何后端改动后必须重跑受影响套件**。
+- `acceptance/` 实存 `run_p0/p1/p2/p6/p7/p8` + `e2e_run.py`（纯标准库；P3 已随视频生产线移除、run_p4 已随发布台砍除删除、run_p5 已随数字人退役删除；P6=任务 P7=认证与单管理员）。**任何后端改动后必须重跑受影响套件**。
 - 任务失败处置（2026-10-30 用户定版：**失败是异常不是工作流**）：瞬时/风控/额度类失败走退避梯子（30min→2h→6h→24h），梯子尽头转**每日慢巡**（24h 一试直到自愈，30 次硬上限后安静终态）；确定性失败不重试安静终态。界面无失败工作流（指纹聚类/标记已修复/复活整批已移除，后端 failures API 保留）：失败行=红徽章+错误+行内重试，侧栏徽章含失败数。任何失败要么自愈要么安静可见。
 - 隔离实例（别污染工作台）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`；跑套件 `CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 python3 acceptance/run_pX.py`（可加 `CS_REAPER_SEC=5` 加速快巡）。跑完删 `data-acceptance`。
   - 复制后先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`——否则验收任务排在真实队列后面必然超时。
@@ -24,8 +24,8 @@
 
 ## LLM 硬规矩（思考型模型，Coding Plan 端点）
 
-- **max_tokens = 实测输出 × 2**：贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。现行值：article 分段式（title 8192 / outline 8192 / section 12000/节 / editor 20000 / charts 4000，均 thinking disabled）· article_kb_write 单遍 8192 · article_kb_brief 4000 · article_kb_polish 8192 · article_kb_topic 4000· kg_spec 4000 · poster 3000/8000/6000 · script_generate/polish 20000 · script_finalize 8000 · idea_research/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · discover_keywords 1024 · ping 1024。
-- httpx 超时 300s；验收轮询常规 ≥600s、脚本生成（三版+自动打磨）≥900s。空正文（推理耗尽预算）必须显式报错，禁静默当成功。
+- **max_tokens = 实测输出 × 2**：贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。现行值：article 分段式（title 8192 / outline 8192 / section 12000/节 / editor 20000 / charts 4000，均 thinking disabled）· article_kb_write 单遍 8192 · article_kb_brief 4000 · article_kb_polish 8192 · article_kb_topic 4000 · article_hotspots 4000 · article_style_extract 2000 · weekly_report 2048 · leadgen_judge 4000 · script_generate/polish 20000 · script_finalize 8000 · idea_research/benchmark_analyze 5000 · self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_topics 8000 · trending_queries 1024 · discover_keywords 1024 · ping 1024。
+- httpx 超时 600s；验收轮询常规 ≥600s、脚本生成（一版+自动打磨）≥900s。空正文（推理耗尽预算）必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定；密钥/模型/检索通道走设置页运行时改（存 app_settings，.env 只留引导项）。
 - 成本台账已拆除（2026-10-27 用户裁定 2B）：系统不再记录任何成本；要花销概算直接看服务商控制台。
 
@@ -34,7 +34,7 @@
 - 页面六段式：①页头带（图标+一句话+主操作 ≤2）②回显带（进度/结果/错误，全站此位置）③计数 chips ④紧凑行列表+点行展开（详情两栏：左内容右元信息）⑤空态 EmptyState。内容区 max-w-7xl。
 - UI 操作必有状态回显；降级必须可见（含原因）。禁 `prompt()`/`alert()`，用行内表单。
 - 审阅队列（一屏一件、A/S/X 键、审完自动下一条、有"不做"出口）一律**手动进入**，禁止打开页面自动劫持。共享组件 QueueBar/ChipRow/relTime 在 `frontend/src/components.tsx`。
-- 产线树侧栏（2026-11-07 用户从三方案原型拍板方案三，取代 11-03 版）：**每条线的页面直接摆在侧栏，可展开收起（localStorage `mx-tree-open` 记住展开态），目的地不藏在页内 tab**——今天 → 人设号（选题库/内容看板/账号经营/对标拆解/候选定夺/监控清单——账号经营已并风格画像（2026-11-07 用户拍板））· 获客号（获客选题/脚本工场/纯获客候选/获客监控/打法卡库）· 公众号（内容工场=选题池+草稿箱一页链完（2026-11-09 两页合并，选用成文→页级成稿 callout→一键定位草稿审稿）/风格画像 ArticleStyle）→ 沉底（任务/设置）。产线 tab 容器（Persona/Leadgen/LineIntel）已删，叶子页直挂 section；旧 SectionKey 经 NAVMAP 兼容路由。徽章（counts.ts 同源，60s 刷新）=**落在每个叶子自身**：选题库/获客选题=待审选题 · 内容看板/脚本工场=待定稿脚本 · 对标拆解/打法卡库=拆解待定夺 · 候选定夺/纯获客候选=候选待定夺 · 内容工场=待拍板选题+待写长文 · 任务=在途（失败红警）；组行徽章=子叶求和；生成中/排队/待拆等过程性数字不上菜单。
+- 产线树侧栏（2026-11-07 用户从三方案原型拍板方案三，取代 11-03 版）：**每条线的页面直接摆在侧栏，可展开收起（localStorage `mx-tree-open` 记住展开态），目的地不藏在页内 tab**——今天 → 人设号（选题库/内容看板/账号经营/对标拆解/候选定夺/监控清单——账号经营已并风格画像（2026-11-07 用户拍板））· 获客号（获客选题/脚本工场/纯获客候选/获客监控/打法卡库）· 公众号（内容工场=选题池+草稿箱一页链完（2026-11-09 两页合并，选用成文→页级成稿 callout→一键定位草稿审稿）/风格画像 ArticleStyle）→ 沉底（任务/设置）。产线 tab 容器（Persona/Leadgen/LineIntel）已删，叶子页直挂 section；旧 SectionKey 经 NAVMAP 兼容路由。徽章（counts.ts 同源，60s 刷新）=**落在每个叶子自身**：选题库/获客选题=待审选题 · 内容看板/脚本工场=待定稿脚本 · 对标拆解/打法卡库=拆解待定夺 · 候选定夺/纯获客候选=候选待定夺 · 内容工场=待拍板选题+待写长文 · 任务=运行中+排队+未归档 failed 全量（failed 红）；今天=待审选题合计（两线求和）；组行徽章=子叶求和；生成中/排队/待拆等过程性数字不上菜单。
 - 主题 moxt 墨绿×白纸：页面纯白、侧栏 #0A2F24（选中金光条 #E8C97F→#C9A25C）、品牌绿主按钮药丸 #29C16A、卡片白+发丝线 #E8ECF0（16px 圆角）、文字 #171929。Tailwind v4 `@theme` 重映射 sky/blue 两套色阶实现全站换肤——**换色只改 index.css，别动组件类名**；语义色不变。**改页面前先给交互方案**。
 - icon=轨道环徽标（public/icon.svg），数字用 `.num-serif`/`.mono-num` 工具类；btn-primary=近黑药丸、btn-accent=品牌绿药丸。
 
@@ -53,5 +53,5 @@
 - **调研与内容数据源国内优先**（用户硬要求）：数据论据优先国内公开数据、行业报告、企业实践与媒体；国外机构数据仅在国内无同类时补充，不作主锚点；检索查询词同样中文源优先。
 - 发布动作永远人工。端口 8000 是用户别的项目，**永远不许杀**。
 - `data/` 混着用户真实内容，删任何行之前先确认归属，删库先备份；正式安全网=每日自动快照+迁移前快照（`data/backups/`），别动。
-- 看门狗副本装在 `~/Library/Application Support/content-studio/`（macOS TCC 禁 LaunchAgent 读 Desktop 仓库）——**改 `scripts/watchdog.sh` 后必须重跑 `launchd.sh install` 同步副本**，status 会提示漂移。
+- 看门狗副本装在 `~/Library/Application Support/content-studio/`（macOS TCC 禁 LaunchAgent 读 Desktop 仓库）——**改 `scripts/watchdog.sh` 后必须重跑 `launchd.sh install` 同步副本**，status 会提示漂移；探活策略=连续 2 次失败升级通知，有 running 任务时连续 6 次（约 30 分钟）才强拉。
 - 用户侧操作（智谱充值、控制台开通等）只能用户本人做，别当代码任务。

@@ -109,12 +109,6 @@ def update_settings(body: UpdateIn) -> dict:
         if not 0 <= body.watch_scan_hour <= 23:
             raise HTTPException(400, detail="扫描时间必须是 0~23 的整数（小时）")
         values["watch_scan_hour"] = body.watch_scan_hour
-    if body.auto_dissect_enabled is not None:
-        values["auto_dissect_enabled"] = body.auto_dissect_enabled
-    if body.auto_dissect_min_score is not None:
-        values["auto_dissect_min_score"] = max(0.0, min(10.0, body.auto_dissect_min_score))
-    if body.auto_dissect_daily_cap is not None:
-        values["auto_dissect_daily_cap"] = max(0, body.auto_dissect_daily_cap)
     # 密钥项：空串=清除
     for key in ("zhipu_api_key",):
         v = getattr(body, key)

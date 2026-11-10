@@ -1,22 +1,19 @@
 import { api } from './api'
 import type { Article, Script, Topic } from './api'
 
-/** 流水线待办统计（工作台卡片数据源）。 */
+/** 流水线待办统计（工作台卡片数据源）。
+2026-11-10 清理：pendingScripts/unwrittenTopics/unwrittenPersona/unwrittenLeadgen/finalScripts
+5 个孤儿字段已随后端 /stats/todos 同步删除，契约只剩下面这些。 */
 export interface TodoStats {
   draftTopics: number // 待审选题（两线合计）
   draftTopicsPersona: number // 待审选题·人设库
   draftTopicsLeadgen: number // 待审选题·获客库
-  pendingScripts: number // 待定稿脚本（两线合计）
-  pendingScriptsPersona: number
-  pendingScriptsLeadgen: number
-  unwrittenTopics: number // 待写脚本（已定审选题）
-  unwrittenPersona: number
-  unwrittenLeadgen: number
+  pendingScriptsPersona: number // 待定稿脚本·人设
+  pendingScriptsLeadgen: number // 待定稿脚本·获客
   pendingArticles: number // 待写长文
   kbTopics: number // 知识库选题待拍板
   openCandidatesPersona: number // 候选账号待定夺·人设线
   openCandidatesLeadgen: number // 候选账号待定夺·获客线
-  finalScripts: number // 已定稿脚本
 }
 
 export async function fetchTodoStats(): Promise<TodoStats> {
@@ -48,7 +45,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     fetchTodoStats(),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=persona'),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=leadgen'),
-    api<{ counts: { running: number; queued: number; parked?: number; failed: number } }>('/jobs?limit=1'),
+    api<{ counts: { running: number; queued: number; failed: number } }>('/jobs?limit=1'),
   ])
   return {
     today: todo.draftTopics,

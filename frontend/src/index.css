@@ -55,12 +55,6 @@
       0 1px 2px rgba(23, 25, 41, 0.03),
       0 6px 18px rgba(23, 25, 41, 0.04);
   }
-  .card-hover {
-    @apply transition-all duration-150;
-  }
-  .card-hover:hover {
-    @apply border-[#c6cfd8];
-  }
 
   /* 按钮：药丸形（moxt 语法）；primary=近黑药丸，accent=品牌绿实心药丸 */
   .btn-primary {
@@ -140,14 +134,10 @@
   background: transparent;
 }
 
-/* 数字字体工具：衬线大数字（stat 主角）与等宽数字（表格/指标不抖动） */
+/* 数字字体工具：衬线大数字（stat 主角） */
 .num-serif {
   font-family: "Lora", "Noto Serif SC", "Songti SC", "SimSun", serif;
   letter-spacing: 0.2px;
-  font-variant-numeric: tabular-nums;
-}
-.mono-num {
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
 }
 

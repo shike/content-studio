@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import statistics
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from sqlmodel import Session, select
 

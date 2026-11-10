@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Check,
-  Copy,
   ChevronDown,
   Clock,
   Inbox,
@@ -12,13 +11,16 @@ import {
   SkipForward,
   Sparkles,
   Square,
-  Trash2,
   CheckSquare,
   X,
 } from 'lucide-react'
-import { api, AUDIENCE_LABELS, SOURCE_LABELS, STATUS_LABELS, Topic } from '../api'
+import { api, apiErrText, AUDIENCE_LABELS, SOURCE_LABELS, STATUS_LABELS, Topic } from '../api'
 import { DetailBody } from '../topicDetail'
-import { Busy, EmptyState, ErrorLine, PageHeader, Pager } from '../components'
+import {
+  Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, isNew, PageHeader, Pager,
+  QueueBar, relTime, sumCounts,
+} from '../components'
+import { useJobProgress, usePageGuard } from '../hooks'
 
 const BADGE_SOURCE: Record<string, string> = {
   idea: 'bg-indigo-100 text-indigo-700',
@@ -39,32 +41,6 @@ function scoreColor(score: number | null) {
   return 'text-slate-400'
 }
 
-function parseTs(iso: string) {
-  // 后端时间戳是无时区后缀的 UTC，补 Z 再解析，避免按本地时区偏移
-  return new Date(/[Zz]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z').getTime()
-}
-
-function relTime(iso?: string) {
-  if (!iso) return ''
-  const ms = Date.now() - parseTs(iso)
-  if (Number.isNaN(ms)) return ''
-  if (ms < 0) return '刚刚'
-  const min = Math.floor(ms / 60000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min} 分钟前`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `${h} 小时前`
-  const d = Math.floor(h / 24)
-  if (d < 30) return `${d} 天前`
-  return `${Math.floor(d / 30)} 个月前`
-}
-
-function isNew(iso?: string) {
-  if (!iso) return false
-  const ms = Date.now() - parseTs(iso)
-  return !Number.isNaN(ms) && ms >= 0 && ms < 24 * 3600 * 1000
-}
-
 export default function Topics({ accountType }: { accountType?: 'persona' | 'leadgen' } = {}) {
   const [all, setAll] = useState<Topic[]>([])
   const [view, setView] = useState<'queue' | 'table'>('table')
@@ -75,11 +51,9 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
   const [status, setStatus] = useState('')
   const [audience, setAudience] = useState('')
   const [order, setOrder] = useState<'new' | 'score'>('new')
-  const [resProg, setResProg] = useState<Record<number, { p: number; m: string }>>({})
   const [copiedHook, setCopiedHook] = useState<string | null>(null)
   const [confirmClean, setConfirmClean] = useState(false)
   const [expandedId, setExpandedId] = useState<number | null>(null)
-  const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const [detailCache, setDetailCache] = useState<Record<number, Topic>>({})
   const [batchMode, setBatchMode] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -90,8 +64,9 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
   const [session, setSession] = useState({ approved: 0, rejected: 0, skipped: 0 })
 
   const [idea, setIdea] = useState('')
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
+  const { guard, busy, setBusy, error, setError } = usePageGuard()
 
   const LIMIT = 20
   const [total, setTotal] = useState(0)
@@ -129,53 +104,24 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
         setBooted(true)
       })
       .catch((e) => {
-        setError(String(e))
+        setError(apiErrText(e))
         setBooted(true)
       })
   }, [loadDrafts])
 
   useEffect(() => {
-    loadTable().catch((e) => setError(String(e)))
+    loadTable().catch((e) => setError(apiErrText(e)))
   }, [loadTable])
 
   const queue = useMemo(() => drafts.filter((t) => !skipped.has(t.id)), [drafts, skipped])
 
-  useEffect(() => {
-    if (drafts.length === 0) return
-    let stop = false
-    const tick = async () => {
-      try {
-        const d = await api<{ items: { type: string; status: string; progress: number; message: string; payload: Record<string, any> }[] }>('/jobs?limit=50&type=idea_research')
-        const map: Record<number, { p: number; m: string }> = {}
-        for (const j of d.items || []) {
-          if (j.type !== 'idea_research' || (j.status !== 'running' && j.status !== 'queued')) continue
-          const tid = j.payload?.topic_id
-          if (tid) map[tid] = { p: j.progress || 0, m: j.message || '' }
-        }
-        if (!stop) setResProg(map)
-      } catch { /* 静默，下轮再取 */ }
-    }
-    tick()
-    const t = setInterval(tick, 5000)
-    return () => { stop = true; clearInterval(t) }
-  }, [drafts.length])
+  // 深研进度轮询（hooks.ts，5s 一轮，静默失败）
+  const resProg = useJobProgress(['idea_research'], 'topic_id', drafts.length > 0)
   const current = queue[idx] ?? null
   const totalAtStart = session.approved + session.rejected + session.skipped + queue.length
   const doneCount = session.approved + session.rejected + session.skipped
 
   const filtered = all // 服务端已按 status/source 筛选并分页
-  const statusCount = useCallback((s: string) => (s ? counts[s] || 0 : Object.values(counts).reduce((a, b) => a + b, 0)), [counts])
-
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
 
   const fetchDetail = useCallback(
     async (id: number) => {
@@ -190,7 +136,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
   useEffect(() => {
     if (view !== 'queue' || !current) return
     if (!detailCache[current.id]?.research_report)
-      fetchDetail(current.id).catch((e) => setError(String(e)))
+      fetchDetail(current.id).catch((e) => setError(apiErrText(e)))
   }, [view, current?.id, detailCache, fetchDetail])
 
   // 表格展开行：拉全文
@@ -198,7 +144,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
     if (expandedId == null) return
     const t = all.find((x) => x.id === expandedId)
     if (t && !detailCache[expandedId]?.research_report)
-      fetchDetail(expandedId).catch((e) => setError(String(e)))
+      fetchDetail(expandedId).catch((e) => setError(apiErrText(e)))
   }, [expandedId, all, detailCache, fetchDetail])
 
   const merged = useCallback(
@@ -242,7 +188,6 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
     guard(async () => {
       await api(`/topics/${id}`, { method: 'DELETE' })
       await reload()
-      setConfirmDel(null)
       if (expandedId === id) setExpandedId(null)
     })
 
@@ -308,20 +253,13 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
     const cur = current ? merged(current.id)! : null
     return (
       <div className="mx-auto max-w-3xl">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="text-sm font-semibold whitespace-nowrap text-slate-700">
-            审阅 {doneCount + (current ? 1 : 0)} / {totalAtStart}
-          </span>
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
-            <div
-              className="h-full rounded-full bg-sky-500 transition-all"
-              style={{ width: `${totalAtStart ? (doneCount / totalAtStart) * 100 : 0}%` }}
-            />
-          </div>
-          <button onClick={exitQueue} className="btn-ghost btn-xs whitespace-nowrap">
-            退出审阅
-          </button>
-        </div>
+        <QueueBar
+          label="审阅"
+          done={doneCount + (current ? 1 : 0)}
+          total={totalAtStart}
+          onExit={exitQueue}
+          exitText="退出审阅"
+        />
 
         {!cur ? (
           /* 本轮审完 */
@@ -360,7 +298,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
                       try {
                         await api(`/topics/${cur.id}/set-type`, { method: 'POST', body: JSON.stringify({ account_type: to }) })
                         await reload()
-                      } catch (e) { setError(String(e)) }
+                      } catch (e) { setError(apiErrText(e)) }
                     }}
                     title="点击切换：该选题是获客打法还是人设内容（影响脚本风格与产线归属）"
                     className={`badge cursor-pointer ${cur.evidence?.account_type === 'leadgen' ? 'bg-amber-100 text-amber-800 hover:brightness-95' : 'bg-sky-50 text-sky-700 hover:brightness-95'}`}>
@@ -464,61 +402,59 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
 
 
       {/* 状态 chips + 来源 + 批量 */}
-      <div className="mt-4 flex flex-wrap items-center gap-1.5">
-        {['', 'draft', 'approved', 'rejected', 'produced'].map((s) => (
-          <button
-            key={s || 'all'}
-            onClick={() => { setStatus(s); setOffset(0) }}
-            className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${
-              status === s
-                ? 'bg-slate-900 text-sky-400 shadow-sm'
-                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-            }`}
-          >
-            {s ? STATUS_LABELS[s] : '全部'} {statusCount(s)}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1.5">
-          <div className="segment">
-            <button onClick={() => { setOrder('new'); setOffset(0) }} className={`segment-item ${order === 'new' ? 'segment-item-active' : ''}`}>最新入库</button>
-            <button onClick={() => { setOrder('score'); setOffset(0) }} className={`segment-item ${order === 'score' ? 'segment-item-active' : ''}`}>分数最高</button>
-          </div>
-          <select value={audience} onChange={(e) => { setAudience(e.target.value); setOffset(0) }} className="select text-xs">
-            <option value="">全部受众</option>
-            {Object.entries(AUDIENCE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          <select value={source} onChange={(e) => { setSource(e.target.value); setOffset(0) }} className="select text-xs">
-            <option value="">全部来源</option>
-            {Object.entries(SOURCE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-          {(status === 'rejected' || (counts['rejected'] || 0) > 0) && (
-            confirmClean ? (
-              <button onClick={async () => { const r = await api<{ deleted: number }>('/topics/cleanup-rejected', { method: 'POST', body: JSON.stringify({ days: 30 }) }); setConfirmClean(false); setBusy(`已清理 ${r.deleted} 条 30 天前的已否决选题`); await reload() }} className="btn-xs btn-danger">
-                确认清 30 天前已否决
-              </button>
-            ) : (
-              <button onClick={() => { setConfirmClean(true); setTimeout(() => setConfirmClean(false), 4000) }} className="btn-xs btn-ghost text-slate-500">
-                清理已否决
-              </button>
-            )
-          )}
-          <button
-            onClick={() => {
-              setBatchMode((v) => !v)
-              setSelected(new Set())
-            }}
-            className={`btn-xs ${batchMode ? 'btn-primary' : 'btn-ghost'}`}
-          >
-            {batchMode ? <CheckSquare size={13} /> : <ListChecks size={13} />}
-            {batchMode ? '退出批量' : '批量'}
-          </button>
-        </div>
+      <div className="mt-4">
+        <ChipRow
+          active={status}
+          onChange={(k) => { setStatus(k); setOffset(0) }}
+          chips={[
+            { key: '', label: '全部', count: sumCounts(counts) },
+            { key: 'draft', label: STATUS_LABELS.draft, count: sumCounts(counts, 'draft') },
+            { key: 'approved', label: STATUS_LABELS.approved, count: sumCounts(counts, 'approved') },
+            { key: 'rejected', label: STATUS_LABELS.rejected, count: sumCounts(counts, 'rejected') },
+            { key: 'produced', label: STATUS_LABELS.produced, count: sumCounts(counts, 'produced') },
+          ]}
+          right={<>
+            <div className="segment">
+              <button onClick={() => { setOrder('new'); setOffset(0) }} className={`segment-item ${order === 'new' ? 'segment-item-active' : ''}`}>最新入库</button>
+              <button onClick={() => { setOrder('score'); setOffset(0) }} className={`segment-item ${order === 'score' ? 'segment-item-active' : ''}`}>分数最高</button>
+            </div>
+            <select value={audience} onChange={(e) => { setAudience(e.target.value); setOffset(0) }} className="select text-xs">
+              <option value="">全部受众</option>
+              {Object.entries(AUDIENCE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+            <select value={source} onChange={(e) => { setSource(e.target.value); setOffset(0) }} className="select text-xs">
+              <option value="">全部来源</option>
+              {Object.entries(SOURCE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            {(status === 'rejected' || (counts['rejected'] || 0) > 0) && (
+              confirmClean ? (
+                <button onClick={() => guard(async () => { const r = await api<{ deleted: number }>('/topics/cleanup-rejected', { method: 'POST', body: JSON.stringify({ days: 30 }) }); setConfirmClean(false); setBusy(`已清理 ${r.deleted} 条 30 天前的已否决选题`); await reload() })} className="btn-xs btn-danger">
+                  确认清 30 天前已否决
+                </button>
+              ) : (
+                <button onClick={() => { setConfirmClean(true); setTimeout(() => setConfirmClean(false), 4000) }} className="btn-xs btn-ghost text-slate-500">
+                  清理已否决
+                </button>
+              )
+            )}
+            <button
+              onClick={() => {
+                setBatchMode((v) => !v)
+                setSelected(new Set())
+              }}
+              className={`btn-xs ${batchMode ? 'btn-primary' : 'btn-ghost'}`}
+            >
+              {batchMode ? <CheckSquare size={13} /> : <ListChecks size={13} />}
+              {batchMode ? '退出批量' : '批量'}
+            </button>
+          </>}
+        />
       </div>
 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
@@ -611,26 +547,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
                             </button>
                           </>
                         )}
-                        {confirmDel === t.id ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteTopic(t.id) }}
-                            className="btn-danger btn-xs"
-                          >
-                            确认删除
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setConfirmDel(t.id)
-                              setTimeout(() => setConfirmDel((c) => (c === t.id ? null : c)), 3000)
-                            }}
-                            title="删除选题"
-                            className="btn-ghost btn-xs text-slate-300 hover:text-red-500"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
+                        <ConfirmDeleteButton onConfirm={() => deleteTopic(t.id)} title="删除选题" />
                         <ChevronDown size={14} className={`text-slate-300 transition-transform ${exp ? 'rotate-180' : ''}`} />
                       </span>
                     )}

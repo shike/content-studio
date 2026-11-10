@@ -74,7 +74,6 @@ def _ladder_delay(retry_count: int) -> int:
     return RETRY_LADDER[i]
 
 
-_LADDER_STEPS = len(RETRY_LADDER)
 PATROL_CAP = 30  # 慢巡硬上限：累计 30 次尝试仍失败 → 安静终态（约一个月）
 
 

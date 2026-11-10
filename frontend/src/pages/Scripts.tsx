@@ -7,12 +7,15 @@ import {
   MonitorPlay,
   PenLine,
   SkipForward,
-  Trash2,
   Wand2,
 } from 'lucide-react'
 import { api, apiErrText, AUDIENCE_LABELS, Script, SOURCE_LABELS, Topic, waitJob } from '../api'
 import type { SectionKey } from '../App'
-import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, QueueBar, relTime, Pager } from '../components'
+import {
+  Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, QueueBar, relTime,
+  sumCounts, Pager,
+} from '../components'
+import { useJobProgress, usePageGuard } from '../hooks'
 import { DetailBody } from '../topicDetail'
 
 const STATUS_BADGE: Record<string, string> = {
@@ -63,16 +66,15 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const [topicGen, setTopicGen] = useState<Record<number, { p: number; m: string }>>({})
   const [topicGenErr, setTopicGenErr] = useState<Record<number, string>>({})
   const [expandedId, setExpandedId] = useState<number | null>(null)
-  const [confirmDel, setConfirmDel] = useState<number | null>(null)
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
   const [useStyle, setUseStyle] = useState(true)
   const [templateId, setTemplateId] = useState(0) // 0=不使用结构模板
   const [selAngles, setSelAngles] = useState<string[]>([]) // 指定打法（空=自动挑 3 种）
   const [genAccountType, setGenAccountType] = useState<'persona' | 'leadgen'>(accountType ?? 'persona') // 本次投放账号类型（两类号策略；跟随所在产线默认）
   const [anglesOpen, setAnglesOpen] = useState(false)
   const [finalizedView, setFinalizedView] = useState<{ id: number; titles: { platform: string; title: string }[]; teleLen: number } | null>(null)
-  const [genProg, setGenProg] = useState<Record<number, { p: number; m: string }>>({})
+
+  // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
+  const { guard, busy, setBusy, error, setError } = usePageGuard()
 
   const LIMIT = 20
   const reload = useCallback(async () => {
@@ -97,7 +99,6 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const deleteScript = (id: number) =>
     guard(async () => {
       await api(`/scripts/${id}`, { method: 'DELETE' })
-      setConfirmDel(null)
       await reload()
     })
 
@@ -113,7 +114,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
         })
         .filter((x) => x.step)
       if (!tplName.trim() || structure.length === 0) {
-        setError(new Error('模板名和至少一行「步骤：要求」都要填').toString().replace(/^Error:\s*/, ''))
+        setError('模板名和至少一行「步骤：要求」都要填')
         return
       }
       await api('/scripts/templates', {
@@ -135,7 +136,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
     reload()
       .then(() => setBooted(true))
       .catch((e) => {
-        setError(String(e))
+        setError(apiErrText(e))
         setBooted(true)
       })
   }, [reload])
@@ -143,26 +144,8 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const topicMap = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics])
 
   const hasGenerating = scripts.some((s) => s.status === 'generating' || s.status === 'polishing')
-  useEffect(() => {
-    if (!hasGenerating) return
-    let stop = false
-    const tick = async () => {
-      try {
-        const d = await api<{ items: { type: string; status: string; progress: number; message: string; payload: Record<string, any> }[] }>('/jobs?limit=50&type=script_generate,script_polish,script_finalize')
-        const map: Record<number, { p: number; m: string }> = {}
-        for (const j of d.items || []) {
-          if (j.status !== 'running' && j.status !== 'queued') continue
-          const sid = j.payload?.script_id
-          if (!sid || !['script_generate', 'script_polish', 'script_finalize'].includes(j.type)) continue
-          map[sid] = { p: j.progress || 0, m: j.message || '' }
-        }
-        if (!stop) setGenProg(map)
-      } catch { /* 静默，下轮再取 */ }
-    }
-    tick()
-    const t = setInterval(tick, 5000)
-    return () => { stop = true; clearInterval(t) }
-  }, [hasGenerating])
+  // 生成/打磨/定稿进度轮询（hooks.ts，5s 一轮，静默失败）
+  const genProg = useJobProgress(['script_generate', 'script_polish', 'script_finalize'], 'script_id', hasGenerating)
   const topicTitle = (script: Script) =>
     (script.topic_id ? topicMap.get(script.topic_id)?.title : '') || `脚本 #${script.id}`
 
@@ -181,7 +164,6 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const doneCount = session.final + session.skipped
 
   const filtered = scripts // 服务端已筛选分页
-  const statusCount = (k: string) => (k ? counts[k] || 0 : Object.values(counts).reduce((a, b) => a + b, 0))
   const pendingWriteTopics = useMemo(() => {
     const started = new Set(allScripts.map((x) => x.topic_id))
     return topics.filter((t) => t.status === 'approved' && !started.has(t.id))
@@ -202,17 +184,6 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
     return topics.filter((t) => started.has(t.id))
       .filter((t) => !accountType || (t.evidence?.account_type ?? 'persona') === accountType)
   }, [topics, allScripts, accountType])
-
-  const guard = async (fn: () => Promise<void>) => {
-    setError('')
-    try {
-      await fn()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
 
   useEffect(() => {
     setSelVersion(0)
@@ -548,7 +519,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
           <button
             onClick={() => setGenAccountType((v) => (v === 'persona' ? 'leadgen' : 'persona'))}
             title="投放账号：人设号内容不带引导；获客号内容自带获客引导设计"
-            className={`badge shrink-0 h-9 cursor-pointer px-3 ${accountType === 'leadgen' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-700'}`}
+            className={`badge shrink-0 h-9 cursor-pointer px-3 ${genAccountType === 'leadgen' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-700'}`}
           >
             {genAccountType === 'leadgen' ? '投放：获客号' : '投放：人设号'}
           </button>
@@ -597,10 +568,10 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
             else { setWritingFilter(false); setStatus(k); setOffset(0) }
           }}
           chips={[
-            { key: '', label: '全部', count: statusCount('') },
-            { key: 'generated', label: '待定稿', count: statusCount('generated') },
-            { key: 'final', label: '已定稿', count: statusCount('final') },
-            { key: 'failed', label: '生成失败', count: statusCount('failed') },
+            { key: '', label: '全部', count: sumCounts(counts) },
+            { key: 'generated', label: '待定稿', count: sumCounts(counts, 'generated') },
+            { key: 'final', label: '已定稿', count: sumCounts(counts, 'final') },
+            { key: 'failed', label: '生成失败', count: sumCounts(counts, 'failed') },
             { key: 'pending_write', label: '待写选题', count: pendingWriteTopics.length },
           ]}
         />
@@ -741,26 +712,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
                         去定稿
                       </button>
                     )}
-                    {confirmDel === s.id ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteScript(s.id) }}
-                        className="btn-danger btn-xs shrink-0"
-                      >
-                        确认删除
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setConfirmDel(s.id)
-                          setTimeout(() => setConfirmDel((c) => (c === s.id ? null : c)), 3000)
-                        }}
-                        className="btn-ghost btn-xs shrink-0 text-slate-300 hover:text-red-500"
-                        title="删除此脚本"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
+                    <ConfirmDeleteButton onConfirm={() => deleteScript(s.id)} title="删除此脚本" />
                   </div>
 
                   {exp && (

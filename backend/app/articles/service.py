@@ -103,13 +103,11 @@ ARTICLE_STYLES: dict[str, str] = {
         "质量判据：一年后可以拿这篇文章对答案。禁止：无时间点无变量的空泛预言、科幻式畅想。"
     ),
 }
-BANNED_PATTERNS = [  # 与 acceptance/quality.py 保持同表（程序化合规红线）；裸「最好的」已移除——
-    # 误杀「千万别挑最好的那条」（反向建议）与「最好的线，设备新」（描述性比较），语义级由 LLM 评审兜底
-    "行业第一", "全网第一", "业界第一", "排名第一",
-    "保证收益", "保证回本", "保证效果", "保证赚钱", "保证翻倍",
-    "百分百", "稳赚", "包赚", "躺赚", "轻松月入", "闭眼入",
-    "包就业", "包接单", "保过", "百分百就业", "学完月入",
-]
+# 违禁词表（程序化合规红线）抽单一数据源 banned_words.json：与 acceptance/quality.py
+# 共用同一 JSON，改表只改文件，不再双处同步。裸「最好的」已移除——误杀「千万别挑最好的
+# 那条」（反向建议）与「最好的线，设备新」（描述性比较），语义级由 LLM 评审兜底。
+_BANNED_TABLE = json.loads((Path(__file__).parent / "banned_words.json").read_text(encoding="utf-8"))
+BANNED_PATTERNS = _BANNED_TABLE["banned_patterns"]
 DEFAULT_STYLE = "deep_dive"  # Q13：用户常用"深度长文"，默认固化+选择器弱化
 
 # 双档位（2026-10-02 用户拍板：双档位·默认公众号版）。feed=公众号版（推荐流完读率优先：
@@ -214,17 +212,14 @@ def length_specs(length: str, audience_note: str) -> dict[str, str]:
     who = _audience_short(audience_note)
     return {k: v.replace("{{WHO}}", who) if isinstance(v, str) else v for k, v in base.items()}
 
-# 刻意转化话术（自然收尾红线；与 acceptance/quality.py 的 CTA_PATTERNS 同表，改一处必须同步另一处）
-_CTA_PATTERNS = [
-    r"评论区[打回留发扣]", r"评论区?扣[「『]?[验关资1-9]", r"私信[我领发回复要]", r"关注我", r"扣[个1-9]", r"回复关键?词",
-    r"加[我微].{0,2}信", r"领.{0,4}资料", r"收藏.{0,6}转发",
-]
+# 刻意转化话术（自然收尾红线）：表本体同在 banned_words.json（与 acceptance/quality.py 共用）
+_CTA_PATTERNS = _BANNED_TABLE["cta_patterns"]
 
 
 def _banned_hits(text: str) -> list[str]:
     """程序化违禁词命中（否定语境放行：'千万别挑最好的'是反向建议不是绝对化承诺——
-    2026-10-02 P1 实测误杀后加窗口）。与 acceptance/quality.py 的 banned_words 同表同逻辑，
-    改一处必须同步另一处。"""
+    2026-10-02 P1 实测误杀后加窗口）。表已抽单一数据源 banned_words.json（与
+    acceptance/quality.py 共用）；否定语境窗口算法两侧各自实现，改算法需两处同步。"""
     hits = []
     for p in BANNED_PATTERNS:
         start = 0
@@ -238,6 +233,100 @@ def _banned_hits(text: str) -> list[str]:
                 break
             start = i + len(p)
     return hits
+
+
+def _content_signature(t: str) -> tuple:
+    """正文守卫签名：数字集合+图片占位标记数。编辑稿/重写稿必须与原稿签名一致，
+    变了即弃用（保数字保图是硬规则）——主线编辑守卫与知识库线定向重写共用。"""
+    return (sorted(re.findall(r"\d+(?:\.\d+)?", t)), t.count("!["))
+
+
+async def _gen_titles(persona_text: str, length_spec: dict[str, str],
+                      material_block: str) -> tuple[str, list[str]]:
+    """标题组（主线与知识库线共用同一 article_title prompt）：返回 (title, 备选≤2)。
+    素材拼接串由调用方给：主线带风格框架+JSON 素材；知识库线带纯文本素材前 9000 字。"""
+    title_data = await gateway.complete_json(
+        [{"role": "user", "content": render("article_title", PERSONA=persona_text,
+                                            TITLE_SPEC=length_spec["title"])
+          + material_block}],
+        purpose="article_title", max_tokens=8192, thinking="disabled")
+    title = str(title_data.get("title") or "").strip()
+    title_alts = [t for t in (title_data.get("title_alts") or []) if t][:2]
+    return title, title_alts
+
+
+async def _attach_charts(md_text: str, tenant_id: int, log_prefix: str) -> str:
+    """数据图表后处理（两条成文执行器共用）：从成文提取数据对比点 → matplotlib 渲染
+    → 按节插入。专职步骤，不依赖分节写作顺带输出（模型依从性不稳定）；
+    提取不到就不加，绝不编造；单张失败跳过不阻塞成文。"""
+    from ..articles.charts import render_chart, validate_spec
+
+    if not md_text.strip():
+        return md_text
+    try:
+        spec_resp = await gateway.complete_json(
+            [{"role": "system", "content": load("article_charts")},
+             {"role": "user", "content": md_text[:8000]}],
+            purpose="article_charts", max_tokens=4000,
+            thinking="disabled")
+        specs = [x for x in (spec_resp.get("charts") or []) if isinstance(x, dict)][:3]
+    except Exception as e:  # noqa: BLE001
+        specs = []
+        print(f"{log_prefix} 图表提取失败（跳过）: {type(e).__name__}: {str(e)[:80]}")
+    rendered = []
+    for k, sp in enumerate(specs):
+        try:
+            sp = validate_spec(json.dumps(sp))
+            sp.setdefault("after_section", k + 1)
+            from ..tenant_brand import primary_of
+
+            path = await asyncio.to_thread(render_chart, sp, primary_of(tenant_id))
+            rendered.append((min(int(sp.get("after_section") or k + 1), 6), sp, Path(path).name))
+        except Exception as e:  # noqa: BLE001
+            print(f"{log_prefix} 图表 {k} 渲染失败跳过: {type(e).__name__}: {str(e)[:60]}")
+    for sec_no, sp, name in sorted(rendered, key=lambda x: -x[0]):
+        t = str(sp.get("title") or "图表").replace('"', '')
+        md_text = _insert_chart_after_section(md_text, sec_no, t, name)
+    return md_text
+
+
+async def _attach_cover(md_text: str, title: str, tenant_id: int, log_prefix: str) -> str:
+    """头图（深靛渐变+白字标题+账号名）：渲染并插入 md 顶部；失败不影响正文。"""
+    try:
+        from ..articles.charts import render_cover
+        from ..tenant_brand import brand_of, cover_slogan_of, primary_of
+
+        signature = brand_of(tenant_id)["signature"]  # 租户品牌署名（头图右下）
+        cover_path = await asyncio.to_thread(
+            render_cover, title or "深度分析", signature, primary_of(tenant_id),
+            cover_slogan_of(tenant_id))
+        md_text = f"![头图](cover:{Path(cover_path).name})\n\n" + md_text
+    except Exception as e:  # noqa: BLE001 头图失败不影响正文
+        print(f"{log_prefix} 头图渲染失败: {type(e).__name__}: {str(e)[:80]}")
+    return md_text
+
+
+def _finalize_article(article_id: int, *, title: str, title_alts: list[str],
+                      kb_sources: list, md_text: str,
+                      kb_topic_flow: bool = False) -> None:
+    """成文落库收尾（两条成文执行器共用）：写回标题/素材来源/正文并置 draft。
+    kb_topic_flow=True（知识库选题线）时同步把关联 KBTopic selected→written。"""
+    with Session(engine) as s:
+        article = s.get(Article, article_id)
+        if article is None:
+            raise RuntimeError(f"article {article_id} 不存在（落稿时已被删除）")
+        article.title = title or article.title
+        article.title_alts = title_alts
+        article.kb_sources = kb_sources
+        article.md = md_text
+        article.status = "draft"
+        s.add(article)
+        if kb_topic_flow:
+            topic = s.exec(select(KBTopic).where(KBTopic.article_id == article_id)).first()  # type: ignore[attr-defined]
+            if topic is not None and topic.status == "selected":
+                topic.status = "written"
+                s.add(topic)
+        s.commit()
 
 
 def _article_generate_fail(payload: dict, _exc: Exception) -> None:
@@ -341,14 +430,9 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
 
     # 第一段：标题组 + 配图规划（小 JSON，稳）
     ctx.set_progress(15, "起标题、规划配图位")
-    title_data = await gateway.complete_json(
-        [{"role": "user", "content": render("article_title", PERSONA=persona_text,
-                                            TITLE_SPEC=length_spec["title"])
-          + f"【风格框架】{style_guide}\n\n"
-          + json.dumps(material, ensure_ascii=False)}],
-        purpose="article_title", max_tokens=8192, thinking="disabled")
-    title = str(title_data.get("title") or "").strip()
-    title_alts = [t for t in (title_data.get("title_alts") or []) if t][:2]
+    title, title_alts = await _gen_titles(
+        persona_text, length_spec,
+        f"【风格框架】{style_guide}\n\n" + json.dumps(material, ensure_ascii=False))
     # 第二段：大纲 → 分节写作 → 组装（分段小调用，绕开长输出偶发空正文）
     ctx.set_progress(30, "规划长文大纲")
     outline = await gateway.complete_json(
@@ -434,11 +518,6 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
     # 老编辑守卫：全文过一遍机翻腔/AI 味（Q：专业度 OK 但机翻痕迹浓）。
     # 铁律=数字与图片占位标记一个不能少，否则保留原稿；失败同样回落原稿。
     if md_text.strip():
-        import re as _re
-
-        def _sig(t: str) -> tuple:
-            return (sorted(_re.findall(r"\d+(?:\.\d+)?", t)), t.count("!["))
-
         try:
             edited = await gateway.complete(
                 [{"role": "system", "content": load("article_editor")},
@@ -448,7 +527,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
             # 元指令防线：编辑模型偶尔把「全文已符合修订标准…原样输出」这类流水线
             # 自述写进正文（2026-10-02 P1 实测 voice=5.0）——命中即弃用编辑稿保留原稿
             _META = ("修订标准", "原样输出", "直译腔", "修改说明", "修订说明", "已按上述要求")
-            if edited and edited.strip() and _sig(edited) == _sig(md_text):
+            if edited and edited.strip() and _content_signature(edited) == _content_signature(md_text):
                 if any(m in edited for m in _META):
                     print("[article] 编辑稿含元指令文本，弃用保留原稿")
                 else:
@@ -458,34 +537,8 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         except Exception as e:  # noqa: BLE001 润色失败不影响成文
             print(f"[article] 编辑守卫失败，保留原稿: {type(e).__name__}: {str(e)[:100]}")
 
-    # 数据图表（专职步骤）：从成文提取数据对比点 → matplotlib 渲染 → 按节插入。
-    # 不再依赖分节写作顺带输出（模型依从性不稳定）；提取不到就不加，绝不编造。
-    from ..articles.charts import render_chart, validate_spec
-    if md_text.strip():
-        try:
-            spec_resp = await gateway.complete_json(
-                [{"role": "system", "content": load("article_charts")},
-                 {"role": "user", "content": md_text[:8000]}],
-                purpose="article_charts", max_tokens=4000,
-                thinking="disabled")
-            specs = [x for x in (spec_resp.get("charts") or []) if isinstance(x, dict)][:3]
-        except Exception as e:  # noqa: BLE001
-            specs = []
-            print(f"[article] 图表提取失败（跳过）: {type(e).__name__}: {str(e)[:80]}")
-        rendered = []
-        for k, sp in enumerate(specs):
-            try:
-                sp = validate_spec(json.dumps(sp))
-                sp.setdefault("after_section", k + 1)
-                from ..tenant_brand import primary_of
-
-                path = await asyncio.to_thread(render_chart, sp, primary_of(tenant_id))
-                rendered.append((min(int(sp.get("after_section") or k + 1), 6), sp, Path(path).name))
-            except Exception as e:  # noqa: BLE001
-                print(f"[article] 图表 {k} 渲染失败跳过: {type(e).__name__}: {str(e)[:60]}")
-        for sec_no, sp, name in sorted(rendered, key=lambda x: -x[0]):
-            t = str(sp.get("title") or "图表").replace('"', '')
-            md_text = _insert_chart_after_section(md_text, sec_no, t, name)
+    # 数据图表（专职步骤）：提取数据对比点 → matplotlib 渲染 → 按节插入。
+    md_text = await _attach_charts(md_text, tenant_id, "[article]")
 
     # 自动配图（Q：文章要有一堆配图且自动出现）：剩余图片占位逐张 CogView 生成，
     # 单篇成本约 0.06×张数；失败跳过保留占位标记（可手动在占位卡再生成）
@@ -504,44 +557,12 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
 
 
     # 头图（深靛渐变+白字标题+账号名）：渲染并插入 md 顶部
-    try:
-        from ..articles.charts import render_cover
-        from ..tenant_brand import brand_of
+    md_text = await _attach_cover(md_text, title, tenant_id, "[article]")
 
-        signature = brand_of(tenant_id)["signature"]  # 租户品牌署名（头图右下）
-        from ..tenant_brand import cover_slogan_of, primary_of
-
-        cover_path = await asyncio.to_thread(
-            render_cover, title or "深度分析", signature, primary_of(tenant_id),
-            cover_slogan_of(tenant_id))
-        cover_name = Path(cover_path).name
-        md_text = f"![头图](cover:{cover_name})\n\n" + md_text
-    except Exception as e:  # noqa: BLE001 头图失败不影响正文
-        print(f"[article] 头图渲染失败: {type(e).__name__}: {str(e)[:80]}")
-
-    # 一页纸知识图解（文末总结图）：LLM 抽取 → 排版 → PNG；失败降级不阻塞成文
-    try:
-        from ..articles.kg import generate_for_article
-
-        ctx.set_progress(98, "生成一页纸知识图解")
-        kg = await generate_for_article(article_id, tenant_id, md_text)
-        md_text = md_text.rstrip() + f"\n\n![知识图解]({kg['file']})\n"
-        ctx.set_progress(99, "知识图解完成")
-    except Exception as e:  # noqa: BLE001 降级不阻塞
-        print(f"[article] 知识图解失败（不影响成文）: {type(e).__name__}: {str(e)[:80]}")
-
-    with Session(engine) as s:
-        article = s.get(Article, article_id)
-        article.title = title or article.title
-        article.title_alts = title_alts
-        article.kb_sources = kb_sources or []
-        article.md = md_text
-        article.status = "draft"
-        s.add(article)
-        s.commit()
-
-        ctx.set_progress(100, "完成")
-        return {"article_id": article_id, "title": title, "style": style, "length": length}
+    _finalize_article(article_id, title=title, title_alts=title_alts,
+                      kb_sources=kb_sources or [], md_text=md_text)
+    ctx.set_progress(100, "完成")
+    return {"article_id": article_id, "title": title, "style": style, "length": length}
 
 
 _KB_BAN_CONNECTORS = ("综上所述", "由此可见", "说到底", "总而言之")
@@ -646,13 +667,8 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
 
     # 标题组（与主线同一 prompt：标题+备选）
     ctx.set_progress(30, "起标题")
-    title_data = await gateway.complete_json(
-        [{"role": "user", "content": render("article_title", PERSONA=persona_text,
-                                            TITLE_SPEC=length_spec["title"])
-          + "\n\n选题素材：\n" + material[:9000]}],
-        purpose="article_title", max_tokens=8192, thinking="disabled")
-    title_from_call = str(title_data.get("title") or "").strip()
-    title_alts = [t for t in (title_data.get("title_alts") or []) if t][:2]
+    title_from_call, title_alts = await _gen_titles(
+        persona_text, length_spec, "\n\n选题素材：\n" + material[:9000])
 
     # 带范本成文：两篇认可稿全文进提示词——模型先见过"好长什么样"，再谈规则
     ctx.set_progress(45, "成文（范本对齐+硬红线）")
@@ -686,11 +702,8 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
                                                     DRAFT=md_text)}],
                 purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
 
-            def _sig(t: str) -> tuple:
-                return (sorted(re.findall(r"\d+(?:\.\d+)?", t)), t.count("!["))
-
             polished = (polished or "").strip()
-            if polished and _sig(polished) == _sig(md_text):
+            if polished and _content_signature(polished) == _content_signature(md_text):
                 remain = _kb_style_violations(polished, anchor_texts)
                 print(f"[kb-write] 定向重写完成，剩余违规 {len(remain)} 项"
                       + (f"：{remain[0][:40]}" if remain else ""))
@@ -701,64 +714,16 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
             print(f"[kb-write] 定向重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
 
     # 数据图表：与主线同一套后处理；提取不到就不加，绝不编造
-    from ..articles.charts import render_chart, validate_spec
-    if md_text.strip():
-        try:
-            spec_resp = await gateway.complete_json(
-                [{"role": "system", "content": load("article_charts")},
-                 {"role": "user", "content": md_text[:8000]}],
-                purpose="article_charts", max_tokens=4000,
-                thinking="disabled")
-            specs = [x for x in (spec_resp.get("charts") or []) if isinstance(x, dict)][:3]
-        except Exception as e:  # noqa: BLE001
-            specs = []
-            print(f"[kb-write] 图表提取失败（跳过）: {type(e).__name__}: {str(e)[:80]}")
-        rendered = []
-        for k, sp in enumerate(specs):
-            try:
-                sp = validate_spec(json.dumps(sp))
-                sp.setdefault("after_section", k + 1)
-                from ..tenant_brand import primary_of
-
-                path = await asyncio.to_thread(render_chart, sp, primary_of(tenant_id))
-                rendered.append((min(int(sp.get("after_section") or k + 1), 6), sp, Path(path).name))
-            except Exception as e:  # noqa: BLE001
-                print(f"[kb-write] 图表 {k} 渲染失败跳过: {type(e).__name__}: {str(e)[:60]}")
-        for sec_no, sp, name in sorted(rendered, key=lambda x: -x[0]):
-            t = str(sp.get("title") or "图表").replace('"', '')
-            md_text = _insert_chart_after_section(md_text, sec_no, t, name)
+    md_text = await _attach_charts(md_text, tenant_id, "[kb-write]")
 
     # 头图（渲染失败不影响正文）
     ctx.set_progress(92, "渲染头图")
-    try:
-        from ..articles.charts import render_cover
-        from ..tenant_brand import cover_slogan_of, primary_of
+    md_text = await _attach_cover(md_text, title, tenant_id, "[kb-write]")
 
-        signature = brand_of(tenant_id)["signature"]
-        cover_path = await asyncio.to_thread(
-            render_cover, title or "深度分析", signature, primary_of(tenant_id),
-            cover_slogan_of(tenant_id))
-        md_text = f"![头图](cover:{Path(cover_path).name})\n\n" + md_text
-    except Exception as e:  # noqa: BLE001
-        print(f"[kb-write] 头图渲染失败: {type(e).__name__}: {str(e)[:80]}")
-
-    with Session(engine) as s:
-        article = s.get(Article, article_id)
-        if article is None:
-            raise RuntimeError(f"article {article_id} 不存在（落稿时已被删除）")
-        article.title = title or article.title
-        article.title_alts = title_alts
-        article.kb_sources = docs
-        article.md = md_text
-        article.status = "draft"
-        s.add(article)
-        topic = s.exec(select(KBTopic).where(KBTopic.article_id == article_id)).first()  # type: ignore[attr-defined]
-        if topic is not None and topic.status == "selected":
-            topic.status = "written"
-            s.add(topic)
-        s.commit()
-        ctx.set_progress(100, "完成")
-        return {"article_id": article_id, "title": title, "style": "kb_write"}
+    _finalize_article(article_id, title=title, title_alts=title_alts,
+                      kb_sources=docs, md_text=md_text, kb_topic_flow=True)
+    ctx.set_progress(100, "完成")
+    return {"article_id": article_id, "title": title, "style": "kb_write"}
 
 
 def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str) -> str:
@@ -792,13 +757,19 @@ def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str)
 _ARTICLE_STYLE_KEY = "article_style_note"
 
 
-def _article_pending_exists(title: str) -> bool:
+# 就绪/在途状态全集（待写→生成中→草稿→已编辑→已渲染）：同题查重与近义去重共用，
+# api/articles.py 的报题查重也调 find_pending_article，别再散落字面量列表。
+ACTIVE_ARTICLE_STATUSES = ["pending", "generating", "draft", "edited", "rendered"]
+
+
+def find_pending_article(title: str) -> Article | None:
+    """同题查重（报题线与 API 共用）：同标题且仍处于在途/就绪状态的已有草稿；
+    命中返回该行（调用方可取 id 报 409），未命中返回 None。"""
     with Session(engine) as s:
-        row = s.exec(select(Article).where(
+        return s.exec(select(Article).where(
             Article.title == title[:60],  # type: ignore[attr-defined]
-            Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]),  # type: ignore[attr-defined]
+            Article.status.in_(ACTIVE_ARTICLE_STATUSES),  # type: ignore[attr-defined]
         )).first()
-        return row is not None
 
 
 @register_executor("article_hotspots")
@@ -835,7 +806,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
           "（真实教训：《甲醇混动车成本账》受众对但主题是汽车，与目标零关系）\n"
           '\n清单：\n' + json.dumps(items, ensure_ascii=False) +
           '\n输出 JSON：{"relevant": [双锚都命中的序号数组]}。一条都没有就给空数组。'}],
-        purpose="discover_keywords", max_tokens=1024, thinking="disabled")
+        purpose="hotspot_keywords", max_tokens=1024, thinking="disabled")
     keep = {int(x) for x in (screen.get("relevant") or []) if str(x).strip().isdigit()}
     items = [x for i, x in enumerate(items) if (i + 1) in keep] if keep else []
     if not items:
@@ -855,7 +826,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     with Session(engine) as s:
         for x in picks:
             title = str(x.get("title") or "").strip()[:60]
-            if not title or _article_pending_exists(title):
+            if not title or find_pending_article(title) is not None:
                 continue
             note = (f"热点：{str(x.get('hotspot') or '')[:80]}｜"
                     f"为什么现在写：{str(x.get('why_now') or '')[:80]}｜"
@@ -933,27 +904,7 @@ async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
 
 # ---- 知识库选题线（2026-11-09）：体系化遍历 ima 目录 → 带判断选题 → 报题即草稿链写 ----
 
-_KB_TOPIC_BATCH = 12       # 每轮用于选题的文档数
-_KB_TOPIC_FULLTEXT = 3     # 其中取全文摘录的篇数
-
-
-def _kb_upsert_docs(s: Session, kb_id: str, folder_id: str, folder_name: str,
-                    docs: list[dict]) -> int:
-    """目录清单并入 kb_documents 台账，返回新入库（status=new）数量。"""
-    new_cnt = 0
-    for d in docs:
-        mid = d.get("media_id") or ""
-        if not mid:
-            continue
-        exists = s.exec(select(KBDocument).where(
-            KBDocument.media_id == mid)).first()  # type: ignore[attr-defined]
-        if exists is not None:
-            continue
-        s.add(KBDocument(kb_id=kb_id, folder_id=folder_id, folder_name=folder_name,
-                         media_id=mid, title=d.get("title") or "", status="new"))
-        new_cnt += 1
-    s.commit()
-    return new_cnt
+_KB_TOPIC_FULLTEXT = 3     # 每轮取全文摘录的篇数
 
 
 @register_executor("article_kb_topics")
@@ -978,7 +929,7 @@ async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
         kb_id = topic_kb_id(s)
         folders = topic_folders(s)
         recent = [r.title for r in s.exec(select(Article).where(
-            Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]))  # type: ignore[attr-defined]
+            Article.status.in_(ACTIVE_ARTICLE_STATUSES))  # type: ignore[attr-defined]
             .order_by(Article.id.desc()).limit(30)).all()  # type: ignore[attr-defined]
             if r.title]
     if not folders:
@@ -1072,7 +1023,7 @@ async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
                     ntitle = _norm(title)
                     dup_topic = any(_norm(x.title) == ntitle for x in s.exec(select(KBTopic)).all())  # type: ignore[attr-defined]
                     dup_article = any(_norm(a.title) == ntitle for a in s.exec(select(Article).where(
-                        Article.status.in_(["pending", "generating", "draft", "edited", "rendered"]))).all())  # type: ignore[attr-defined]
+                        Article.status.in_(ACTIVE_ARTICLE_STATUSES))).all())  # type: ignore[attr-defined]
                     if dup_topic or dup_article:
                         dropped.append(f"近义重复：{title[:24]}")
                         continue

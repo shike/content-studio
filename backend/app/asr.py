@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Optional
 
 from .settings import settings
 
@@ -91,54 +90,3 @@ def transcribe(path: str, vocab: str = "") -> str:
         if text:
             lines.append(text)
     return "\n".join(lines)
-
-
-def model_name() -> str:
-    return settings.asr_model
-
-
-def transcribe_to_srt(path: str, max_chars: int = 18, max_dur: float = 3.5) -> Optional[str]:
-    """视频 → 标准 SRT（P3 使用；单条字幕 ≤max_chars 或超时强制断句）。"""
-    segments = _segments_with_fallback(path)
-    cues: list[tuple[float, float, str]] = []
-    for seg in segments:
-        text = seg.text.strip()
-        if not text:
-            continue
-        start, end = seg.start, seg.end
-        # 按长度切分，时长按字符比例摊
-        if len(text) > max_chars:
-            n = (len(text) + max_chars - 1) // max_chars
-            step = (end - start) / n
-            for i in range(n):
-                cues.append((start + i * step, start + (i + 1) * step,
-                             text[i * max_chars:(i + 1) * max_chars]))
-        else:
-            cues.append((start, end, text))
-    if not cues:
-        return None
-    # 合并过短相邻句
-    merged: list[tuple[float, float, str]] = []
-    for start, end, text in cues:
-        if merged and (len(merged[-1][2]) + len(text) <= max_chars
-                       and end - merged[-1][0] <= max_dur):
-            ms, _, mt = merged[-1]
-            merged[-1] = (ms, end, mt + text)
-        else:
-            merged.append((start, end, text))
-    return _format_srt(merged)
-
-
-def _ts(seconds: float) -> str:
-    ms = int(round(seconds * 1000))
-    h, rem = divmod(ms, 3600_000)
-    m, rem = divmod(rem, 60_000)
-    s, ms = divmod(rem, 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def _format_srt(cues: list[tuple[float, float, str]]) -> str:
-    blocks = []
-    for i, (start, end, text) in enumerate(cues, 1):
-        blocks.append(f"{i}\n{_ts(start)} --> {_ts(end)}\n{text}\n")
-    return "\n".join(blocks)

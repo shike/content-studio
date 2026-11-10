@@ -1,25 +1,18 @@
-"""LLM 网关：GLM 为主、DeepSeek 备选，调用重试 + 用量成本台账（docs/技术方案.md §8）。"""
+"""LLM 网关：单通道 GLM（直调端点），统一重试 + 空正文显式报错。
+
+用量成本台账已拆除（2026-10-27 用户裁定 2B）：系统不记录任何调用成本，
+花销概算直接看服务商控制台。"""
 from __future__ import annotations
 
 import asyncio
 import json
 import re
-import time
 from typing import Optional
 
 import httpx
-from sqlmodel import Session
 
-from ..db import engine
 from ..jobs.errors import QuotaExhaustedError, TransientError
 from ..settings import settings
-
-# 元 / 百万 tokens: (输入, 输出)。缺省按 glm-5.3-flash 计。
-# glm-5.3-flash 为估算值（官方未公布牌价，实际走 Coding Plan 套餐额度）
-_PRICES = {
-    "glm-5.3-flash": (2, 8),
-    "glm-5.3": (8, 28),
-}
 
 
 class LLMError(RuntimeError):
@@ -38,12 +31,6 @@ def active() -> dict:
 
 def is_configured() -> bool:
     return bool(active()["key"])
-
-
-def _record(purpose: str, model: str, tokens_in: int, tokens_out: int,
-            latency_ms: int, ok: bool) -> None:
-    price = _PRICES.get(model, _PRICES["glm-5.3-flash"])
-    cost = (tokens_in * price[0] + tokens_out * price[1]) / 1_000_000
 
 
 # 全局 LLM 并发闸（2026-10-07）：直调端点（知识图解/海报/物料包标签/ping）不入任务队列，
@@ -74,22 +61,14 @@ async def complete(messages: list[dict], *, purpose: str = "chat",
             "temperature": temperature, "max_tokens": max_tokens}
     if thinking == "disabled":
         body["thinking"] = {"type": "disabled"}
-    started = time.perf_counter()
-    tokens_in = tokens_out = 0
+    async with _llm_sem():
+        return await _complete_locked(messages, body=body, cfg=cfg)
+
+
+async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict) -> str:
     ok = False
     last_err: Optional[Exception] = None
     content: Optional[str] = None
-    async with _llm_sem():
-        return await _complete_locked(
-            messages, body=body, cfg=cfg, purpose=purpose,
-            started=started, tokens_in=tokens_in, tokens_out=tokens_out,
-            ok=ok, last_err=last_err, content=content)
-
-
-async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict, purpose: str,
-                           started: float, tokens_in: int, tokens_out: int,
-                           ok: bool, last_err: Optional[Exception],
-                           content: Optional[str]) -> str:
     for attempt in range(3):
         try:
             # 600s：脚本三版生成（20000 tokens+思考链）在 glm-5.3-flash 上实测超 300s
@@ -109,17 +88,12 @@ async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict, purpo
                 # 思考型模型 max_tokens 不足时正文为空（推理耗尽预算）
                 raise LLMError("模型返回空正文（max_tokens 可能被推理耗尽）")
             content = raw
-            usage = data.get("usage") or {}
-            tokens_in = usage.get("prompt_tokens", 0)
-            tokens_out = usage.get("completion_tokens", 0)
             ok = True
             break
         except Exception as e:  # noqa: BLE001 统一重试
             last_err = e
             content = None  # 失败的尝试不得留下半成品正文
             await asyncio.sleep(2 ** attempt)
-    _record(purpose, cfg["model"], tokens_in, tokens_out,
-            int((time.perf_counter() - started) * 1000), ok)
     if not ok or not content:
         detail = str(last_err) or type(last_err).__name__  # ReadTimeout('') 等空串异常必须露出类型名，否则超时被误判 deterministic
         # 任务体系异常分类：额度窗口挂起、通道抖动跨任务重试（P1 骨架）

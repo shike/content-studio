@@ -14,24 +14,21 @@ import urllib.request
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 违禁词（合规红线）：命中即 FAIL，不进 LLM 评审
+# 违禁词（合规红线）：命中即 FAIL，不进 LLM 评审。表本体抽单一数据源
+# backend/app/articles/banned_words.json（与 backend/app/articles/service.py 共用，
+# 改表只改 JSON，不再双处同步；本模块保持纯标准库，用 json 读）。
 # 注意避开合法用词（"第一步/第一条产线"不含"行业第一"这类绝对化模式）。
 # 裸「最好的」已移除（2026-10-02 P1 实测：误杀率过高——「千万别挑最好的那条」是反向建议、
 # 「最好的线，设备新」是描述性比较，都不是绝对化承诺；语义级超级由 LLM 评审 compliance 项
 # 兜底（绝对化承诺直接 0 分），程序化表只留模式明确的营销违规）。
-# 否定语境窗口仍保留：其余模式命中时，前 4 字含否定词（"别说行业第一"）同样放行。
-BANNED_PATTERNS = [
-    "行业第一", "全网第一", "业界第一", "排名第一",
-    "保证收益", "保证回本", "保证效果", "保证赚钱", "保证翻倍",
-    "百分百", "稳赚", "包赚", "躺赚", "轻松月入", "闭眼入",
-    "包就业", "包接单", "保过", "百分百就业", "学完月入",
-]
+# 否定语境窗口仍保留：其余模式命中时，前 4 字含否定词（"别说行业第一"）同样放行（见 banned_words）。
+with open(os.path.join(_REPO, "backend", "app", "articles", "banned_words.json"),
+          encoding="utf-8") as _banned_table_file:
+    _BANNED_TABLE = json.load(_banned_table_file)
+BANNED_PATTERNS = _BANNED_TABLE["banned_patterns"]
 
 # 刻意 CTA 话术（自然收尾约束的程序化辅助信号，最终由评审员判定）
-CTA_PATTERNS = [
-    r"评论区[打回留发扣]", r"评论区?扣[「『]?[验关资1-9]", r"私信[我领发回复要]", r"关注我", r"扣[个1-9]", r"回复关键?词",
-    r"加[我微].{0,2}信", r"领.{0,4}资料", r"收藏.{0,6}转发",
-]
+CTA_PATTERNS = _BANNED_TABLE["cta_patterns"]
 
 _ARTICLE_RUBRIC = """你是苛刻的公众号深度长文内容评审。这类文章的定位=专业书面深度分析
 （不是口播稿，不要用"口语化/3秒钩子"的短视频标准量它）。按六项评分（每项 0-10 分）：
@@ -102,8 +99,8 @@ def banned_words(text: str) -> list[str]:
 
     否定语境不算命中：「千万别挑最好的那条」是反向建议，不是绝对化承诺（2026-10-02 P1
     实测误杀：三版脚本与长文小节标题都以「别挑/别选最好的」的正当修辞被拦）——往前看
-    4 字内含否定词即放行。与 backend/app/articles/service.py 的守卫同表同逻辑，改一处
-    必须同步另一处。"""
+    4 字内含否定词即放行。表已抽单一数据源 banned_words.json（与 backend/app/articles/
+    service.py 共用）；否定语境窗口算法两侧各自实现，改算法需两处同步。"""
     hits = []
     for p in BANNED_PATTERNS:
         start = 0

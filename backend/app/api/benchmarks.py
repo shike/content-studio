@@ -11,6 +11,7 @@ from ..db import engine
 from ..jobs.runner import runner
 from ..models import BenchmarkVideo, ScriptTemplate, Topic, User
 from ..settings import settings
+from ._listing import require_douyin_url
 
 router = APIRouter()
 
@@ -21,15 +22,29 @@ class AnalyzeIn(BaseModel):
     url: str
 
 
+def crawl_warning_note() -> str:
+    """采集预警：最近一次探针异常 → 提交时就告诉用户可能失败（省一轮空等）。
+    预警失败不影响提交，异常吞掉返回空串。"""
+    try:
+        from ..crawler_probe import read_state
+
+        last = (read_state().get("last") or {})
+        if last.get("status") not in (None, "ok"):
+            return (f"抖音采集当前异常（{str(last.get('detail', ''))[:40]}，"
+                    f"探测于 {last.get('at', '')}），任务可能失败")
+    except Exception:  # noqa: BLE001 预警失败不影响提交
+        pass
+    return ""
+
+
 @router.post("/api/analyze/video", status_code=202)
 async def analyze_video(body: AnalyzeIn,
                         user: User = Depends(require_user)) -> dict:
-    from ..benchmarks.downloader import extract_douyin_url, is_douyin_url
+    from ..benchmarks.downloader import extract_douyin_url
     url = extract_douyin_url(body.url.strip())
     if not url:
         raise HTTPException(status_code=400, detail="url 不能为空")
-    if not is_douyin_url(url):  # SSRF 闸门：服务端会主动下载该链接
-        raise HTTPException(status_code=400, detail="仅支持抖音视频链接（v.douyin.com / douyin.com）")
+    require_douyin_url(url, "仅支持抖音视频链接（v.douyin.com / douyin.com）")
     with Session(engine) as s:
         b = s.exec(select(BenchmarkVideo).where(BenchmarkVideo.url == url)).first()
         if b is None:  # 实体去重：同一链接重复贴不建重复行
@@ -41,15 +56,8 @@ async def analyze_video(body: AnalyzeIn,
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
                               dedup_key=f"bm:{benchmark_id}")
     out = {"benchmark_id": benchmark_id, "job_id": job.id}
-    # 采集预警：最近一次探针异常且未过久 → 提交时就告诉用户可能失败（省一轮空等）
-    try:
-        from ..crawler_probe import read_state
-
-        last = (read_state().get("last") or {})
-        if last.get("status") not in (None, "ok"):
-            out["crawl_warning"] = f"抖音采集当前异常（{str(last.get('detail', ''))[:40]}，探测于 {last.get('at', '')}），任务可能失败"
-    except Exception:  # noqa: BLE001 预警失败不影响提交
-        pass
+    if note := crawl_warning_note():
+        out["crawl_warning"] = note
     return out
 
 
@@ -81,15 +89,8 @@ async def analyze_local(file: UploadFile,
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
                               dedup_key=f"bm:{benchmark_id}")
     out = {"benchmark_id": benchmark_id, "job_id": job.id}
-    # 采集预警：最近一次探针异常且未过久 → 提交时就告诉用户可能失败（省一轮空等）
-    try:
-        from ..crawler_probe import read_state
-
-        last = (read_state().get("last") or {})
-        if last.get("status") not in (None, "ok"):
-            out["crawl_warning"] = f"抖音采集当前异常（{str(last.get('detail', ''))[:40]}，探测于 {last.get('at', '')}），任务可能失败"
-    except Exception:  # noqa: BLE001 预警失败不影响提交
-        pass
+    if note := crawl_warning_note():
+        out["crawl_warning"] = note
     return out
 
 

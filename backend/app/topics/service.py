@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 
-import httpx
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -16,7 +15,6 @@ from ..llm import gateway
 from ..models import ResearchReport, Topic
 from ..prompts import load, render
 from ..search import batch_search, search_enabled
-from ..settings import settings
 
 
 

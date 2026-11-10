@@ -9,7 +9,6 @@ import json
 import os
 import re
 import time
-from pathlib import Path
 from typing import Any
 
 import matplotlib
@@ -52,8 +51,6 @@ def _setup_font() -> None:
     matplotlib 渲染中文全是豆腐块（乱码），所以候选字体逐个探测并显式注册。
     注册后清除 matplotlib 的字体缓存：长驻进程里缓存过期会导致新注册字体
     不生效（服务器上中文乱码的根因）。"""
-    import shutil
-
     from matplotlib import font_manager
 
     for f in _FONT_CANDIDATES:
@@ -135,52 +132,6 @@ def render_chart(spec: dict[str, Any], primary: str = _BRAND) -> str:
             ax.grid(axis="x", color="#F1F1F4", linewidth=0.8)
             ax.set_axisbelow(True)
             ax.tick_params(colors="#52525B", labelsize=10)
-    fig.tight_layout()
-    fig.savefig(path, facecolor="white")
-    plt.close(fig)
-    return str(path)
-
-
-def render_flow(spec: dict[str, Any]) -> str:
-    """渲染框架/流程图：stages=[{name, desc}] 横向圆角框+箭头+要点小字。"""
-    _setup_font()
-    from matplotlib.patches import FancyBboxPatch
-
-    stages = spec.get("stages") or []
-    stages = [s for s in stages if isinstance(s, dict) and str(s.get("name") or "").strip()]
-    if not 2 <= len(stages) <= 5:
-        raise ValueError("流程图 stages 需 2~5 个")
-    title = str(spec.get("title") or "")[:40]
-
-    out_dir = _tenant_image_dir()
-    path = out_dir / f"flow_{int(time.time() * 1000)}.png"
-
-    fig, ax = plt.subplots(figsize=(9.6, 2.9), dpi=150)
-    fig.patch.set_facecolor("white")
-    ax.axis("off")
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, 10)
-    n = len(stages)
-    gap = 0.55
-    box_w = (10 - gap * (n - 1)) / n
-    for i, st in enumerate(stages):
-        x = i * (box_w + gap)
-        ax.add_patch(FancyBboxPatch((x, 2.6), box_w, 4.8,
-                                    boxstyle="round,pad=0.1",
-                                    facecolor="#EEF0FA", edgecolor=_BRAND, linewidth=1.6))
-        ax.text(x + box_w / 2, 6.1, str(st.get("name") or "")[:10],
-                ha="center", fontsize=13, fontweight="bold", color="#1F2430")
-        desc = str(st.get("desc") or "")[:44]
-        if desc:
-            import textwrap
-            ax.text(x + box_w / 2, 4.6, "\n".join(textwrap.wrap(desc, 11)),
-                    ha="center", va="top", fontsize=9, color="#52525B", linespacing=1.5)
-        if i < n - 1:
-            ax.annotate("", xy=(x + box_w + gap - 0.08, 5.0),
-                        xytext=(x + box_w + 0.08, 5.0),
-                        arrowprops=dict(arrowstyle="-|>", color=_BRAND, lw=2.2))
-    if title:
-        ax.set_title(title, fontsize=13, color="#16161B", pad=10)
     fig.tight_layout()
     fig.savefig(path, facecolor="white")
     plt.close(fig)

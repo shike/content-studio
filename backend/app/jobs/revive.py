@@ -47,7 +47,7 @@ def entity_orphans() -> list[dict]:
 
     任务记录可能已被清理，所以按实体表反查（活跃任务 payload 里含同 id 才算有主）。
     """
-    ACTIVE = ("queued", "running", "parked")
+    ACTIVE = ("queued", "running")
     out: list[dict] = []
     with Session(engine) as s:
         active_payloads: dict[str, list[dict]] = {}
@@ -90,6 +90,4 @@ def _revive_payload(job_type: str, row) -> dict:
         return {"article_id": row.id}
     if job_type in ("script_generate", "script_polish"):
         return {"script_id": row.id}
-
-        return {"project_id": row.id}
     return {}

@@ -11,11 +11,9 @@ import asyncio
 import json
 import random
 import re
-import subprocess
 import time
 from urllib.parse import quote
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -23,13 +21,10 @@ from sqlmodel import Session, select
 from ..browser import launch, ua
 from ..db import engine
 from ..llm import gateway
-from ..prompts import render
-from ..settings import settings
 from ..jobs.errors import TransientError
 from ..jobs.runner import register_concurrent, register_executor, runner
-from ..models import BenchmarkVideo, HarvestProfile, Topic, WatchAccount, WatchCandidate
+from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
 
-_MAX_NEW_PER_ACCOUNT = 0  # 已废止（2026-11-08 用户定版：监控内容全量自动拆解，不设上限）
 _LIST_LIMIT = 20          # 每账号最多看最近 N 条
 
 
@@ -825,53 +820,10 @@ async def watch_discover(ctx, payload: dict) -> dict:
             "skipped": skipped, "top": [f"{d['name']}（{_fmt_follow(d['follower_count'])}粉）"
                                         for d in ranked], "notes": notes}
 
-# ---- 获客号挖掘 v2（2026-10-31 用户定版：求带评论直接搜 + 近期多条同类验证）----
+# ---- 已扫池（获客挖掘 / hl 搜索矩阵共用：解析过的 sec_uid 不重复撞主页限速）----
 
-_LEADGEN_HUNT_SEED_CAP = 16      # 每轮最多扫的种子视频数（控时长）
-_LEADGEN_HUNT_MIN_COMMENTS = 3   # 求带评论绝对数门槛：≥3 条判获客候选
-_PATROL_BUSINESS_WORDS = ("AI", "人工智能", "大模型", "数字化", "智能", "FDE", "OPC",
-                          "自动化", "获客", "落地", "降本", "提效")
-
-
-def _count_recent_same(entries: list[dict], days: int = 30) -> int:
-    """近 N 天内标题命中业务词的作品数（entries 最新在前，带 ctime）。"""
-    cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
-    n = 0
-    for e in entries:
-        ct = e.get("ctime") or 0
-        if ct and float(ct) < cutoff:
-            continue
-        title = (e.get("title") or "").lower()
-        if any(w.lower() in title for w in _PATROL_BUSINESS_WORDS):
-            n += 1
-    return n
-
-
-# ---- 纯获客号挖掘（2026-11-02 用户定版；判定标准 V4：入表一律 LLM 终审）----
-# 用户标尺：暖暖AI赋能 297 粉（签名挂报名微信号）——纯获客号越纯越可能是小号，
-# 粉丝/赞/求带评论全不参与判定。
-# 迭代史：V1/V2 只看转化链路混进船锚厂家/摄影号/广告老板号；V3 加赛道闸但词表仍
-# 有入表权，高崇耕（纯内容干货号）靠"落地/企业ai"话题词碰撞直通入表，智典（诊断
-# 钩子服务商）靠我把"咨询诊断"写进教培面混进来。V4 根治（2026-11-03 用户拍板
-# "只认教/带人形态"）：**词表降级为初筛（只决定要不要解析+进存档），入表唯一
-# 门槛 = LLM 终审**——语义读完整签名，不存在话题词/生意词碰撞问题。
-
-_HARVEST_AI_WORDS = ("人工智能", "aigc", "gpt", "大模型", "智能体", "数字员工", "fde")
-# 初筛教培词（宽收召回：初筛错放由 LLM 终审拦，初筛错拒本来就走 pending 复判）
-_HARVEST_EDU_WORDS = ("培训", "课程", "训练营", "训练", "陪跑", "带教", "学员", "教练",
-                      "招生", "组局", "教学", "讲课", "干货", "操盘手", "私教", "导师",
-                      "开课", "内训")
-_HARVEST_CONTACT_WORDS = ("微信", "加V", "V信", "weixin", "报名", "留电", "☎", "电话", "私信",
-                          "领取", "领资料", "加我", "联系", "wx", "V:", "1v1", "加好友")
-_HARVEST_BIZ_WORDS = ("组局", "沙龙", "社群", "同城", "训练营", "陪跑", "咨询", "课程", "培训",
-                      "学院", "商学院", "招生", "诊断", "带教", "接单", "承接", "获客", "引流",
-                      "落地", "合伙人", "代理", "创业", "圈主", "赋能", "ai落地", "数字化转型",
-                      "实体", "老板", "操盘", "企业ai", "fde", "线下", "私域")
 _HARVEST_SEEN_KEY = "harvest_seen_secs"
-_HARVEST_PER_RUN = 30     # 每轮解析主页上限（profile/other 连续解析 ~60 会开始空响应）
-_HARVEST_VIDEOS = 5       # 每轮种子视频数（控时长）
 _HARVEST_SEEN_CAP = 3000
-_HARVEST_LLM_BATCH = 20   # 每轮 LLM 复判条数（一次调用批量判）
 
 
 def _harvest_budget(key: str, default: int) -> int:
@@ -886,32 +838,6 @@ def _harvest_budget(key: str, default: int) -> int:
     except (TypeError, ValueError):
         v = default
     return max(1, min(v, 200))
-
-
-def judge_leadgen_account(nick: str, sig: str) -> tuple[bool, bool, str]:
-    """V4 初筛（无入表权，只决定解析优先级）：返回 (初筛纯, 强信号, 依据)。
-
-    三段：①AI 生态词（船锚厂家/广告公司死这）②教/带人形态词（服务商/内容号降权）
-    ③转化链路（联系方式必须与 AI 教育形态同时在场）。初筛纯 → 存档标 lexicon
-    优先送 LLM 终审；初筛不过 → pending 排后，终审兜底教培变体写法。"""
-    text = f"{nick} {sig or ''}"
-    low = text.lower()
-    ai_hit = [w for w in _HARVEST_AI_WORDS if w in low] or (
-        ["ai"] if re.search(r"(?<![a-z0-9])ai(?![a-z0-9])", low) else [])
-    if not ai_hit:
-        return False, False, "非AI赛道（签名/昵称无AI生态词）"
-    edu = [w for w in _HARVEST_EDU_WORDS if w in low]
-    if not edu:
-        return False, False, "AI赛道但非教/带人形态（服务商/内容号）"
-    contact = [w for w in _HARVEST_CONTACT_WORDS if w.lower() in low]
-    biz = [w for w in _HARVEST_BIZ_WORDS if w.lower() in low]
-    if contact:
-        return True, True, f"初筛纯·转化入口（{'、'.join(contact[:3])}｜教词：{'、'.join(edu[:3])}）"
-    if len(biz) >= 2:
-        return True, False, f"初筛纯·生意形态（{'、'.join(biz[:3])}）"
-    if len(biz) == 1:
-        return False, False, f"单一生意词（{biz[0]}），疑似不足"
-    return False, False, "无获客信号"
 
 
 def _load_harvest_seen() -> set[str]:
@@ -937,120 +863,6 @@ def _save_harvest_seen(seen: set[str]) -> None:
         s.commit()
 
 
-def _harvest_video_commenters(vid: str, seen: set[str]) -> list[tuple[str, str]]:
-    """开视频页拦 comment/list（滚动唤醒+面板滚动），收评论者 sec_uid（接口只给 sec+昵称）。"""
-    from playwright.sync_api import sync_playwright
-
-    got: list[tuple[str, str]] = []
-    with sync_playwright() as p:
-        browser = launch(p)
-        try:
-            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
-                                      viewport={"width": 1380, "height": 940})
-            page = ctx.new_page()
-
-            def on_resp(r):
-                if "aweme/v1/web/comment/list/" in r.url:
-                    try:
-                        for c in (r.json().get("comments") or []):
-                            u = c.get("user") or {}
-                            if u.get("sec_uid") and u["sec_uid"] not in seen:
-                                seen.add(u["sec_uid"])
-                                got.append((u["sec_uid"], (u.get("nickname") or "").strip()[:24]))
-                    except Exception:  # noqa: BLE001
-                        pass
-
-            page.on("response", on_resp)
-            page.goto(f"https://www.douyin.com/video/{vid}",
-                      timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
-            # 评论面板容器有自己的滚动：悬停后滚 8 屏翻页（每页 5 条）
-            for sel in ['[data-e2e="comment-list"]', ".comment-mainContent", 'div[class*="comment"]']:
-                loc = page.locator(sel)
-                if loc.count() > 0:
-                    try:
-                        loc.first.hover(timeout=3000)
-                        for _ in range(8):
-                            page.mouse.wheel(0, 900)
-                            page.wait_for_timeout(2500)
-                        break
-                    except Exception:  # noqa: BLE001
-                        continue
-        finally:
-            browser.close()
-    return got
-
-
-def _resolve_douyin_profile(sec: str) -> tuple[Optional[dict], Optional[list[dict]]]:
-    """PC 主页拦 user/profile/other 换全资料 + aweme/post 拿最新作品（限速由调用方控制）。"""
-    from playwright.sync_api import sync_playwright
-
-    cur: dict = {"u": None, "posts": []}
-    with sync_playwright() as p:
-        browser = launch(p)
-        try:
-            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
-                                      viewport={"width": 1380, "height": 940})
-            page = ctx.new_page()
-
-            def on_resp(r):
-                if "aweme/v1/web/user/profile/other/" in r.url:
-                    try:
-                        u = (r.json().get("user") or {})
-                        if u.get("sec_uid"):
-                            cur["u"] = {
-                                "sec": u["sec_uid"],
-                                "nick": (u.get("nickname") or "").strip()[:24],
-                                # 截 220：联系入口常落在签名尾部（凯凯案例 100 字截断正好切掉 🌐微信号）
-                                "sig": (u.get("signature") or "").strip()[:220],
-                                "fans": int(u.get("follower_count") or 0),
-                                "works": int(u.get("aweme_count") or 0),
-                                "ip": (u.get("ip_location") or "").strip()[:12],
-                            }
-                    except Exception:  # noqa: BLE001
-                        pass
-                elif "aweme/v1/web/aweme/post/" in r.url:
-                    try:
-                        for a in (r.json().get("aweme_list") or [])[:3]:
-                            cur["posts"].append({"id": str(a.get("aweme_id") or ""),
-                                                 "title": (a.get("desc") or "").strip()[:40]})
-                    except Exception:  # noqa: BLE001
-                        pass
-
-            page.on("response", on_resp)
-            page.goto(f"https://www.douyin.com/user/{sec}",
-                      timeout=30000, wait_until="domcontentloaded")
-            page.wait_for_timeout(4500)
-        finally:
-            browser.close()
-    return cur.get("u"), cur.get("posts") or None
-
-
-def resolve_author_by_share_url(url: str) -> tuple[Optional[dict], Optional[str]]:
-    """贴链判号入口的解析：v.douyin.com 短链 / 视频 / 主页分享链接 → 作者全资料。"""
-    import httpx as _hx
-
-    try:
-        r = _hx.get(url.strip(), follow_redirects=True, timeout=20,
-                    headers={"User-Agent": ua()})
-        final = str(r.url)
-    except Exception as e:  # noqa: BLE001
-        return None, f"链接打不开：{type(e).__name__}"
-    m = re.search(r"/video/(\d{6,})", final) or re.search(r"share/video/(\d{6,})", final)
-    if m:
-        info, err = _probe_video_author(m.group(1))
-        return info, err
-    m = re.search(r"share/user/([A-Za-z0-9_-]{20,})", final) or \
-        re.search(r"/user/([A-Za-z0-9_-]{30,})", final) or \
-        re.search(r"sec_uid=([A-Za-z0-9_-]{20,})", final)
-    if not m:
-        return None, "链接里没有视频 id 或主页 sec_uid（请在 App 里分享主页或视频）"
-    sec = m.group(1)
-    info, _posts = _resolve_douyin_profile(sec)
-    if info is None:
-        return None, "主页资料未取到（等待窗内数据未到，可重试）"
-    return info, None
-
 _HL_CITIES = ["苏州", "上海", "杭州", "南京", "无锡", "宁波", "温州", "常州", "南通",
               "嘉兴", "绍兴", "湖州", "金华", "台州", "昆山", "吴江"]
 _HL_KEYWORDS = ["线下沙龙", "组局", "AI沙龙", "同城聚会", "主理人", "AI活动", "创业沙龙",
@@ -1058,8 +870,6 @@ _HL_KEYWORDS = ["线下沙龙", "组局", "AI沙龙", "同城聚会", "主理人
                 "AI圈子", "饭局"]
 _HL_SEARCH_BUDGET = 12      # 每晚搜索数（全矩阵 ~9 晚轮完，账号会长新）
 _HL_VERIFY_BUDGET = 25      # 每晚取证作者数
-_HL_SEEN_KEY = "hl_search_seen"
-_HL_SEEN_CAP = 4000
 _HL_MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 "
                  "(KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1")
 _HL_ACT = ["沙龙", "组局", "聚会", "线下", "圈子", "社群", "主理人", "读书会", "共创",

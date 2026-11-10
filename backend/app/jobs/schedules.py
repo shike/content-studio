@@ -46,7 +46,16 @@ def effective_enabled(state: ScheduleState) -> bool:
         return False
     sch = _by_key(state.key)
     if sch and sch.enabled_by:
-        return bool(getattr(settings, sch.enabled_by, True))
+        flag = bool(getattr(settings, sch.enabled_by, True))
+        if flag and sch.enabled_by == "ima_kb_enabled":
+            # 与执行器层同源（函数内延迟 import 防环；articles/ima_kb 只依赖 db/models/errors，
+            # 无环）：ima 凭证未配齐 = 功能未启用——调度面就停用、不提交任务，
+            # 不再等执行体第一行才拒绝（此前 Settings 无此字段，getattr 默认 True 恒放行）。
+            from ..articles.ima_kb import kb_config
+
+            with Session(engine) as s:
+                flag = kb_config(s) is not None
+        return flag
     return True
 
 
@@ -199,7 +208,7 @@ async def _run_kb_topics() -> str:
     return f"job #{job.id}（知识库选题 → 草稿）"
 
 
-# 知识库选题线（2026-11-09）：与热点报题错峰，3 点半跑，早晨草稿箱多一批库内真货支撑的选题
+# 知识库选题线（2026-11-09）：与热点报题（0 点）错峰，3 点跑，早晨草稿箱多一批库内真货支撑的选题
 register_schedule(Schedule(key="article_kb_topics_daily", label="知识库选题（遍历 ima 产选题）",
                            daily_hour=3, enabled_by="ima_kb_enabled",
                            run=_run_kb_topics))

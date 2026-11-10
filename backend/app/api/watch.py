@@ -13,8 +13,17 @@ from ..jobs.runner import runner
 from ..models import BenchmarkVideo, Job, Topic, WatchAccount, WatchCandidate
 from ..watch.service import _DISCOVER_QUALITY_FANS
 from ..watch.service import _fmt_follow
+from ._listing import require_douyin_url
 
 router = APIRouter(prefix="/api/watch")
+
+
+def _account_out(acc: WatchAccount) -> dict:
+    """账号出参统一脱敏（唯一出口）：creator_cookie 绝不出后端，回显只有 has_cookie 位。"""
+    d = acc.model_dump()
+    d.pop("creator_cookie", None)
+    d["has_cookie"] = bool(acc.creator_cookie)
+    return d
 
 
 @router.get("/digest")
@@ -117,9 +126,7 @@ def list_accounts(account_type: str = "") -> dict:
         items = []
         for r in rows:
             st = stats.get(r.name) or {"total": 0, "recent": 0}
-            d = r.model_dump()
-            d.pop("creator_cookie", None)  # 凭据不出后端：回显只有 has_cookie 位
-            d["has_cookie"] = bool(r.creator_cookie)
+            d = _account_out(r)
             d["video_total"] = st["total"]
             d["video_recent_7d"] = st["recent"]
             items.append(d)
@@ -138,9 +145,7 @@ def create_account(body: AccountIn) -> dict:
         raise HTTPException(status_code=400,
                             detail="抖音账号需要主页链接（App 内分享主页 → 复制链接）")
     if body.url.strip():
-        from ..benchmarks.downloader import is_douyin_url
-        if not is_douyin_url(body.url.strip()):
-            raise HTTPException(status_code=400, detail="仅支持抖音链接（防任意 URL 抓取）")
+        require_douyin_url(body.url.strip())
     with Session(engine) as s:
         acc = WatchAccount(platform=body.platform, name=body.name.strip(),
                            url=body.url.strip(), note=body.note.strip(), kind=body.kind,
@@ -149,10 +154,7 @@ def create_account(body: AccountIn) -> dict:
         s.add(acc)
         s.commit()
         s.refresh(acc)
-        d = acc.model_dump()
-        d.pop("creator_cookie", None)
-        d["has_cookie"] = bool(acc.creator_cookie)
-        return d
+        return _account_out(acc)
 
 
 @router.put("/accounts/{account_id}")
@@ -166,9 +168,8 @@ def update_account(account_id: int, body: AccountUpdate) -> dict:
                 raise HTTPException(status_code=400, detail="账号名不能为空")
             acc.name = body.name.strip()
         if body.url is not None:
-            from ..benchmarks.downloader import is_douyin_url
-            if body.url.strip() and not is_douyin_url(body.url.strip()):
-                raise HTTPException(status_code=400, detail="仅支持抖音链接（防任意 URL 抓取）")
+            if body.url.strip():
+                require_douyin_url(body.url.strip())
             acc.url = body.url.strip()
         if body.note is not None:
             acc.note = body.note
@@ -183,10 +184,7 @@ def update_account(account_id: int, body: AccountUpdate) -> dict:
         s.add(acc)
         s.commit()
         s.refresh(acc)
-        d = acc.model_dump()
-        d.pop("creator_cookie", None)
-        d["has_cookie"] = bool(acc.creator_cookie)
-        return d
+        return _account_out(acc)
 
 
 @router.delete("/accounts/{account_id}")
@@ -223,12 +221,11 @@ async def scan_account(account_id: int, user: User = Depends(require_user)) -> d
 async def resolve(body: ResolveIn) -> dict:
     if not body.url.strip():
         raise HTTPException(status_code=400, detail="url 不能为空")
-    from ..benchmarks.downloader import extract_douyin_url, is_douyin_url
+    from ..benchmarks.downloader import extract_douyin_url
     url = extract_douyin_url(body.url.strip())
-    if url and not is_douyin_url(url):
-        raise HTTPException(status_code=400, detail="仅支持抖音链接（防任意 URL 抓取）")
     if not url:
         raise HTTPException(status_code=400, detail="url 不能为空")
+    require_douyin_url(url)
     job = await runner.submit("watch_resolve", {"url": url}, dedup_key=url)
     return {"job_id": job.id}
 
@@ -274,55 +271,6 @@ async def discover(body: DiscoverIn, user: User = Depends(require_user)) -> dict
     return {"job_id": job.id}
 
 
-class JudgeIn(BaseModel):
-    url: str
-
-
-@router.post("/judge-account")
-def judge_account(body: JudgeIn, user: User = Depends(require_user)) -> dict:
-    """贴链判号（2026-11-02 用户定版）：贴主页/视频分享链接 → 反查作者 → 转化痕迹判定。
-
-    手动贴链一律入候选表（keyword=手动贴链，判定依据写 pure_reason）——用户亲手带进来的
-    号不因词典没接住而丢失。"""
-    from ..watch.service import judge_leadgen_account, resolve_author_by_share_url
-
-    url = (body.url or "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="请贴抖音分享链接")
-    info, err = resolve_author_by_share_url(url)  # 同步函数（def 端点跑线程池，可直接阻塞）
-    if info is None:
-        raise HTTPException(status_code=422, detail=err or "解析失败")
-    pure, _strong, reason = judge_leadgen_account(info["name"], info.get("signature") or "")
-    sec = info.get("sec_uid") or ""
-    with Session(engine) as s:
-        dup = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
-            WatchCandidate.sec_uid == sec)).first() if sec else None  # type: ignore[attr-defined]
-        if dup is not None:
-            cand_id, cand_status = dup.id, dup.status
-        else:
-            row = WatchCandidate(
-                keyword="手动贴链", name=info["name"], sec_uid=sec,
-                url=f"https://www.iesdouyin.com/share/user/{sec}" if sec else url,
-                signature=(info.get("signature") or "")[:100],
-                follower_count=info.get("follower_count") or 0,
-                sample_video_id=info.get("video_id") or "",
-                sample_title=(info.get("title") or "")[:60],
-                sample_stats=json.dumps({"digg": info.get("digg") or 0,
-                                         "comment": info.get("comment") or 0,
-                                         "share": info.get("share") or 0}),
-                account_type="leadgen",
-                pure_reason=("手动贴链 · " + reason)[:70],
-            )
-            s.add(row)
-            s.commit()
-            s.refresh(row)
-            cand_id, cand_status = row.id, row.status
-    return {"candidate_id": cand_id, "status": cand_status, "pure": pure,
-            "reason": reason, "name": info["name"],
-            "fans": info.get("follower_count") or 0,
-            "signature": (info.get("signature") or "")[:100]}
-
-
 @router.get("/discover/candidates")
 def list_candidates(status: str = "", account_type: str = "") -> dict:
     """account_type：persona|leadgen 类型内过滤（情报中心 2026-11-03 分线；空=全量）。"""
@@ -365,7 +313,7 @@ def add_candidate(cid: int) -> dict:
         s.commit()
         s.refresh(c)  # commit 后属性过期，model_dump 不触发 refresh 会拿空壳
         return {"candidate": _cand_dict(c),
-                "account": acc.model_dump() if acc is not None else None,
+                "account": _account_out(acc) if acc is not None else None,
                 "duplicate": dup}
 
 
