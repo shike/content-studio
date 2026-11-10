@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from ..asr import transcribe
 from ..db import engine
 from ..settings import settings
-from ..jobs.runner import JobContext, register_executor, register_owed, runner
+from ..jobs.runner import _DEAD_ERROR_MARKERS, JobContext, register_executor, register_owed, runner
 from ..llm import gateway
 from ..models import BenchmarkVideo, Topic
 from ..prompts import render
@@ -112,6 +112,10 @@ def owed_benchmarks() -> list[tuple[dict, str]]:
 
     6 小时失败退避保留在声明里：最近失败过的不补——确定性失败（如 ASR 词表越界）
     补队也是白烧；in_flight 判定含 parked（额度挂起的任务不算缺失）。
+    内容已死的不补（永久排除，不受 6 小时窗限制）：「匿名不可见/已删除/转写空」是
+    永不可成的终态，任务侧已当场归档；但这里扫的是实体状态（approved+analysis 空），
+    不认识死标记就会每过冷却窗把同一条死视频复活一次（2026-11-10 生产实证：5 条
+    死视频 × 每 6.5h 一轮 × 3 轮 = 15 条重复失败）。手动重试入口不受影响。
     """
     from datetime import datetime, timedelta
 
@@ -147,9 +151,19 @@ def owed_benchmarks() -> list[tuple[dict, str]]:
                 )  # type: ignore[attr-defined]
             ).all()
         }
+        dead_ids = {
+            (j.payload or {}).get("benchmark_id")
+            for j in s.exec(
+                select(Job).where(
+                    Job.type == "benchmark_analyze",  # type: ignore[attr-defined]
+                    Job.status == "failed",  # type: ignore[attr-defined]
+                )  # type: ignore[attr-defined]
+            ).all()
+            if any(m in (j.error or "") for m in _DEAD_ERROR_MARKERS)
+        }
         out = []
         for b in approved:
-            if b.id in active or b.id in recent_failed:
+            if b.id in active or b.id in recent_failed or b.id in dead_ids:
                 continue
             # 第三位=归属（reaper 系统上下文无 ACTOR，须显式带视频租户）
             out.append(({"benchmark_id": b.id}, f"bm:{b.id}", (b.tenant_id, 0, "")))
