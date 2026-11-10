@@ -212,6 +212,23 @@ async def _run_kb_topics() -> str:
 register_schedule(Schedule(key="article_kb_topics_daily", label="知识库选题（遍历 ima 产选题）",
                            daily_hour=3, enabled_by="ima_kb_enabled",
                            run=_run_kb_topics))
+
+
+async def _run_kb_auto() -> str:
+    """全自动圈题成文：从池中自动挑题 → 建稿 → 链写成文（自带质量自评+自动排版）。
+    2026-11-10 用户定版「系统做全部工作，用户只做最终决策」——选题不再人工挑选。"""
+    from .runner import runner
+
+    job = await runner.submit("article_kb_auto", {},
+                              dedup_key=f"1:kbauto:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（自动圈题 → 后台写稿）"
+
+
+# 自动成文线（2026-11-10）：跟在 3 点选题之后，4 点自动挑题写稿，早晨「待发」队列自动补满
+register_schedule(Schedule(key="article_kb_auto_daily", label="知识库自动成文（自动圈题写稿）",
+                           daily_hour=4, enabled_by="ima_kb_enabled",
+                           run=_run_kb_auto))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))

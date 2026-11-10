@@ -36,9 +36,11 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
         pending_scripts_leadgen = _count(s, tid, "scripts",
                                          status="generated", account_type="leadgen")
         # 待写长文（公众号独立报题线 2026-11-02）：草稿箱里待写的报题草稿
-        pending_articles = _count(s, tid, "articles", status="pending")
-        # 知识库选题待拍板（2026-11-09 选题线上产品：选用/不做是本线唯一人工闸门）
-        kb_topics = _count(s, tid, "kb_topics", status="new")
+        # 内容工场待决策稿（2026-11-10 用户定版「系统全干、用户只决策」）：
+        # 排队写 + 待发（draft/edited/rendered）——选题池降级为系统内部机制，不再人工挑选
+        pending_articles = s.execute(text(
+            "SELECT COUNT(*) FROM articles WHERE tenant_id=:tid AND status IN "
+            "('pending','draft','edited','rendered')"), {"tid": tid}).scalar() or 0
         # 候选账号待定夺（2026-11-03 IA 收敛：情报并入产线，徽章随线走）
         cand_open_persona = _count(s, tid, "watch_candidates",
                                    status="open", account_type="persona")
@@ -49,6 +51,5 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
             "pendingScriptsPersona": pending_scripts_persona,
             "pendingScriptsLeadgen": pending_scripts_leadgen,
             "pendingArticles": pending_articles,
-            "kbTopics": kb_topics,
             "openCandidatesPersona": cand_open_persona,
             "openCandidatesLeadgen": cand_open_leadgen}

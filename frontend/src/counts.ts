@@ -10,8 +10,7 @@ export interface TodoStats {
   draftTopicsLeadgen: number // 待审选题·获客库
   pendingScriptsPersona: number // 待定稿脚本·人设
   pendingScriptsLeadgen: number // 待定稿脚本·获客
-  pendingArticles: number // 待写长文
-  kbTopics: number // 知识库选题待拍板
+  pendingArticles: number // 内容工场待决策稿（排队写+待发；2026-11-10 系统全干定版）
   openCandidatesPersona: number // 候选账号待定夺·人设线
   openCandidatesLeadgen: number // 候选账号待定夺·获客线
 }
@@ -57,7 +56,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     l_scripts: todo.pendingScriptsLeadgen,
     l_cand: todo.openCandidatesLeadgen,
     l_bench: bmL.counts.pending,
-    article: todo.kbTopics + todo.pendingArticles,
+    article: todo.pendingArticles,
     // 在途 + 失败（失败是异常不是工作流：可见但不建流程，瞬时类由每日慢巡自愈）
     tasks: jobs.counts.running + jobs.counts.queued + (jobs.counts.failed || 0),
     failed: jobs.counts.failed || 0,

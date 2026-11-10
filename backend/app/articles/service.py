@@ -602,6 +602,47 @@ def _kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
     return out
 
 
+async def _quality_gate(ctx: JobContext, md_text: str) -> float | None:
+    """质量自评闸门（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：
+    模型主编按 5 维打分；低于 7 分用评审意见定向重写一次（签名守卫防数字/图被改）。
+    返回最终分（评审失败返回 None，不阻塞成文）。"""
+    try:
+        verdict = await gateway.complete_json(
+            [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
+            purpose="article_quality_gate", max_tokens=1024, thinking="disabled")
+        score = float(verdict.get("overall") or 0)
+        worst = str(verdict.get("worst") or "")[:80]
+    except Exception as e:  # noqa: BLE001 自评失败不阻塞
+        print(f"[kb-write] 质量自评失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
+        return None
+    if score >= 7.0:
+        print(f"[kb-write] 质量自评 {score:.1f}，过闸")
+        return score
+    print(f"[kb-write] 质量自评 {score:.1f} 未过闸（{worst}），定向重写一次")
+    try:
+        polished = await gateway.complete(
+            [{"role": "user", "content": render("article_kb_polish",
+                                                VIOLATIONS=f"主编评审 {score:.1f} 分，最大问题：{worst}。按此意见改写全文，其余要求不变。",
+                                                DRAFT=md_text)}],
+            purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
+        polished = (polished or "").strip()
+        if polished and _content_signature(polished) == _content_signature(md_text):
+            md_text = polished
+            try:
+                verdict2 = await gateway.complete_json(
+                    [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
+                    purpose="article_quality_gate", max_tokens=1024, thinking="disabled")
+                score = float(verdict2.get("overall") or score)
+                print(f"[kb-write] 重写后自评 {score:.1f}")
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            print("[kb-write] 重写稿签名不符（数字/图片变化），保留原稿分")
+    except Exception as e:  # noqa: BLE001 重写失败不阻塞
+        print(f"[kb-write] 质量重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
+    return score
+
+
 @register_executor("article_kb_write", on_fail=_article_generate_fail)
 async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     """知识库选题成文：绑定依据文档全文，单遍写出书面语 1900~2200 字规格。
@@ -720,10 +761,27 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(92, "渲染头图")
     md_text = await _attach_cover(md_text, title, tenant_id, "[kb-write]")
 
+    # 质量自评闸门：低于 7 分按评审意见定向重写一次（2026-11-10 用户定版：系统全干）
+    ctx.set_progress(95, "质量自评")
+    score = await _quality_gate(ctx, md_text)
+
     _finalize_article(article_id, title=title, title_alts=title_alts,
                       kb_sources=docs, md_text=md_text, kb_topic_flow=True)
-    ctx.set_progress(100, "完成")
-    return {"article_id": article_id, "title": title, "style": "kb_write"}
+
+    # 自动排版成「待发」终态：用户只做最终决策（公众号后台点发表 / 一键复制），不再手动渲染
+    from .renderer import render_wechat_html
+    with Session(engine) as s:
+        art = s.get(Article, article_id)
+        if art is not None and (art.md or "").strip():
+            art.html = render_wechat_html(art.md)
+            art.status = "rendered"
+            if score is not None:
+                art.note = (art.note or "") + f"｜质量自评 {score:.1f}"
+            s.add(art)
+            s.commit()
+    ctx.set_progress(100, "完成：已排版待发")
+    return {"article_id": article_id, "title": title, "style": "kb_write",
+            "quality": score}
 
 
 def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str) -> str:
@@ -1070,3 +1128,68 @@ async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(100, msg[:90])
     return {"processed_docs": processed_docs, "batches": batch_no, "added": added_total,
             "pool_new": pool_new, "exhausted": exhausted, "message": msg}
+
+
+_KB_AUTO_DAILY = 2  # 每日自动圈题成文篇数（系统全干，用户只决策；2026-11-10 定版）
+
+
+@register_executor("article_kb_auto", on_fail=_article_generate_fail)
+async def article_kb_auto(ctx: JobContext, payload: dict) -> dict:
+    """全自动圈题成文（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：
+    每日从选题池按策略自动挑题 → 建稿 → 链写成文（成文自带质量自评+自动排版）。
+    选题池降级为系统内部机制——不再倒给用户挑选。策略：跳过与已有稿件标题
+    相似（≥0.55）的题和缺依据文档的题，按池内顺序（最早挖掘优先）取满当日预算。"""
+    budget = int(payload.get("budget") or _KB_AUTO_DAILY)
+    import difflib
+
+    with Session(engine) as s:
+        existing_titles = [row[0] for row in s.exec(
+            select(Article.title).where(  # type: ignore[attr-defined]
+                Article.status.in_(ACTIVE_ARTICLE_STATUSES))).all()]  # type: ignore[attr-defined]
+        topics = s.exec(select(KBTopic).where(  # type: ignore[attr-defined]
+            KBTopic.status == "new").order_by(KBTopic.id)).all()  # type: ignore[attr-defined]
+
+    chosen: list[KBTopic] = []
+    for t in topics:
+        if not t.docs:
+            continue
+        if any(difflib.SequenceMatcher(None, t.title, et).ratio() >= 0.55
+               for et in existing_titles):
+            continue
+        chosen.append(t)
+        if len(chosen) >= budget:
+            break
+    if not chosen:
+        ctx.set_progress(100, "池中无可用的全新题（都写过或缺依据文档），今日不产出")
+        return {"picked": 0, "message": "池中无可用新题"}
+
+    results = []
+    for t in chosen:
+        with Session(engine) as s:
+            topic = s.get(KBTopic, t.id)
+            if topic is None or topic.status != "new":
+                continue
+            art = Article(title=topic.title, status="pending",
+                          note=f"判断：{topic.judgment[:80]}｜读者：{topic.audience[:12]}｜依据：{topic.why[:80]}")
+            art.kb_doc_ids = list(topic.docs or [])
+            s.add(art)
+            s.commit()
+            s.refresh(art)
+            aid, docs = art.id, list(art.kb_doc_ids or [])
+            topic.status = "selected"
+            topic.article_id = aid
+            s.add(topic)
+            s.commit()
+        from ..jobs.runner import runner
+        job = await runner.submit("article_kb_write", {"article_id": aid, "kb_doc_ids": docs})
+        with Session(engine) as s:
+            art = s.get(Article, aid)
+            if art is not None:
+                art.status = "generating"
+                s.add(art)
+                s.commit()
+        results.append({"article_id": aid, "job_id": job.id, "title": t.title[:40]})
+        ctx.set_progress(min(95, 20 * len(results)), f"已圈题成文 {len(results)}/{len(chosen)}：{t.title[:24]}")
+
+    ctx.set_progress(100, f"今日自动圈题 {len(results)} 篇，后台写稿中（写完自动排版待发）")
+    return {"picked": len(results), "results": results}
