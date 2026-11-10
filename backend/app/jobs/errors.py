@@ -34,6 +34,7 @@ _TRANSIENT_MARKS = (
     "Server disconnected", "timed out", "Timeout", "Connection reset",
     "Connection refused", "HTTP 5", "502", "503", "504",
     "空正文", "推理耗尽",  # 思考型模型偶发空正文（间歇性，重试可解）
+    "结构化输出解析失败",  # LLM 坏 JSON：采样抖动（2026-11-11 生产实证：同 payload 重跑即成），进梯子
 )
 _QUOTA_MARKS = ("1113", "余额不足", "quota", "Quota", "额度")
 # 平台风控验证码：IP 级惩罚窗（几十分钟级），等待后重试可解——既非网络抖动也非确定性错误
