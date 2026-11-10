@@ -868,7 +868,11 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     keep = {int(x) for x in (screen.get("relevant") or []) if str(x).strip().isdigit()}
     items = [x for i, x in enumerate(items) if (i + 1) in keep] if keep else []
     if not items:
-        raise TransientError("今日热点里没有读者业务相关的题（受众锚定筛空），宁缺勿滥，稍后重试")
+        # 「筛空」是对当天输入的最终判断，不是故障（2026-11-11 用户定版：这类 100% 死任务
+        # 不进失败清单挂慢巡——同批输入重试结论不变，明晚 00:00 调度自然换新批次）。
+        # 诚实空结果收尾：任务成功、消息可见、无重试无红警。
+        ctx.set_progress(100, "今日热点无读者业务相关题（宁缺勿滥），未建稿")
+        return {"drafts": [], "chained": 0}
     ctx.set_progress(35, f"预筛后剩 {len(items)} 条相关热点，提炼切角")
 
     persona_text = brand_of(1)["persona"]
