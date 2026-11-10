@@ -172,3 +172,5 @@ else:
           status == 200 and "/api/public/images/" in (payload_html or ""),
           f"status={status}, 签名图数={(payload_html or '').count('/api/public/images/')}")
 
+
+sys.exit(finish("P1 内容核心"))
