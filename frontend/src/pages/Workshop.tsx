@@ -96,7 +96,7 @@ export default function Workshop() {
     <div>
       <PageHeader icon={Newspaper} title="公众号内容工场"
         desc="稿子系统全自动写好、自评质量、排版完毕（每天凌晨自动产出）；你只做最终决策：点开看一眼，能发就复制去公众号后台发表。" />
-      <div className="mt-4"><ErrorLine text={error} /></div>
+      {error && <div className="mt-4"><ErrorLine text={error} /></div>}
       {justDone && (
         <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           ✓ {justDone}

@@ -26,3 +26,4 @@ data-integrity/
 
 # 工具缓存（自动重建，不进库）
 .ruff_cache/
+data-prodcheck/
