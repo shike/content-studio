@@ -44,7 +44,6 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const [chip, setChip] = useState<ChipKey>('todo')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [detail, setDetail] = useState<Record<number, Topic>>({})
-  const [angleSel, setAngleSel] = useState<Record<number, number>>({})     // topic_id→切角序号
   const [booted, setBooted] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState('')
@@ -124,10 +123,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
 
   const genScripts = (t: Topic) =>
     guard(async () => {
-      const tgt = t.evidence?.target || {}
-      const angles: string[] = tgt.angles || []
-      const pick = angles[angleSel[t.id] ?? 0] || t.angle || ''
-      if (pick) await api(`/topics/${t.id}/angle`, { method: 'PUT', body: JSON.stringify({ angle: pick }) })
+      if (t.title) await api(`/topics/${t.id}/angle`, { method: 'PUT', body: JSON.stringify({ angle: t.title }) })
       await api('/scripts/generate', {
         method: 'POST',
         body: JSON.stringify({
@@ -193,13 +189,11 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
         <div className="mt-4 space-y-2">
           {list.map((t) => {
             const tgt = (t.evidence?.target || {}) as {
-              event?: string; why?: string; angles?: string[]
-              evidences?: { text: string; source: string }[]; spice?: string; heat?: string
+              sentence?: string; context?: string; heat?: string; spice?: string
             }
             const exp = expanded === t.id
             const heat = heatEvidence(t)
             const spice = SPICE[tgt.spice || ''] || null
-            const sel = angleSel[t.id] ?? 0
             const scriptSt = scriptsMap[t.id]
             const open = exp ? detailOf(t.id) : null
             return (
@@ -226,42 +220,14 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
                   <div className="border-t border-[#E8ECF0] px-4 py-4">
                     <div className="grid gap-4 lg:grid-cols-[1fr_250px]">
                       <div className="min-w-0 space-y-3 text-[13px] leading-relaxed text-slate-700">
-                        {tgt.event && (
-                          <div><span className="text-[11px] tracking-wide text-slate-400">事件</span><div>{tgt.event}</div></div>
-                        )}
-                        {tgt.why && (
+                        <div>
+                          <span className="text-[11px] tracking-wide text-slate-400">整条视频就是这句话——三秒点名，半句话说完</span>
+                          <div className="mt-1 text-[17px] font-bold leading-snug text-slate-900">{t.title}</div>
+                        </div>
+                        {tgt.context && (
                           <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2 text-[12.5px] text-blue-900">
-                            <b>为什么值得怼</b>：{tgt.why}
+                            <b>你在怼什么</b>：{tgt.context}
                           </div>
-                        )}
-                        {!!tgt.angles?.length && !scriptSt && (
-                          <div>
-                            <span className="text-[11px] tracking-wide text-slate-400">FDE 切角（点选主切角）</span>
-                            <div className="mt-1 space-y-1.5">
-                              {tgt.angles.map((a, i) => (
-                                <div key={i}
-                                  className={`cursor-pointer rounded-xl border px-3 py-2 text-[12.5px] transition ${sel === i ? 'border-emerald-300 bg-emerald-50/70 text-emerald-900' : 'border-[#E8ECF0] text-slate-700 hover:border-slate-300'}`}
-                                  onClick={(e) => { e.stopPropagation(); setAngleSel((m) => ({ ...m, [t.id]: i })) }}>
-                                  <b>{'①②③'[i] || '·'}</b> {a}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {!!tgt.evidences?.length && (
-                          <div>
-                            <span className="text-[11px] tracking-wide text-slate-400">可用论据（备稿自动带入脚本）</span>
-                            <div className="mt-1 space-y-1.5">
-                              {tgt.evidences.map((e, i) => (
-                                <div key={i} className="border-l-2 border-[#C9A25C] bg-[#FBFAF5] px-3 py-1.5 text-[12.5px] text-[#4A4A3F]">
-                                  {e.text}<span className="ml-1 text-[11px] text-slate-400">—— {e.source}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {t.evidence?.hotspot && (
-                          <div className="text-xs text-slate-400">热点事实：{String(t.evidence.hotspot)}</div>
                         )}
                       </div>
                       <div className="space-y-3 text-[13px] text-slate-600">

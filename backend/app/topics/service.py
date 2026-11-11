@@ -282,7 +282,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             [{"role": "system", "content": system_prompt},
              {"role": "user", "content": user_hint}],
             purpose="trending_target", max_tokens=8000, thinking="disabled")
-        return [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("title")]
+        return [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("sentence")]
 
     ctx.set_progress(64, "行业事件挑靶（社会热点不在菜单）")
     items = await _llm_targets(
@@ -292,16 +292,22 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         "从行业原料里挑靶子（最多 3 个；没有够格的大事就空数组）。")
 
     # 程序化科技闸：靶子（标题+hotspot）必须含科技/行业关键词，防模型拿社会新闻凑数
+    _CLAUSE_PUNCT = re.compile(r"[，,。？?：:；;、]")
     def _industry_gate(batch_items: list[dict]) -> list[dict]:
         out: list[dict] = []
         for x in batch_items:
-            text = _norm(f"{x.get('title') or ''} {x.get('hotspot') or ''}").lower()
-            if any(k.lower() in text for k in _TECH_KW):
-                out.append(x)
+            sentence = str(x.get("sentence") or "").strip()
+            text = _norm(f"{sentence} {x.get('context') or ''}").lower()
+            if not any(k.lower() in text for k in _TECH_KW):
+                continue  # 非行业靶子
+            if not sentence or len(sentence) > 16 or _CLAUSE_PUNCT.search(sentence):
+                continue  # 半句话闸：超长/复合句物理废掉（三秒半句话方法论，不信任模型自觉）
+            x["sentence"] = sentence
+            out.append(x)
         return out
     gated = _industry_gate(items)
-    if items and not gated:
-        print(f"[trending] 行业闸拦截 {len(items)} 条非行业靶子，整批作废")
+    if len(items) != len(gated):
+        print(f"[trending] 行业闸+半句话闸：{len(items)} 条进 → {len(gated)} 条出")
     items = gated
 
     # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
@@ -312,7 +318,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         hotspot = str(x.get("hotspot") or "").strip()
         if not hotspot or "对标圈" in hotspot:
             continue
-        if is_similar_title(str(x.get("title") or ""), line="persona"):  # 标题撞车兜底（提炼走人设线）
+        if is_similar_title(str(x.get("sentence") or ""), line="persona"):  # 标题撞车兜底（提炼走人设线）
             continue
         hn = _norm(hotspot)
         if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
@@ -355,26 +361,21 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 superseded.append(t.id)
         for x in batch:
             tgt = {
-                "event": str(x.get("event") or "")[:400],
-                "why": str(x.get("why") or "")[:300],
-                "angles": [str(a)[:90] for a in (x.get("angles") or []) if str(a).strip()][:3],
-                "evidences": [
-                    {"text": str(e.get("text") or "")[:220], "source": str(e.get("source") or "")[:60]}
-                    for e in (x.get("evidences") or []) if isinstance(e, dict) and e.get("text")
-                ][:3],
+                "sentence": str(x.get("sentence") or "")[:20],
+                "context": str(x.get("context") or "")[:60],  # 事件一句话（他在怼什么）
                 "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
                 "heat": str(x.get("heat") or "科技媒体头条")[:60],
             }
             t = Topic(
-                title=str(x.get("title"))[:60],
-                angle="",  # 主切角由用户备稿时点选（PUT /topics/{id}/angle）
-                audience=x.get("audience") if x.get("audience") in ("boss", "fde", "both") else "both",
+                title=str(x.get("sentence"))[:60],  # 标题=半句话判决（靶子即视频）
+                angle="",  # 判决句本身就是主切角（备稿时回填）
+                audience="both",
                 source_type="trending",
-                source_ref=str(x.get("hotspot") or "")[:200],
+                source_ref=str(x.get("context") or "")[:200],
                 line="persona",  # 站外热点提炼走人设线（获客号有独立挖号进料，2026-11-02）
                 evidence={
-                    "hotspot": x.get("hotspot", ""),
-                    "target": tgt,  # 靶子产线（2026-11-11 观点怼热点主轴）
+                    "hotspot": x.get("context", ""),
+                    "target": tgt,  # 半句话靶子（2026-11-12 三秒半句话方法论定版）
                     "material": {"watch_count": len(watch_items), "news": news_meta,
                                  "hot": hot_meta, "queries": q_status, "web": search_metas},
                 },
