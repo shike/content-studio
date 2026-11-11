@@ -157,7 +157,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             [{"role": "user", "content": render("article_adapt_write",
                                                 SOURCE=source, ANGLE=angle,
                                                 QUOTES=quotes_block)}],
-            purpose="article_adapt_write", max_tokens=8192, thinking="disabled")
+            purpose="article_adapt_write", max_tokens=20000, thinking="enabled")
         body = _strip_fence(body)
         lines = body.split("\n")
         if not lines or not lines[0].lstrip().startswith("# "):
