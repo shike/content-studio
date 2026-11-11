@@ -33,6 +33,7 @@ export interface MenuStats {
   l_scripts: number // 脚本工场=待定稿脚本·获客
   l_cand: number // 纯获客候选=候选待定夺·获客
   l_bench: number // 打法卡库=拆解待定夺·获客
+  c_items: number // 内容清单=待改编源文数（2026-11-11 源文改编产线）
   article: number // 内容工场=待拍板选题+待写报题稿（2026-11-09 两页合并后本页全部待人工入口）
   tasks: number // 在途（运行+排队+退避中/慢巡；2026-11-11 用户定版：退避中有自动重试排程，不是失败）
   failed: number // 终态失败计数（需要人看的唯一失败口径；Today 待办卡用）
@@ -40,11 +41,12 @@ export interface MenuStats {
 }
 
 export async function fetchMenuStats(): Promise<MenuStats> {
-  const [todo, bmP, bmL, jobs] = await Promise.all([
+  const [todo, bmP, bmL, jobs, items] = await Promise.all([
     fetchTodoStats(),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=persona'),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=leadgen'),
     api<{ counts: { running: number; queued: number; failed: number; summary: { active: number; todo: number; done: number } } }>('/jobs?limit=1'),
+    api<{ total: number }>('/articles/content-items?status=pending&limit=1'),
   ])
   return {
     today: todo.draftTopics,
@@ -56,6 +58,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     l_scripts: todo.pendingScriptsLeadgen,
     l_cand: todo.openCandidatesLeadgen,
     l_bench: bmL.counts.pending,
+    c_items: items.total,
     article: todo.pendingArticles,
     // 三态口径（引擎统一 2026-10-12，后端 counts.summary 已分好）：在途=active（含退避中），
     // 失败=todo（终态）。2026-11-11 用户定版：退避中不挂红——红警只在终态失败时亮

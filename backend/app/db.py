@@ -192,6 +192,20 @@ def _migrate(engine) -> None:
         if acols and "kb_doc_ids" not in acols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE articles ADD COLUMN kb_doc_ids JSON DEFAULT '[]'"))
+        # 源文改编产线（2026-11-11）：发布登记与 48h 回流落库
+        if acols and "publish_url" not in acols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE articles ADD COLUMN publish_url VARCHAR DEFAULT ''"))
+        if acols and "published_at" not in acols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE articles ADD COLUMN published_at VARCHAR DEFAULT ''"))
+        if acols and "stats" not in acols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE articles ADD COLUMN stats JSON DEFAULT '{}'"))
+        cicols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(content_items)"))]
+        if cicols and "priority" not in cicols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE content_items ADD COLUMN priority INTEGER DEFAULT 0"))
         if cols and "creator_cookie" not in cols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN creator_cookie VARCHAR DEFAULT ''"))

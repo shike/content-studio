@@ -1,11 +1,12 @@
 """公众号流水线 API。"""
 import asyncio
 import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
-from sqlmodel import or_, Session, select
+from sqlmodel import func, or_, Session, select
 
 from ..articles.images import sign_image, valid_image_name
 from ..articles.service import find_pending_article
@@ -14,7 +15,7 @@ from ..articles.renderer import render_wechat_html, sanitize_html
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Article, User
+from ..models import Article, ContentItem, DailyLedger, User
 from ..settings import settings
 
 router = APIRouter(prefix="/api/articles")
@@ -111,6 +112,157 @@ async def dismiss_kb_topic(topic_id: int, user: User = Depends(require_user)) ->
         s.add(topic)
         s.commit()
     return {"ok": True}
+
+
+# ── 内容清单（源文改编产线，2026-11-11）──
+# 注意：以下路由必须位于 GET /{article_id} 之前，否则被 int 路径参数吞掉
+
+
+class ItemStatusIn(BaseModel):
+    status: str  # pending（入队/强制转正） | dismissed（不做）
+
+
+class PublishIn(BaseModel):
+    url: str
+
+
+class ReflowIn(BaseModel):
+    reads: int = 0
+    welook: int = 0
+    follows: int = 0
+    leads: int = 0
+
+
+@router.post("/mine", status_code=202)
+async def mine_sources(user: User = Depends(require_user)) -> dict:
+    """手动补挖：提交一批源文评估（调度每日 04:00 自动跑）。"""
+    job = await runner.submit("article_kb_miner", {},
+                              dedup_key=f"1:kbminer:{datetime.now():%Y%m%d}")
+    return {"job_id": job.id}
+
+
+@router.post("/adapt", status_code=202)
+async def adapt_once(user: User = Depends(require_user)) -> dict:
+    """手动改编：从清单取项成文（调度每日 05:00 自动跑）。"""
+    job = await runner.submit("article_adapt", {},
+                              dedup_key=f"1:adapt:{datetime.now():%Y%m%d}")
+    return {"job_id": job.id}
+
+
+@router.get("/content-items")
+def list_content_items(status: str = "", category: str = "",
+                       limit: int = 100, offset: int = 0) -> dict:
+    """内容清单：源文列表（置顶→质量分→新）+ 状态计数。"""
+    with Session(engine) as s:
+        q = select(ContentItem).order_by(
+            ContentItem.priority.desc(), ContentItem.quality_score.desc(), ContentItem.id.desc())
+        if status:
+            q = q.where(ContentItem.status == status)
+        if category:
+            q = q.where(ContentItem.category == category)
+        total = len(s.exec(q).all())
+        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()
+        cq = select(ContentItem.status, func.count(ContentItem.id)).group_by(ContentItem.status)
+        counts = {st: n for st, n in s.exec(cq).all()}
+        return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
+
+
+@router.post("/content-items/{item_id}/status")
+def set_content_item_status(item_id: int, body: ItemStatusIn,
+                            user: User = Depends(require_user)) -> dict:
+    """人工调状态：不做（dismissed）/ 入队或强制转正（pending）。running/done/published 不许手改。"""
+    if body.status not in ("pending", "dismissed"):
+        raise HTTPException(status_code=400, detail="只允许 pending（入队）或 dismissed（不做）")
+    with Session(engine) as s:
+        it = s.get(ContentItem, item_id)
+        if it is None:
+            raise HTTPException(status_code=404, detail="清单项不存在")
+        if it.status in ("running", "done", "published"):
+            raise HTTPException(status_code=409, detail=f"当前状态 {it.status} 不允许手改")
+        it.status = body.status
+        s.add(it)
+        s.commit()
+        s.refresh(it)
+        return it.model_dump()
+
+
+@router.post("/content-items/{item_id}/pin")
+def pin_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
+    """置顶：「明天改编」——priority=9，改编器先取（再看质量分）。"""
+    with Session(engine) as s:
+        it = s.get(ContentItem, item_id)
+        if it is None:
+            raise HTTPException(status_code=404, detail="清单项不存在")
+        if it.status != "pending":
+            raise HTTPException(status_code=409, detail="只有待改编项可以置顶")
+        it.priority = 9
+        s.add(it)
+        s.commit()
+        s.refresh(it)
+        return it.model_dump()
+
+
+@router.get("/ledger")
+def list_ledger(limit: int = 14, user: User = Depends(require_user)) -> dict:
+    """产线当日账（近 N 条）：晨检对账数据源。anomaly=成功但无产出且无原因——按故障处理。"""
+    with Session(engine) as s:
+        rows = s.exec(
+            select(DailyLedger).order_by(DailyLedger.id.desc())  # type: ignore[attr-defined]
+            .limit(max(1, min(limit, 60)))).all()  # type: ignore[attr-defined]
+        out = []
+        for r in rows:
+            d = r.model_dump()
+            d["anomaly"] = bool(r.ok) and not (r.produced or "").strip() and not (r.reason or "").strip()
+            out.append(d)
+        return {"items": out}
+
+
+@router.post("/{article_id}/publish")
+def publish_article(article_id: int, body: PublishIn,
+                    user: User = Depends(require_user)) -> dict:
+    """发布登记：人工在公众号后台发表后贴回链接记账（发布永远人工）。"""
+    url = body.url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="请贴公众号文章链接")
+    with Session(engine) as s:
+        art = s.get(Article, article_id)
+        if art is None:
+            raise HTTPException(status_code=404, detail="article not found")
+        art.publish_url = url[:300]
+        art.published_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        art.status = "published"
+        if art.kb_sources:  # 清单项联动：源文项标已发布
+            mid = (art.kb_sources[0] or {}).get("media_id")
+            if mid:
+                it = s.exec(select(ContentItem).where(  # type: ignore[attr-defined]
+                    ContentItem.media_id == mid)).first()  # type: ignore[attr-defined]
+                if it is not None and it.status == "done":
+                    it.status = "published"
+                    s.add(it)
+        s.add(art)
+        s.commit()
+        s.refresh(art)
+        return art.model_dump()
+
+
+@router.put("/{article_id}/reflow")
+def reflow_article(article_id: int, body: ReflowIn,
+                   user: User = Depends(require_user)) -> dict:
+    """48h 回流：阅读/在看/涨粉/进线 四个数（北极星=进线）。"""
+    vals = {"reads": max(0, int(body.reads)), "welook": max(0, int(body.welook)),
+            "follows": max(0, int(body.follows)), "leads": max(0, int(body.leads))}
+    with Session(engine) as s:
+        art = s.get(Article, article_id)
+        if art is None:
+            raise HTTPException(status_code=404, detail="article not found")
+        stats = dict(art.stats or {})
+        stats.update(vals)
+        stats["filled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        art.stats = stats
+        s.add(art)
+        s.commit()
+        s.refresh(art)
+        return art.model_dump()
 
 
 @router.post("/{article_id}/write", status_code=202)

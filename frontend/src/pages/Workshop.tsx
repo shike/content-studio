@@ -5,9 +5,10 @@ import { copyRichHtml } from '../clipboard'
 import { ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { usePageGuard } from '../hooks'
 
-/** 内容工场 · 决策页（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：
- *  系统每日自动圈题→写稿→质量自评→排版，成品落在本页；用户只看一眼，
- *  能发就复制去公众号后台，不想要就「不用」。选题池/报题/热点等创作入口全部收进系统内部。 */
+/** 内容工场 · 决策页（2026-11-10 定版「系统做全部工作，用户只做最终决策」；
+ *  2026-11-11 接源文改编产线：稿件来自内容清单，加发布登记与 48h 回流）：
+ *  系统每日自动取项→改编→审校→排版，成品落在本页；用户只做最终决策：
+ *  能发就复制去公众号后台发表，回来登记链接；不想要就「不用」。 */
 
 const A_BADGE: Record<string, { label: string; cls: string }> = {
   pending: { label: '排队写', cls: 'bg-amber-100 text-amber-800' },
@@ -32,6 +33,10 @@ export default function Workshop() {
   const [detail, setDetail] = useState<Record<number, Article>>({})
   const [justDone, setJustDone] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [pubFor, setPubFor] = useState<number | null>(null)
+  const [pubUrl, setPubUrl] = useState('')
+  const [rfFor, setRfFor] = useState<number | null>(null)
+  const [rf, setRf] = useState({ reads: '', welook: '', follows: '', leads: '' })
   const { guard, busy, error, setError } = usePageGuard()
 
   const load = useCallback(async () => {
@@ -80,6 +85,30 @@ export default function Workshop() {
       await load()
     })
   }
+  const registerPublish = async (a: Article) => {
+    await guard(async () => {
+      await api(`/articles/${a.id}/publish`, {
+        method: 'POST', body: JSON.stringify({ url: pubUrl.trim() }),
+      })
+      setPubFor(null); setPubUrl('')
+      setJustDone(`已登记发布《${(a.title || '').slice(0, 24)}》——48h 后这里会提醒你补阅读/进线数据`)
+      await load()
+    })
+  }
+  const saveReflow = async (a: Article) => {
+    await guard(async () => {
+      await api(`/articles/${a.id}/reflow`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          reads: Number(rf.reads) || 0, welook: Number(rf.welook) || 0,
+          follows: Number(rf.follows) || 0, leads: Number(rf.leads) || 0,
+        }),
+      })
+      setRfFor(null); setRf({ reads: '', welook: '', follows: '', leads: '' })
+      setJustDone('回流数据已记账——周报会按栏目归因')
+      await load()
+    })
+  }
   const refresh = async () => {
     setRefreshing(true)
     try { await load() } finally { setRefreshing(false) }
@@ -108,7 +137,7 @@ export default function Workshop() {
         <span className="rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-800">待发 {pendingN}</span>
         {writingN > 0 && <span className="rounded-full bg-sky-100 px-3 py-1 font-medium text-sky-700">写稿中 {writingN}</span>}
         <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">今日产出 {todayN}</span>
-        <span className="ml-auto hidden text-xs text-slate-400 md:block">系统每天 4 点自动补产 · 自评低于 7 分的稿子自动重写一次</span>
+        <span className="ml-auto hidden text-xs text-slate-400 md:block">每天 4 点挖清单 · 5 点取项改编 · 四审（原创度/事实对源/读者/去AI味）全过才进待发</span>
         <button className="btn-ghost btn-sm flex items-center gap-1" onClick={refresh} disabled={refreshing}>
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />刷新
         </button>
@@ -165,7 +194,22 @@ export default function Workshop() {
                           </div>
                         )}
                         {!!full?.kb_sources?.length && (
-                          <div className="text-xs text-slate-400">依据：{full.kb_sources.map((k) => k.title).slice(0, 3).join('、')}</div>
+                          <div className="text-xs text-slate-400">改编自：{full.kb_sources.map((k) => k.title).slice(0, 3).join('、')}</div>
+                        )}
+                        {a.status === 'published' && (
+                          <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-relaxed">
+                            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-800">{a.publish_url || '（未贴链接）'}</span>
+                            {a.published_at && <span className="ml-1.5 text-slate-400">{a.published_at} 发布</span>}
+                            {a.stats?.filled_at && (
+                              <div className="mt-1.5 flex flex-wrap gap-x-3 text-slate-600">
+                                <span>阅读 <b className="num-serif text-slate-900">{a.stats.reads ?? 0}</b></span>
+                                <span>在看 <b className="num-serif text-slate-900">{a.stats.welook ?? 0}</b></span>
+                                <span>涨粉 <b className="num-serif text-slate-900">{a.stats.follows ?? 0}</b></span>
+                                <span>进线 <b className="num-serif text-emerald-700">{a.stats.leads ?? 0}</b></span>
+                                <span className="text-slate-400">{a.stats.filled_at} 回流</span>
+                              </div>
+                            )}
+                          </div>
                         )}
                         <div className="flex flex-wrap gap-2 pt-1">
                           {['rendered', 'draft', 'edited'].includes(a.status) && (
@@ -174,8 +218,55 @@ export default function Workshop() {
                               复制公众号格式
                             </button>
                           )}
-                          <ConfirmDeleteButton onConfirm={() => removeOne(a)} confirmText="不用" />
+                          {['rendered', 'draft', 'edited'].includes(a.status) && pubFor !== a.id && (
+                            <button className="btn-sm btn" disabled={!!busy}
+                              onClick={(e) => { e.stopPropagation(); setPubFor(a.id); setPubUrl('') }}>
+                              已发布 · 登记
+                            </button>
+                          )}
+                          {a.status === 'published' && rfFor !== a.id && (
+                            <button className="btn-sm btn" disabled={!!busy}
+                              onClick={(e) => {
+                                e.stopPropagation(); setRfFor(a.id)
+                                setRf({ reads: String(a.stats?.reads ?? ''), welook: String(a.stats?.welook ?? ''),
+                                  follows: String(a.stats?.follows ?? ''), leads: String(a.stats?.leads ?? '') })
+                              }}>
+                              {a.stats?.filled_at ? '改回流数据' : '48h 补数据'}
+                            </button>
+                          )}
+                          {a.status !== 'published' && <ConfirmDeleteButton onConfirm={() => removeOne(a)} confirmText="不用" />}
                         </div>
+                        {pubFor === a.id && (
+                          <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 px-3 py-2.5">
+                            <div className="mb-1.5 text-[11px] leading-relaxed text-slate-500">
+                              发布永远由你亲手完成——这里只是贴回链接告诉系统结果（状态转「已发布」，48h 后提醒补数据）。
+                            </div>
+                            <div className="flex gap-2">
+                              <input value={pubUrl} onChange={(e) => setPubUrl(e.target.value)}
+                                placeholder="https://mp.weixin.qq.com/s/…"
+                                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[12.5px] outline-none focus:border-slate-400" />
+                              <button className="btn-sm btn" disabled={!!busy || !pubUrl.trim().startsWith('http')}
+                                onClick={(e) => { e.stopPropagation(); registerPublish(a) }}>确认已发布</button>
+                              <button className="btn-sm btn-ghost" onClick={(e) => { e.stopPropagation(); setPubFor(null) }}>取消</button>
+                            </div>
+                          </div>
+                        )}
+                        {rfFor === a.id && (
+                          <div className="rounded-xl border border-dashed border-blue-300 bg-blue-50/50 px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                            <div className="mb-1.5 text-[11px] text-slate-500">公众号后台 T+2 能看到的数据，填四个数（30 秒）；「进线」= 私信/微信新增咨询数，北极星就靠它。</div>
+                            <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                              {([['reads', '阅读'], ['welook', '在看'], ['follows', '涨粉'], ['leads', '进线']] as const).map(([k, label]) => (
+                                <label key={k} className="flex items-center gap-1">
+                                  {label}
+                                  <input value={rf[k]} onChange={(e) => setRf({ ...rf, [k]: e.target.value })}
+                                    inputMode="numeric" className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-right num-serif outline-none focus:border-slate-400" />
+                                </label>
+                              ))}
+                              <button className="btn-sm btn" disabled={!!busy} onClick={() => saveReflow(a)}>保存</button>
+                              <button className="btn-sm btn-ghost" onClick={() => setRfFor(null)}>取消</button>
+                            </div>
+                          </div>
+                        )}
                         <div className="text-[11px] leading-relaxed text-slate-400">
                           复制后到公众号后台「新的创作 → 写新文章」粘贴，检查无误点发表。发布永远由你亲手完成。
                         </div>

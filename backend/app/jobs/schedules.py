@@ -213,6 +213,32 @@ async def _run_deepread() -> str:
 register_schedule(Schedule(key="article_deepread_daily", label="知识库深读写（域轮读·综合成文）",
                            daily_hour=4, enabled_by="ima_kb_enabled",
                            run=_run_deepread))
+async def _run_kb_miner() -> str:
+    """挖掘器（2026-11-11 源文改编产线）：每日评一批 ima 源文，高质量入内容清单。"""
+    from .runner import runner
+    job = await runner.submit("article_kb_miner", {},
+                              dedup_key=f"1:kbminer:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（评一批源文 → 入清单）"
+
+
+# 挖掘器（2026-11-11）：4 点承接深读线时段；只评估入清单，不成文
+register_schedule(Schedule(key="article_kb_miner_daily", label="知识库挖掘（源文评估入清单）",
+                           daily_hour=4, enabled_by="ima_kb_enabled",
+                           run=_run_kb_miner))
+async def _run_article_adapt() -> str:
+    """改编器（2026-11-11 源文改编产线）：每日从清单取一项源文改编成文进待发。"""
+    from .runner import runner
+    job = await runner.submit("article_adapt", {},
+                              dedup_key=f"1:adapt:{datetime.now():%Y%m%d}",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}（清单取项 → 改编成文）"
+
+
+# 改编器（2026-11-11）：5 点改编，与 4 点挖掘错峰；清单空=诚实空过，宁缺勿滥
+register_schedule(Schedule(key="article_adapt_daily", label="源文改编成文（清单取项·进待发）",
+                           daily_hour=5, enabled_by="ima_kb_enabled",
+                           run=_run_article_adapt))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))

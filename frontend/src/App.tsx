@@ -8,6 +8,7 @@ import {
   Layers,
   LayoutDashboard,
   Lightbulb,
+  ListChecks,
   Magnet,
   Newspaper,
   PenLine,
@@ -23,6 +24,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import Today from './pages/Today'
 import Workshop from './pages/Workshop'
+import ContentItems from './pages/ContentItems'
 import ArticleStyle from './pages/ArticleStyle'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
@@ -49,7 +51,7 @@ export type SectionKey =
   | 'today' | 'tasks' | 'settings'
   | 'p_topics' | 'p_content' | 'p_own' | 'p_bench' | 'p_cand' | 'p_watch'
   | 'l_topics' | 'l_scripts' | 'l_cand' | 'l_watch' | 'l_bench'
-  | 'article' | 'a_style'
+  | 'c_items' | 'article' | 'a_style'
 
 /** 旧分区键 → 新叶子（内嵌页 onNavigate 的兼容路由）。
 2026-11-10 清理：11 个全仓零调用的旧键已删，只保留 Tasks 联动入口仍在产出的 4 键。 */
@@ -99,6 +101,7 @@ const TREE: TreeGroup[] = [
   {
     key: 'article', label: '公众号', icon: Newspaper,
     children: [
+      { key: 'c_items', label: '内容清单', icon: ListChecks },
       { key: 'article', label: '内容工场', icon: PenLine },
       { key: 'a_style', label: '风格画像', icon: Sparkles },
     ],
@@ -108,7 +111,7 @@ const TREE: TreeGroup[] = [
 const BADGED_LEAVES = new Set<string>([
   'today', 'p_topics', 'p_content', 'p_bench', 'p_cand',
   'l_topics', 'l_scripts', 'l_cand', 'l_bench',
-  'article', 'tasks',
+  'c_items', 'article', 'tasks',
 ])
 
 const TREE_KEY = 'mx-tree-open'
@@ -320,6 +323,7 @@ export default function App() {
           {active === 'l_cand' && <DiscoveredAccounts accountType="leadgen" />}
           {active === 'p_watch' && <Watch onNavigate={navTo} accountType="persona" />}
           {active === 'l_watch' && <Watch onNavigate={navTo} accountType="leadgen" />}
+          {active === 'c_items' && <ContentItems onNavigate={navTo} />}
           {active === 'article' && <Workshop />}
           {active === 'a_style' && <ArticleStyle />}
           {active === 'tasks' && <Tasks onNavigate={navTo} />}

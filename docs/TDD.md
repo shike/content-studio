@@ -287,23 +287,40 @@ article:    pending（报题待写）──► generating ──► draft ──
   自身论点；依据对不上文档的丢弃，近期标题近义排除）→ 入 `kb_topics` 选题池（new 待选）。
   无合格选题=任务成功返回 topics:0（不硬凑）。调度 `article_kb_topics_daily` 每日凌晨 3 点
   （ima_kb_enabled 门控）。
-- 深读产线（2026-11-11 用户拆锁定版「被自己锁死了」：选题是读的产物，不再是标题抽卡）：
-  调度 `article_deepread_daily` 每日 4 点（`ima_kb_enabled` 门控）跑 `article_deepread`
-  执行器——**域轮读**：ima 目录列表游标（app_settings.deepread_cursor="idx:pos"）每天取一个域的
-  下一批 ≤18 篇文档**全文**（无池子线 3 篇摘录/8000 字截断限制，单篇 3 万字防异常上限）→
-  逐篇消化（article_deepread_digest：主张+逐字原文资产+未回答的问题）→ 跨文档综合
-  （article_deepread_synth：增量判断须 ≥2 篇共同支撑、禁复述单篇论点、落在读者利害；
-  撑不出=诚实空过不出稿）→ 范本成文（复用 article_kb_write prompt，1900~2200 字）→
-  文风禁令机检 → 定向重写 → 图表/头图 → **带牙质量闸**（重写一次仍 <7 分 = 置 failed
-  「质量闸未过，不进待发」，只有过闸稿才自动排版落 rendered 待发）。日产 1 篇，量服从质。
-  原 `article_kb_topics_daily`（3 点抽卡）与 `article_kb_auto_daily`（4 点圈题）调度退役，
-  执行器与手动端点（select/dismiss）暂时保留作回滚窗口。
-- 前端（2026-11-10 决策页改造）：公众号组单叶「内容工场」`Workshop.tsx`=产出流+决策——
-  待发/写稿中/今日产出计数 → 全部稿件单列表（点行展开：排版成品预览+判断/依据元信息），
-  行内动作只有「复制公众号格式」「不用」（删除）；写稿中行 60s 自动刷新。
-  选题池/手动报题/热点提炼等创作入口不再上页（系统内部机制）；
-  旧 SectionKey 经 NAVMAP 兼容到 article。徽章=待决策稿（stats/todos.pendingArticles=
-  pending+draft+edited+rendered）。
+- 深读产线（2026-11-11 用户拆锁定版后当日被「源文改编流」取代，`article_deepread_daily`
+  调度停用中）：`article_deepread` 执行器与 prompt 保留未删。
+- **源文改编产线**（2026-11-11 用户定版「从知识库挖掘高质量内容，形成清单，持续生成发布」，
+  数据模型=`content_items`（清单项=一篇具体源文：标题/来源号/质量分/为什么好/改编角度/
+  逐字原话 ≤3/栏目/优先级/状态 pending|running|done|published|dismissed|low）+`daily_ledger`
+  （当日账：phase=mine|adapt，produced/reason，anomaly=成功但无产出且无原因按故障处理））：
+  - **挖掘器** `article_kb_miner`（调度 `article_kb_miner_daily` 每日 4 点，`ima_kb_enabled` 门控）：
+    ima 目录游标（app_settings.adapt_cursor="idx:pos"，`adapt_gen_line` 可覆盖入清单线，默认 7.5）
+    每日 ≤18 篇全文（单篇 3 万字防异常上限）→ 逐篇评估
+    （article_kb_miner_eval：评分四维=具体框架/可抄清单/带数字案例/反共识判断 + 为什么好 +
+    改编角度 + 逐字原话 ≤3 + 栏目五选一，目录映射兜底）→ ≥线入清单（media_id 防重），
+    低分落 status=low 防回卷重评，全部失败=TransientError 游标不推进走梯子，日账必落（含空过原因）。
+    API：`POST /api/articles/mine` 手动补挖 · `GET /content-items`（status/category 过滤+counts）·
+    `POST /content-items/{id}/status`（pending/dismissed）· `POST /content-items/{id}/pin`（置顶=9）·
+    `GET /ledger`（带 anomaly 标记）。
+  - **改编器** `article_adapt`（调度 `article_adapt_daily` 每日 5 点，同门控）：清单取项
+    （priority desc→score desc，CAS running 占位，running 超 2h 自愈回 pending）→ 拉源文全文 →
+    article_adapt_write（保源文骨架+逐字原话 ≤3 处引用，判断口径/钩子必须是我们的，1900~2200 字，
+    下限 1500）→ **原创度闸**（`_dup_ratio`：源文 ≥14 字实质句被原样搬入的字符占比 ≤30%，
+    超线 article_adapt_reduce 降重一次，数字签名守卫，仍超=当日空过退回清单）→ 违禁词机检
+    （_kb_style_violations+定向重写）→ **审校组**（article_review_facts 事实对源 +
+    article_review_reader 读者弃读点，问题清单制；不过 revise_once 修订复审，二次不过 ×1 退
+    pending、×2 落 low 防天循环）→ **标题评分**（article_title_score 五维，正题/来源题/备选全进
+    候选池自动选主标题）→ 图表/头图 → finalize 排版落 rendered 待发。API：`POST /adapt` 手动改编 ·
+    `POST /articles/{id}/publish`（发布登记贴 URL→published，清单项联动）·
+    `PUT /articles/{id}/reflow`（48h 回流 reads/welook/follows/leads，北极星=进线）。
+    幂等：dedup_key=日期；改编类失败统一退项走梯子（例外：原创度/审校不过=确定性空过带原因）。
+- 前端（2026-11-11 源文改编流）：公众号组三叶——「内容清单」`ContentItems.tsx`（回显带=昨次
+  挖掘/改编日账（anomaly 红字）+手动补挖 · 栏目 chips+状态计数 · 行=源文（栏目 tag/质量分/
+  来源号），展开=为什么好/改编角度/最佳原话/来源/去向，动作=明天改编(pin)/不做/强制入清单/
+  恢复待改编；running 行 60s 自动刷新）·「内容工场」`Workshop.tsx`=决策页（行展开加改编来源、
+  发布登记（贴 URL→published）、已发布行回流四数补填；复制公众号格式/不用不变）· 风格画像。
+  徽章：内容清单=待改编数（counts.c_items）；内容工场=待决策稿（stats/todos.pendingArticles=
+  pending+draft+edited+rendered）；旧 NAVMAP articles→article 兼容不变。
 
 ### 发布台（已砍）
 

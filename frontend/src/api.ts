@@ -105,6 +105,28 @@ export interface Article {
   md: string
   html: string
   status: string
+  publish_url?: string
+  published_at?: string
+  stats?: Record<string, any>
+  created_at?: string
+}
+
+/** 内容清单项（2026-11-11 源文改编产线）：挖掘器评估入清单，改编器每日取项成文。 */
+export interface ContentItem {
+  id: number
+  media_id: string
+  folder_name: string
+  title: string
+  source_author: string
+  quality_score: number
+  why_good: string
+  adapt_angle: string
+  best_quotes: string[]
+  category: string
+  priority: number
+  status: string
+  article_id: number | null
+  note: string
   created_at?: string
 }
 

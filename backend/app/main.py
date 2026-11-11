@@ -19,6 +19,8 @@ from .version import APP_VERSION
 # 导入服务模块以注册任务执行器
 from .articles import service as _article_service  # noqa: F401
 from .articles import deepread as _article_deepread  # noqa: F401
+from .articles import miner as _article_kb_miner  # noqa: F401
+from .articles import adapt as _article_adapt  # noqa: F401
 from .benchmarks import service as _benchmark_service  # noqa: F401
 from .radar import service as _radar_service  # noqa: F401
 from .scripts import service as _script_service  # noqa: F401

@@ -227,6 +227,9 @@ class Article(TenantScoped, TimestampMixin, table=True):
     title_alts: list = Field(default_factory=list, sa_column=Column(JSON))  # 备选标题
     kb_sources: list = Field(default_factory=list, sa_column=Column(JSON))  # ima 知识库素材来源（2026-11-08 取材写文）
     kb_doc_ids: list = Field(default_factory=list, sa_column=Column(JSON))  # 选题绑定的库内依据文档 [{media_id,title}]（2026-11-09 知识库选题线）
+    publish_url: str = ""  # 发布登记：公众号文章链接（发布永远人工，系统只记账，2026-11-11 源文改编产线）
+    published_at: str = ""  # 发布登记时间
+    stats: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 48h 回流 {reads,welook,follows,leads,filled_at}
     html: str = ""
     status: str = "draft"  # pending 待写 | generating | failed | draft | edited | rendered | published
 
@@ -258,6 +261,42 @@ class KBTopic(TenantScoped, TimestampMixin, table=True):
     folder_name: str = ""                 # 产出来源目录
     status: str = "new"                   # new 待选 | selected 已选用 | dismissed 不做 | written 已成文
     article_id: Optional[int] = Field(default=None, index=True)  # 选用后生成的草稿 id
+
+
+class ContentItem(TenantScoped, TimestampMixin, table=True):
+    """内容清单（2026-11-11 源文改编产线）：挖掘器逐篇评估知识库，高质量源文入清单，
+    改编器每日取一项改编成文——清单项 = 一篇具体源文（保骨架保原话，换判断口径）。"""
+    __tablename__ = "content_items"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    media_id: str = Field(default="", index=True)  # ima 源文 id（库内唯一，防重挖重入）
+    kb_id: str = ""
+    folder_id: str = Field(default="", index=True)
+    folder_name: str = ""                 # 产出来源目录
+    title: str = ""                       # 源文标题
+    source_author: str = ""               # 来源号/作者
+    quality_score: float = 0.0            # 挖掘器评分（≥生成线才入清单；低分不落行只记日账）
+    why_good: str = ""                    # 为什么值得发（一句）
+    adapt_angle: str = ""                 # 改编角度（保什么骨架/换什么口径/接什么钩子）
+    best_quotes: list = Field(default_factory=list, sa_column=Column(JSON))  # 逐字原话 [str]（改编时保留引用）
+    category: str = Field(default="", index=True)  # 栏目：转行真话|交付现场|行业拆局|变现报价|现场实录
+    priority: int = Field(default=0, index=True)  # 人工置顶权重（「明天改编」=9，取项先看它再看质量分）
+    status: str = Field(default="pending", index=True)  # pending 待改编 | running 改编中 | done 已改编 | published 已发布 | dismissed 不做
+    article_id: Optional[int] = Field(default=None, index=True)  # 改编产出的文章 id
+    note: str = ""                        # 备注（空过原因等）
+
+
+class DailyLedger(TenantScoped, TimestampMixin, table=True):
+    """产线当日账（2026-11-11）：每环节收尾写一行，次日晨检对账——
+    任务成功但无产出且无原因 = 异常（堵「成功但空转」的洞）。"""
+    __tablename__ = "daily_ledger"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    day: str = Field(default="", index=True)  # UTC 日期 YYYY-MM-DD（runner 全线 naive-UTC）
+    phase: str = ""                           # mine 挖掘 | adapt 改编
+    produced: str = ""                        # 产出摘要（入清单 N 项 / 文章 #id）
+    reason: str = ""                          # 空过/异常原因（有产出留空）
+    ok: bool = True
 
 
 class WatchAccount(TenantScoped, TimestampMixin, table=True):
