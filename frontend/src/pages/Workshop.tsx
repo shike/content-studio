@@ -37,6 +37,7 @@ export default function Workshop() {
   const [pubUrl, setPubUrl] = useState('')
   const [rfFor, setRfFor] = useState<number | null>(null)
   const [rf, setRf] = useState({ reads: '', welook: '', follows: '', leads: '' })
+  const [filter, setFilter] = useState<'' | 'generating' | 'published' | 'failed'>('')
   const { guard, busy, error, setError } = usePageGuard()
 
   const load = useCallback(async () => {
@@ -114,17 +115,25 @@ export default function Workshop() {
     try { await load() } finally { setRefreshing(false) }
   }
 
-  const today = new Date().toISOString().slice(0, 10)
-  const pendingN = items.filter((a) => ['draft', 'edited', 'rendered'].includes(a.status)).length
+  const readyN = items.filter((a) => ['draft', 'edited', 'rendered'].includes(a.status)).length
   const writingN = items.filter((a) => ['pending', 'generating'].includes(a.status)).length
-  const todayN = items.filter((a) => (a.created_at || '').slice(0, 10) === today).length
+  const publishedN = items.filter((a) => a.status === 'published').length
+  const failedN = items.filter((a) => a.status === 'failed').length
+  // 决策队列：默认只看 待发+写稿中；失败/已发布走筛选，不混进每天的决策流
+  const WEIGHT: Record<string, number> = { generating: 0, pending: 0, rendered: 1, edited: 1, draft: 1, failed: 2, published: 3 }
+  const visible = items
+    .filter((a) => {
+      if (filter === '') return ['draft', 'edited', 'rendered', 'pending', 'generating'].includes(a.status)
+      return a.status === filter
+    })
+    .sort((a, b) => (WEIGHT[a.status] ?? 9) - (WEIGHT[b.status] ?? 9) || (b.id ?? 0) - (a.id ?? 0))
 
   if (!booted) return <div className="text-sm text-slate-400">载入内容工场…</div>
 
   return (
     <div>
       <PageHeader icon={Newspaper} title="公众号内容工场"
-        desc="稿子系统全自动写好、自评质量、排版完毕（每天凌晨自动产出）；你只做最终决策：点开看一眼，能发就复制去公众号后台发表。" />
+        desc="系统每天从内容清单取源文改编、四审过闸、排版完毕；你只做最终决策：能发就复制去公众号后台发表，回来登记链接。" />
       {error && <div className="mt-4"><ErrorLine text={error} /></div>}
       {justDone && (
         <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -134,21 +143,38 @@ export default function Workshop() {
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
-        <span className="rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-800">待发 {pendingN}</span>
-        {writingN > 0 && <span className="rounded-full bg-sky-100 px-3 py-1 font-medium text-sky-700">写稿中 {writingN}</span>}
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">今日产出 {todayN}</span>
+        <button className={`rounded-full px-3 py-1 font-medium ${filter === '' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+          onClick={() => setFilter('')}>
+          决策队列 <span className="num-serif">{readyN + writingN}</span>
+        </button>
+        {writingN > 0 && (
+          <button className={`rounded-full px-3 py-1 ${filter === 'generating' ? 'bg-sky-600 text-white' : 'bg-sky-50 text-sky-700 hover:bg-sky-100'}`}
+            onClick={() => setFilter(filter === 'generating' ? '' : 'generating')}>
+            写稿中 <span className="num-serif">{writingN}</span>
+          </button>
+        )}
+        <button className={`rounded-full px-3 py-1 ${filter === 'published' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          onClick={() => setFilter(filter === 'published' ? '' : 'published')}>
+          已发布 <span className="num-serif">{publishedN}</span>
+        </button>
+        {failedN > 0 && (
+          <button className={`rounded-full px-3 py-1 ${filter === 'failed' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}
+            onClick={() => setFilter(filter === 'failed' ? '' : 'failed')}>
+            写稿失败 <span className="num-serif">{failedN}</span>
+          </button>
+        )}
         <span className="ml-auto hidden text-xs text-slate-400 md:block">每天 4 点挖清单 · 5 点取项改编 · 四审（原创度/事实对源/读者/去AI味）全过才进待发</span>
         <button className="btn-ghost btn-sm flex items-center gap-1" onClick={refresh} disabled={refreshing}>
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />刷新
         </button>
       </div>
 
-      {items.length === 0 ? (
-        <div className="mt-8"><EmptyState icon={Newspaper} title="队列空着"
-          desc="系统每天凌晨自动圈题写稿，写完自动排版落到这里。不用做任何事，明天早上来看就行。" /></div>
+      {visible.length === 0 ? (
+        <div className="mt-8"><EmptyState icon={Newspaper} title={filter === '' ? '决策队列清空了' : '这一类暂无稿件'}
+          desc={filter === '' ? '系统每天凌晨改编一篇进待发，改完自动排版落到这里。不用做任何事，明天早上来看就行。' : '换个筛选看看。'} /></div>
       ) : (
         <div className="mt-4 space-y-2">
-          {items.map((a) => {
+          {visible.map((a) => {
             const badge = A_BADGE[a.status] || { label: a.status, cls: 'bg-slate-100 text-slate-600' }
             const q = qualityOf(a)
             const full = detail[a.id]

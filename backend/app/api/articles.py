@@ -152,7 +152,7 @@ async def adapt_once(user: User = Depends(require_user)) -> dict:
 @router.get("/content-items")
 def list_content_items(status: str = "", category: str = "",
                        limit: int = 100, offset: int = 0) -> dict:
-    """内容清单：源文列表（置顶→质量分→新）+ 状态计数。"""
+    """内容清单：源文列表（置顶→质量分→新）+ 两组计数（按状态/按栏目）。"""
     with Session(engine) as s:
         q = select(ContentItem).order_by(
             ContentItem.priority.desc(), ContentItem.quality_score.desc(), ContentItem.id.desc())
@@ -162,9 +162,11 @@ def list_content_items(status: str = "", category: str = "",
             q = q.where(ContentItem.category == category)
         total = len(s.exec(q).all())
         rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()
-        cq = select(ContentItem.status, func.count(ContentItem.id)).group_by(ContentItem.status)
-        counts = {st: n for st, n in s.exec(cq).all()}
-        return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
+        scq = select(ContentItem.status, func.count(ContentItem.id)).group_by(ContentItem.status)
+        ccq = select(ContentItem.category, func.count(ContentItem.id)).group_by(ContentItem.category)
+        return {"items": [r.model_dump() for r in rows], "total": total,
+                "status_counts": {st: n for st, n in s.exec(scq).all()},
+                "category_counts": {c: n for c, n in s.exec(ccq).all()}}
 
 
 @router.post("/content-items/{item_id}/status")
