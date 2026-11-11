@@ -292,7 +292,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         "从行业原料里挑靶子（最多 3 个；没有够格的大事就空数组）。")
 
     # 程序化科技闸：靶子（标题+hotspot）必须含科技/行业关键词，防模型拿社会新闻凑数
-    _CLAUSE_PUNCT = re.compile(r"[，,。？?：:；;、]")
+    _CLAUSE_PUNCT = _re.compile(r"[，,。？?：:；;、]")
     def _industry_gate(batch_items: list[dict]) -> list[dict]:
         out: list[dict] = []
         for x in batch_items:
