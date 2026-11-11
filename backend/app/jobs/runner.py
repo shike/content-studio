@@ -94,6 +94,7 @@ _POLICIES: dict[str, RetryPolicy] = {
     "script_polish": RetryPolicy(task_timeout=2400),
     "script_finalize": RetryPolicy(task_timeout=1800),
     "article_generate": RetryPolicy(task_timeout=3600),
+    "article_deepread": RetryPolicy(task_timeout=5400),  # 域轮读：18 篇全文拉取+逐篇消化串行
     "idea_research": RetryPolicy(task_timeout=1800),
     "trending_topics": RetryPolicy(task_timeout=900),
     "creator_data_scan": RetryPolicy(task_timeout=300),

@@ -287,17 +287,17 @@ article:    pending（报题待写）──► generating ──► draft ──
   自身论点；依据对不上文档的丢弃，近期标题近义排除）→ 入 `kb_topics` 选题池（new 待选）。
   无合格选题=任务成功返回 topics:0（不硬凑）。调度 `article_kb_topics_daily` 每日凌晨 3 点
   （ima_kb_enabled 门控）。
-- 全自动成文（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：调度
-  `article_kb_auto_daily` 每日 4 点（`ima_kb_enabled` 门控+凭证检查）跑 `article_kb_auto`
-  执行器——从池中自动挑题（跳过与在库稿件标题相似 ≥0.55 的题与缺依据文档的题，日预算 2 篇）
-  → 建 pending 草稿（kb_doc_ids 落库，topic 转 selected）并链写 `article_kb_write`：
-  依据文档全文取材 → 作者案头简报（增量判断，禁复述素材原论点）→ 带范本成文
-  （两篇认可稿全文进 prompt，1900~2200 字）→ 文风禁令机检（_kb_style_violations）→
-  命中定向重写（article_kb_polish）→ 图表/头图 → **质量自评闸门**（article_quality_gate
-  五维打分，<7 分按评审意见定向重写一次，数字/图片签名守卫）→ **自动排版**渲染为
-  公众号内联 HTML 落「待发」终态（rendered，note 附自评分）；topic 转 written。
-  `POST /api/articles/kb-topics/{id}/select` 保留为同链路的手动入口，
-  `POST /api/articles/kb-topics/{id}/dismiss` 转 dismissed（留痕防回灌）。
+- 深读产线（2026-11-11 用户拆锁定版「被自己锁死了」：选题是读的产物，不再是标题抽卡）：
+  调度 `article_deepread_daily` 每日 4 点（`ima_kb_enabled` 门控）跑 `article_deepread`
+  执行器——**域轮读**：ima 目录列表游标（app_settings.deepread_cursor="idx:pos"）每天取一个域的
+  下一批 ≤18 篇文档**全文**（无池子线 3 篇摘录/8000 字截断限制，单篇 3 万字防异常上限）→
+  逐篇消化（article_deepread_digest：主张+逐字原文资产+未回答的问题）→ 跨文档综合
+  （article_deepread_synth：增量判断须 ≥2 篇共同支撑、禁复述单篇论点、落在读者利害；
+  撑不出=诚实空过不出稿）→ 范本成文（复用 article_kb_write prompt，1900~2200 字）→
+  文风禁令机检 → 定向重写 → 图表/头图 → **带牙质量闸**（重写一次仍 <7 分 = 置 failed
+  「质量闸未过，不进待发」，只有过闸稿才自动排版落 rendered 待发）。日产 1 篇，量服从质。
+  原 `article_kb_topics_daily`（3 点抽卡）与 `article_kb_auto_daily`（4 点圈题）调度退役，
+  执行器与手动端点（select/dismiss）暂时保留作回滚窗口。
 - 前端（2026-11-10 决策页改造）：公众号组单叶「内容工场」`Workshop.tsx`=产出流+决策——
   待发/写稿中/今日产出计数 → 全部稿件单列表（点行展开：排版成品预览+判断/依据元信息），
   行内动作只有「复制公众号格式」「不用」（删除）；写稿中行 60s 自动刷新。
@@ -327,7 +327,7 @@ article:    pending（报题待写）──► generating ──► draft ──
   - `deterministic`（默认；参数/配置/内容问题）→ 立即失败，永不自动重试。
 - **重试策略**：`RetryPolicy(max_retries, base, cap, classes, park_backoff, max_parks, stuck_after)` 按 type 注册于 `_POLICIES`，提交时 `max_retries` 落到任务行。人工重试清零自动重试计数；批量"重试全部"跳过 deterministic。
 - **闭环判定（失败→恢复的因果链可见）**：`_coverage()` 对每个 failed 任务检测"同 type + 同 dedup_key/同实体 id 且 id 更大的 succeeded 任务"→ 附 `covered_by`。三态语义：**待处置**（未闭环、无排期）/ **重试中**（有 next_retry_at）/ **已闭环**（covered_by 存在，绿标"由 #N 成功重跑"，自动移出待处置）。重试血缘：`jobs.retry_of` 记录由哪个失败任务重试而来（手动重试/批量重试/按指纹复活三条路径都写入），详情页显示链路。
-- **统一调度中心**（`jobs/schedules.py`，Q"任务调度管理中心"）：所有周期任务一处注册（`REGISTRY`：key/label/执行体/节奏 daily_hour 或 interval_hours/设置开关字段）、`schedules` 表存运行态（enabled/hour 覆盖/last_run_at/next_run_at/last_status/run_count）、`_schedule_loop`（runner 内受监督循环，每 60s 巡检）到点执行。REGISTRY 共 12 项：`article_hotspots_daily`（0 点，站外热点报题）· `watch_scan`（1 点，`watch_scan_hour` 可配 + `watch_scan_enabled` 门控）· `self_scan`（1 点，同上门控）· `hl_search_daily`（2 点，同城组局号搜索挖掘）· `article_kb_topics_daily`（3 点，`ima_kb_enabled` 门控 + ima 凭证配置检查，未配置则停用）· `article_kb_auto_daily`（4 点，同门控，自动圈题写稿）· `daily_backup`（3 点，业务库每日备份）· `creator_data_daily`（4 点，`creator_data_enabled` 门控）· `video_weekly_report`（5 点，按周幂等自愈）· `trending_daily`（6 点，热点雷达=话题巡检+站外热点提炼）· `media_cleanup`（每日 6 点，拆解媒体清扫）· `crawl_probe`（每 2h，采集探针）。API：`GET /api/schedules`、`POST /{key}/toggle`、`PUT /{key}/hour`、`POST /{key}/run`（立即执行并记运行态）；任务页「调度中心」卡片可视化。旧 main.py 硬编码调度循环已删除。
+- **统一调度中心**（`jobs/schedules.py`，Q"任务调度管理中心"）：所有周期任务一处注册（`REGISTRY`：key/label/执行体/节奏 daily_hour 或 interval_hours/设置开关字段）、`schedules` 表存运行态（enabled/hour 覆盖/last_run_at/next_run_at/last_status/run_count）、`_schedule_loop`（runner 内受监督循环，每 60s 巡检）到点执行。REGISTRY 共 11 项：`article_hotspots_daily`（0 点，站外热点报题）· `watch_scan`（1 点，`watch_scan_hour` 可配 + `watch_scan_enabled` 门控）· `self_scan`（1 点，同上门控）· `hl_search_daily`（2 点，同城组局号搜索挖掘）· `article_deepread_daily`（4 点，`ima_kb_enabled` 门控，知识库深读写）· `daily_backup`（3 点，业务库每日备份）· `creator_data_daily`（4 点，`creator_data_enabled` 门控）· `video_weekly_report`（5 点，按周幂等自愈）· `trending_daily`（6 点，热点雷达=话题巡检+站外热点提炼）· `media_cleanup`（每日 6 点，拆解媒体清扫）· `crawl_probe`（每 2h，采集探针）。API：`GET /api/schedules`、`POST /{key}/toggle`、`PUT /{key}/hour`、`POST /{key}/run`（立即执行并记运行态）；任务页「调度中心」卡片可视化。旧 main.py 硬编码调度循环已删除。
 - **同行发现**（`watch_discover`，无独立日调度，经 `POST /api/watch/discover` 触发，关键词按天轮换）：优先级=设置页配置 > 对标圈近 30 天标题 LLM 动态提炼（discover_keywords 小调用，2026-10-10 防发现池同质）> 12 词静态池走 DDG→视频链接→反查作者→粉丝 Top8 入候选表（status=open 待人工定夺；已在清单/已忽略的不重复）；候选粉丝 ≥1 万（_DISCOVER_QUALITY_FANS）计入工作台周报卡「清单外高赞同行」。
 - **同城组局号搜索挖掘**（`hl_search_matrix`，调度 `hl_search_daily` 每日 2 点）：城市×关键词搜索矩阵分晚轮跑 → 作者池取证 → 四要素筛 → LLM 分级 → 判 A/B 入候选表待人工定夺；解析到的号一律落 `harvest_profiles` 全量存档（判定可重跑、存量可按预算回捞补档）。
 - **抖音采集探针**（`crawler_probe.py`，调度 key=`crawl_probe`，每 2 小时）：先 TCP 探出口隧道

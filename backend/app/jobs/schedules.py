@@ -198,37 +198,21 @@ async def _run_article_hotspots() -> str:
 # 钟点 0 点（错峰窗 0-6 内最前，与 1:00 扫描错开；不可 hour_from_settings，同 watch_discover 理由）
 register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点报题（独立提炼）",
                            daily_hour=0, run=_run_article_hotspots))
-async def _run_kb_topics() -> str:
-    """知识库选题线：体系化遍历 ima 核心目录 → 带判断选题 → 草稿并自动链写成文。"""
+async def _run_deepread() -> str:
+    """深读写（2026-11-11 拆锁定版）：每天读一个域的完整文档 → 跨文档综合判断 → 成文。
+    取代池子两线（03:00 抽卡选题 + 04:00 自动圈题）——选题是读的产物，不再是标题抽卡。"""
     from .runner import runner
 
-    job = await runner.submit("article_kb_topics", {},
-                              dedup_key=f"1:kbtopics:{datetime.now():%Y%m%d}",
+    job = await runner.submit("article_deepread", {},
+                              dedup_key=f"1:deepread:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（知识库选题 → 草稿）"
+    return f"job #{job.id}（深读一个域 → 成文）"
 
 
-# 知识库选题线（2026-11-09）：与热点报题（0 点）错峰，3 点跑，早晨草稿箱多一批库内真货支撑的选题
-register_schedule(Schedule(key="article_kb_topics_daily", label="知识库选题（遍历 ima 产选题）",
-                           daily_hour=3, enabled_by="ima_kb_enabled",
-                           run=_run_kb_topics))
-
-
-async def _run_kb_auto() -> str:
-    """全自动圈题成文：从池中自动挑题 → 建稿 → 链写成文（自带质量自评+自动排版）。
-    2026-11-10 用户定版「系统做全部工作，用户只做最终决策」——选题不再人工挑选。"""
-    from .runner import runner
-
-    job = await runner.submit("article_kb_auto", {},
-                              dedup_key=f"1:kbauto:{datetime.now():%Y%m%d}",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（自动圈题 → 后台写稿）"
-
-
-# 自动成文线（2026-11-10）：跟在 3 点选题之后，4 点自动挑题写稿，早晨「待发」队列自动补满
-register_schedule(Schedule(key="article_kb_auto_daily", label="知识库自动成文（自动圈题写稿）",
+# 深读产线（2026-11-11）：4 点跑（承接原自动圈题时段），读什么写什么，日产 1 篇量服从质
+register_schedule(Schedule(key="article_deepread_daily", label="知识库深读写（域轮读·综合成文）",
                            daily_hour=4, enabled_by="ima_kb_enabled",
-                           run=_run_kb_auto))
+                           run=_run_deepread))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))
