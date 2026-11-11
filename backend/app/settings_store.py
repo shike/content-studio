@@ -32,6 +32,8 @@ MANAGED: dict[str, str] = {
     "creator_data_enabled": "bool",
     "ima_kb_enabled": "bool",
     "watch_scan_hour": "int",
+    "dissect_comment_min": "int",  # 拆解闸：评论≥20 自动拆（2026-11-11 用户定版）
+    "dissect_digg_min": "int",     # 拆解闸：赞≥300 自动拆（与评论线任一满足即可）
 }
 
 

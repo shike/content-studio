@@ -286,21 +286,16 @@ async def watch_scan(ctx, payload: dict) -> dict:
     douyin_accounts = [a for a in accounts if a.platform == "douyin"]
     notes: list[str] = []
     queued = 0
-    # 存量待定夺清扫（2026-11-08 用户定版：监控内容全量自动拆解——历史 pending 一律批准排队）
+    # 存量待定夺清扫：历史 pending 一律走同一道拆解闸（评论/赞达标才拆，
+    # 不过线标 ignored 保留行——与新增视频同一标准，不做无闸批量放行）
+    from ..benchmarks import service as _bms
     with Session(engine) as s:
         backlog = s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
             BenchmarkVideo.scan_status == "pending")).all()  # type: ignore[attr-defined]
-        for b in backlog:
-            b.scan_status = "approved"
-            b.notes = "自动拆解（存量清扫）"
-            s.add(b)
-        s.commit()
-        backlog_ids = [b.id for b in backlog]
-    for bid in backlog_ids:
-        await runner.submit("benchmark_analyze", {"benchmark_id": bid},
-                            dedup_key=f"bm:{bid}")
-    if backlog_ids:
-        notes.append(f"存量待定夺 {len(backlog_ids)} 条已自动转拆解")
+    if backlog:
+        n_backlog = await _bms.auto_dissect_rows(backlog, "存量清扫")
+        notes.append(f"存量待定夺 {len(backlog)} 条过闸：批准拆解 {n_backlog} 条，"
+                     f"其余未达线标 ignored")
 
     with Session(engine) as s:
         known = {b.url for b in s.exec(
@@ -390,8 +385,9 @@ async def watch_scan(ctx, payload: dict) -> dict:
         notes.append(f"{acc.name}：新入库 {created} 条（待定夺，批准后进拆解队列）"
                      + (f"，回填互动数 {backfilled} 条" if backfilled else ""))
 
-    # 质量闸自动拆解（2026-10-28 全自动化裁定）：达标新作品自动批准进拆解队列，
-    # 其余保持待定夺。人的角色后移到选题库定审，拆解库日常不用看。
+    # 质量闸自动拆解（2026-11-11 用户定版：评论≥20或赞≥300 才拆）：达标新作品自动批准
+    # 进拆解队列，未达标标 ignored（页面上可见，手动批准可强制拆）。
+    # 人的角色后移到选题库定审，拆解库日常不用看。
     if new_row_ids:
         try:
             from ..benchmarks import service as bms

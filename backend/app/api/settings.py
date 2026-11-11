@@ -35,6 +35,8 @@ def _status() -> dict:
         "scrape_proxy": settings.scrape_proxy,
         "watch_scan_enabled": settings.watch_scan_enabled,
         "watch_scan_hour": settings.watch_scan_hour,
+        "dissect_comment_min": settings.dissect_comment_min,
+        "dissect_digg_min": settings.dissect_digg_min,
         "managed_keys": sorted(MANAGED),  # 可在本页修改的键（前端按需展示）
     }
     st.update(stored_secret_state())  # *_set 状态（密钥明文绝不回传）
@@ -59,6 +61,8 @@ class UpdateIn(BaseModel):
     scrape_proxy: str | None = None
     watch_scan_enabled: bool | None = None
     watch_scan_hour: int | None = None
+    dissect_comment_min: int | None = None  # 拆解闸：评论≥N 自动拆（2026-11-11）
+    dissect_digg_min: int | None = None     # 拆解闸：赞≥N 自动拆
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
 
@@ -109,6 +113,12 @@ def update_settings(body: UpdateIn) -> dict:
         if not 0 <= body.watch_scan_hour <= 23:
             raise HTTPException(400, detail="扫描时间必须是 0~23 的整数（小时）")
         values["watch_scan_hour"] = body.watch_scan_hour
+    for key, label in (("dissect_comment_min", "评论线"), ("dissect_digg_min", "赞线")):
+        v = getattr(body, key)
+        if v is not None:
+            if not 0 <= v <= 100000:
+                raise HTTPException(400, detail=f"拆解闸{label}必须是 0~100000 的整数")
+            values[key] = v
     # 密钥项：空串=清除
     for key in ("zhipu_api_key",):
         v = getattr(body, key)

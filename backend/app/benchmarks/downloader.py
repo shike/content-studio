@@ -111,6 +111,53 @@ def resolve_aweme_id(url: str) -> Optional[str]:
     return None
 
 
+def probe_video_stats(url: str) -> Optional[dict]:
+    """视频页 detail 免登录取互动数（2026-11-11 拆解闸前置探测）。
+
+    返回 {digg, comment, share, collect}；页面未吐数据/失败返回 None。
+    实测边界（2026-11-11 生产出口三条视频）：comment/share/collect 可取，
+    play_count 恒 0——抖音网页端播放数只有作者自己在创作者后台可见，
+    匿名通道永远拿不到，闸线只能落评论/赞。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    detail: dict = {}
+    with sync_playwright() as p:
+        browser = launch(p)
+        try:
+            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                      viewport={"width": 1280, "height": 900})
+            page = ctx.new_page()
+
+            def on_response(resp):
+                try:
+                    if "aweme/v1/web/aweme/detail" in resp.url and not detail:
+                        detail.update(resp.json())
+                except Exception:  # noqa: BLE001
+                    pass
+
+            page.on("response", on_response)
+            page.goto(url, timeout=45000, wait_until="domcontentloaded")
+            deadline = time.time() + 60
+            while not detail and time.time() < deadline:
+                page.wait_for_timeout(2000)
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            browser.close()
+    st = (detail.get("aweme_detail") or {}).get("statistics") or {}
+    if not st:
+        return None
+    out = {}
+    for key, src in (("digg", "digg_count"), ("comment", "comment_count"),
+                     ("share", "share_count"), ("collect", "collect_count")):
+        v = st.get(src)
+        if isinstance(v, int):
+            out[key] = v
+    return out or None
+
+
 def _download_mp4(video_url: str, out_dir: Path) -> Optional[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"bm_{int(time.time() * 1000)}.mp4"

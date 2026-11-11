@@ -204,6 +204,13 @@ article:    pending（报题待写）──► generating ──► draft ──
 - `POST /api/benchmarks/{id}/resolve` `{action(approve|ignore|pending)}` → 人工定夺（approve 即排队拆解）
 - `POST /api/benchmarks/resolve-pending` `{action, author?}` → 批量定夺当前待定夺行（可按作者过滤）
 
+**拆解质量闸**（2026-11-11 用户定版，取代 11-08「全拆无闸」——实测 7 天灌入 222 篇低赞拆解+58 篇垃圾选题后撤销）：
+- 闸线 = **评论 ≥ `dissect_comment_min`(默认 20) 或 赞 ≥ `dissect_digg_min`(默认 300)**，任一满足即自动批准拆解；两条线均设置页运行时可调（MANAGED int）。
+- 数据边界（2026-11-11 生产出口三视频实测）：评论/赞/转/藏匿名可取；**播放数恒 0**——抖音网页端只有作者自己在创作者后台可见，匿名通道永远拿不到，闸线只能落评论/赞（用户原始意向「播放+留言」据此修正）。
+- 流程：待定夺行评论缺失时先 `downloader.probe_video_stats` 补探（每条一次页开，60s 截止）→ 闸判定 → 过线 approved 并排队 `benchmark_analyze`；不过线标 **ignored 保留行**（notes 记判定理由，页面上可见，手动 approve 可强制拆）；探测失败按赞线单判并如实注「评论?」。
+- 覆盖三条自动路径：watch_scan 新增行、watch_scan 存量 pending 清扫、话题雷达自动拆解（同一 `auto_dissect_rows` 入口，无旁路）。
+- `quality_score` 热度分同步复活（此前是死列恒 0）：`评论/2 + 赞/60` 封顶 10，透明公式与闸线同源；闸判定时回写。
+
 ### 同行监测（对标账号管理与扫描）
 - `GET /api/watch/digest` → 同行监测周报（近 7 天实时摘要，不落库：新视频/待定夺按作者分布+高分选题 Top3 带切角一句话）
 - `GET /api/watch/accounts` → `{items:[{platform, name, url, note, enabled, last_scan_at, video_total, video_recent_7d, scores}]}`；`scores` 为 `{relevance, quality, overall}` 或 null（从备注评分文本解析，口径见 MRD §2.1.1）

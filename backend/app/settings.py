@@ -45,7 +45,11 @@ class Settings(BaseSettings):
     creator_data_enabled: bool = True  # 自有账号日级指标抓取（创作者中心 overview，2026-10-12；kill switch）
     ima_kb_enabled: bool = True      # ima 知识库取材/选题线总开关（执行器层还要求 app_settings 里凭证配齐，两层相与）
     watch_scan_hour: int = 1         # 每天几点执行（本地时区）
-    # 全自动拆解闸（2026-10-28 用户裁定"全自动化，高质量提前拆解好"）：达标作品自动批准进拆解
+    # 拆解闸（2026-11-11 用户定版：评论≥20 或 赞≥300 任一即拆；11-08 的「全拆无闸」
+    # 实测 7 天灌入 222 篇低赞拆解+58 篇垃圾选题后撤销）。播放数匿名通道恒 0
+    # （只有作者后台可见），闸线只能落评论/赞。
+    dissect_comment_min: int = 20   # 拆解闸：评论 ≥ 此值自动拆解
+    dissect_digg_min: int = 300     # 拆解闸：赞 ≥ 此值自动拆解（与评论线任一满足即可）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
 
     @property

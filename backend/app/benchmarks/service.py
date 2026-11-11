@@ -46,23 +46,69 @@ _BENCHMARK_DIR = settings.data_dir / "benchmarks"
 
 _BENCHMARK_DIR = settings.data_dir / "benchmarks"
 
+def _heat_score(stats: dict) -> float:
+    """热度分（2026-11-11 用户定版指标：评论为主、赞为辅的透明公式）：
+    评论/2 + 赞/60，封顶 10。播放数匿名通道拿不到（实测恒 0），不入公式。"""
+    comment = stats.get("comment") or 0
+    digg = stats.get("digg") or 0
+    return round(min(10.0, comment / 2 + digg / 60), 1)
+
+
+def _gate_verdict(stats: dict) -> tuple[bool, str]:
+    """拆解闸（2026-11-11 用户定版：评论≥20 或 赞≥300，任一即拆）。
+
+    评论未知时只按赞线判，理由如实注明。线走设置页
+    dissect_comment_min / dissect_digg_min，可运行时调。"""
+    from ..settings import settings
+
+    c_min, d_min = settings.dissect_comment_min, settings.dissect_digg_min
+    comment = stats.get("comment")
+    digg = stats.get("digg") or 0
+    c_txt = f"评论{comment}" if comment is not None else "评论?"
+    if comment is not None and comment >= c_min:
+        return True, f"{c_txt}≥{c_min}"
+    if digg >= d_min:
+        return True, f"赞{digg}≥{d_min}"
+    return False, f"{c_txt}/{digg}赞 未达线（评论≥{c_min}或赞≥{d_min}）"
+
+
 async def auto_dissect_rows(rows: list, source_tag: str) -> int:
-    """全量自动拆解（2026-11-08 用户定版：监控账号的内容全部自动拆解——
-    质量闸退役：无分数门槛/每日上限/开关）。待定夺行自动批准并排队拆解，
+    """自动拆解，质量闸回归（2026-11-11 用户定版：评论≥20或赞≥300 才拆）。
+
+    11-08 曾定版「监控内容全拆无闸」，7 天灌了 222 篇低赞拆解（中位数 ~30 赞，
+    0 赞也拆）+ 58 篇垃圾选题，实测次日撤销：机器在给垃圾抛光。
+    流程：评论缺失先 detail 探测补全（每条新视频一次页开）→ 闸判定 →
+    过线批准排队拆解；不过线标 ignored 保留行（页面上可见，手动批准可强制拆）。
     返回本次批准条数。"""
+    from .downloader import probe_video_stats
+
     n = 0
     for r in rows:
+        passed, why = False, ""
         with Session(engine) as s:
             row = s.get(BenchmarkVideo, r.id)
             if row is None or row.scan_status != "pending":
                 continue  # 已被处理/重复触发
-            row.scan_status = "approved"
-            row.notes = f"自动拆解（{source_tag}）"
+            stats = dict(row.stats or {})
+            if stats.get("comment") is None and row.source == "douyin" and row.url:
+                probed = await asyncio.to_thread(probe_video_stats, row.url)
+                if probed:
+                    stats.update(probed)
+                    row.stats = stats
+            passed, why = _gate_verdict(stats)
+            row.quality_score = _heat_score(stats)
+            if passed:
+                row.scan_status = "approved"
+                row.notes = f"自动拆解（{source_tag}：{why}）"
+            else:
+                row.scan_status = "ignored"
+                row.notes = f"低质未拆（{source_tag}：{why}）；手动批准可强制拆解"
             s.add(row)
             s.commit()
-        await runner.submit("benchmark_analyze", {"benchmark_id": r.id},
-                            dedup_key=f"bm:{r.id}")
-        n += 1
+        if passed:
+            await runner.submit("benchmark_analyze", {"benchmark_id": r.id},
+                                dedup_key=f"bm:{r.id}")
+            n += 1
     return n
 
 
