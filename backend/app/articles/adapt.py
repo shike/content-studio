@@ -214,25 +214,24 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             if polished and _content_signature(polished) == _content_signature(md_text):
                 md_text = polished
 
-        # ── 审校组（事实对源 + 读者弃读点）：问题清单制，修订一次复审，二次不过计数退避 ──
+        # ── 审校组（问题清单制）：事实对源=硬闸（拦编造），读者弃读点=建议（落 note 不拦）──
         from .review import review_facts, review_reader, revise_once, score_titles
-        ctx.set_progress(82, "审校组：事实对源 + 读者弃读点")
+        ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
         issues = await review_facts(md_text, source)
-        issues += await review_reader(md_text)
+        reader_points = await review_reader(md_text)
         if issues:
             revised = await revise_once(md_text, issues)
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
                 issues = await review_facts(md_text, source)
-                issues += await review_reader(md_text)
         if issues:
             with Session(engine) as s:
                 it0 = s.get(ContentItem, item_id)
                 fails = (it0.note or "").count("审校未过") if it0 is not None else 0
             tag = f"审校未过×{fails + 1}"
-            _release(f"审校二次未过（{'；'.join(issues[:2])}），清单项 #{item_id} 落 low 不再自动重试"
+            _release(f"事实审校二次未过（{'；'.join(issues[:2])}），清单项 #{item_id} 落 low 不再自动重试"
                      if fails >= 1 else
-                     f"审校未过（{'；'.join(issues[:2])}），退回清单 #{item_id}",
+                     f"事实审校未过（{'；'.join(issues[:2])}），退回清单 #{item_id}",
                      item_status="low" if fails >= 1 else "pending", tag=tag)
             with Session(engine) as s:
                 art = s.get(Article, article_id)
@@ -240,11 +239,11 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                     art.status = "failed"
                     art.title = title
                     art.md = md_text
-                    art.note = (art.note or "") + f"｜审校未过（{issues[0][:40]}），不进待发"
+                    art.note = (art.note or "") + f"｜事实审校未过（{issues[0][:40]}），不进待发"
                     s.add(art)
                     s.commit()
-            ctx.set_progress(100, f"审校未过（{len(issues)} 项），本篇不进待发")
-            return {"adapted": False, "issues": len(issues), "message": "审校未过"}
+            ctx.set_progress(100, f"事实审校未过（{len(issues)} 项），本篇不进待发")
+            return {"adapted": False, "issues": len(issues), "message": "事实审校未过"}
 
         # ── 标题评分（五维，自动选主标题；正题/来源题/备选全进候选池）──
         ctx.set_progress(88, "标题评分")
@@ -278,6 +277,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         if art is not None and (art.md or "").strip():
             art.html = render_wechat_html(art.md)
             art.status = "rendered"
+            if reader_points:  # 读者审校=编辑口味建议，落 note 给用户终审参考，不拦发布
+                art.note = (art.note or "") + "｜读者审校建议：" + "；".join(
+                    p[:44] for p in reader_points[:2])[:200]
             s.add(art)
             s.commit()
         it = s.get(ContentItem, item_id)
