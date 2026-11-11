@@ -224,9 +224,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                           + ("\n".join(f"- {x['title']}（{x['source']}{('/' + x['date']) if x['date'] else ''}）"
                                        for x in news_items)
                              if news_items else f"（未生效：{news_meta.get('status')}）"))
-    material_parts.append("【百度热搜·今日实时榜（泛热点——只有能与创作者领域强结合的才可选）】\n"
-                          + ("\n".join(f"- {x['word']}" + (f"｜{x['desc']}" if x.get("desc") else "")
-                                       for x in hot_items)
+    material_parts.append("【百度热搜·今日实时榜（带在榜排名=热度硬证据，靶子第一选择）】\n"
+                          + ("\n".join(f"- 热搜第{i}位：{x['word']}" + (f"｜{x['desc']}" if x.get("desc") else "")
+                                       for i, x in enumerate(hot_items, 1))
                              if hot_items else f"（未生效：{hot_meta.get('status')}）"))
     material_parts.append("【联网检索·按画像生成的检索词】\n" + ("\n".join(
         f"- {x}" for x in web_lines) if web_lines else f"（未生效：{q_status}）"))
@@ -238,14 +238,27 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         material_parts.append("【对标圈近 2 天新视频】（无——站内采集空窗）")
     material = "\n\n".join(material_parts)
 
+    # 近期爆款清单（2026-11-11 靶子三版：续集型靶子合法——模型必须知道用户拍过什么）
+    ctx.set_progress(58, "整理你的近期爆款（续集靶子上下文）")
+    own_hits: list[str] = []
+    with Session(engine) as s:
+        from ..models import SelfVideo
+        vids = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
+            SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]
+        ranked = sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0), reverse=True)[:4]
+        for v in ranked:
+            play = int((v.stats or {}).get("play") or 0)
+            own_hits.append(f"- 「{(v.title or '')[:40]}」（播放 {play}）")
+    own_hits_text = ("\n".join(own_hits)) if own_hits else "（暂无自有视频数据——续集打法本批不可用）"
+
     data = await gateway.complete_json(
         [{"role": "system", "content": render("trending_target",
                                               PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                                               TODAY=datetime.now().strftime("%Y-%m-%d"),
-                                              MATERIAL=material,
+                                              MATERIAL=material, OWN_HITS=own_hits_text,
                                               BAN_LIST="\n".join(ban_lines)
                                               or "（近 14 天无出题记录）")},
-         {"role": "user", "content": "挑出今天能怼的靶子（最多 3 个，宁缺毋滥）。"}],
+         {"role": "user", "content": "挑出今天能怼的靶子（最多 3 个，宁缺毋滥；在榜优先）。"}],
         purpose="trending_target", max_tokens=8000, thinking="disabled")
 
     items = [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("title")]
@@ -309,6 +322,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                     for e in (x.get("evidences") or []) if isinstance(e, dict) and e.get("text")
                 ][:3],
                 "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
+                "heat": str(x.get("heat") or "")[:60],  # 热度证据（热搜第N位/未在榜·备胎）
             }
             t = Topic(
                 title=str(x.get("title"))[:60],

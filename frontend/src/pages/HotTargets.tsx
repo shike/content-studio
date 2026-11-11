@@ -25,6 +25,15 @@ function heatTag(hotspot: string): { label: string; cls: string } | null {
   return null
 }
 
+/** 热度证据（三版定版）：target.heat 优先（如「百度热搜第23位」），无则回落来源解析 */
+function heatEvidence(t: Topic): { text: string; onBoard: boolean } | null {
+  const h = String(t.evidence?.target?.heat || '').trim()
+  if (h) return { text: h, onBoard: /热搜第/.test(h) }
+  const tag = heatTag(t.source_ref || '')
+  if (!tag) return null
+  return { text: `${tag.label}（未在榜·备胎）`, onBoard: tag.label === '百度热搜' }
+}
+
 interface ScriptRow { id: number; topic_id: number | null; status: string }
 
 export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => void }) {
@@ -185,10 +194,10 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
           {list.map((t) => {
             const tgt = (t.evidence?.target || {}) as {
               event?: string; why?: string; angles?: string[]
-              evidences?: { text: string; source: string }[]; spice?: string
+              evidences?: { text: string; source: string }[]; spice?: string; heat?: string
             }
             const exp = expanded === t.id
-            const tag = heatTag(t.source_ref || '')
+            const heat = heatEvidence(t)
             const spice = SPICE[tgt.spice || ''] || null
             const sel = angleSel[t.id] ?? 0
             const scriptSt = scriptsMap[t.id]
@@ -199,7 +208,11 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
                 <div className="flex cursor-pointer items-center gap-3 px-4 py-3" onClick={() => openRow(t)}>
                   {exp ? <ChevronDown size={15} className="shrink-0 text-slate-400" />
                     : <ChevronRight size={15} className="shrink-0 text-slate-400" />}
-                  {tag && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${tag.cls}`}>{tag.label}</span>}
+                  {heat && (
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${heat.onBoard ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-400'}`}>
+                      {heat.text}
+                    </span>
+                  )}
                   {spice && <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] sm:inline-flex ${spice.cls}`}>{spice.label}</span>}
                   {scriptSt && (
                     <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
