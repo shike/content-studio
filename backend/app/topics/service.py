@@ -238,7 +238,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         material_parts.append("【对标圈近 2 天新视频】（无——站内采集空窗）")
     material = "\n\n".join(material_parts)
 
-    # 近期爆款清单（2026-11-11 靶子三版：续集型靶子合法——模型必须知道用户拍过什么）
+    # ── 两段式挑靶（2026-11-11 三版修正的根治：口头「在榜优先」没用，改成结构上没退路）──
+    # Stage 1：只给榜（board 专属 prompt + 程序化校验靶子确实长在榜内条目上）；
+    # Stage 2：榜内挑不出才允许科技媒体/检索备胎，且批次明确标注备胎。
     ctx.set_progress(58, "整理你的近期爆款（续集靶子上下文）")
     own_hits: list[str] = []
     with Session(engine) as s:
@@ -251,17 +253,40 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             own_hits.append(f"- 「{(v.title or '')[:40]}」（播放 {play}）")
     own_hits_text = ("\n".join(own_hits)) if own_hits else "（暂无自有视频数据——续集打法本批不可用）"
 
-    data = await gateway.complete_json(
-        [{"role": "system", "content": render("trending_target",
-                                              PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
-                                              TODAY=datetime.now().strftime("%Y-%m-%d"),
-                                              MATERIAL=material, OWN_HITS=own_hits_text,
-                                              BAN_LIST="\n".join(ban_lines)
-                                              or "（近 14 天无出题记录）")},
-         {"role": "user", "content": "挑出今天能怼的靶子（最多 3 个，宁缺毋滥；在榜优先）。"}],
-        purpose="trending_target", max_tokens=8000, thinking="disabled")
+    board_material = material_parts[1]  # 百度热搜段（带排名）
+    board_words_norm = [_norm(x.get("word") or "") for x in hot_items if len(_norm(x.get("word") or "")) >= 6]
 
-    items = [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("title")]
+    def _board_only_check(batch_items: list[dict]) -> list[dict]:
+        """程序化闸：stage1 靶子的 hotspot 必须真长在榜内条目上（防模型偷跑备料）。"""
+        out: list[dict] = []
+        for x in batch_items:
+            hs = _norm(str(x.get("hotspot") or ""))
+            if any(w in hs or hs in w for w in board_words_norm if w):
+                out.append(x)
+        return out
+
+    async def _llm_targets(system_prompt: str, user_hint: str) -> list[dict]:
+        data = await gateway.complete_json(
+            [{"role": "system", "content": system_prompt},
+             {"role": "user", "content": user_hint}],
+            purpose="trending_target", max_tokens=8000, thinking="disabled")
+        return [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("title")]
+
+    ctx.set_progress(64, "第一段：热榜内挑靶（在榜优先，无退路）")
+    items = _board_only_check(await _llm_targets(
+        render("trending_target_board", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
+               TODAY=datetime.now().strftime("%Y-%m-%d"), OWN_HITS=own_hits_text,
+               BOARD=board_material),
+        "从热榜里挑靶子（最多 2 个，挑不出就空数组）。"))
+    stage = "board" if items else "backup"
+    if not items:
+        ctx.set_progress(70, "榜内无可结合——第二段：科技媒体备胎（如实标注未在榜）")
+        items = await _llm_targets(
+            render("trending_target", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
+                   TODAY=datetime.now().strftime("%Y-%m-%d"), MATERIAL=material,
+                   OWN_HITS=own_hits_text, BAN_LIST="\n".join(ban_lines)
+                   or "（近 14 天无出题记录）"),
+            "挑出今天能怼的靶子（最多 3 个，宁缺毋滥；榜内无可选时的备胎批）。")
 
     # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
     watch_norms = [_norm(x["title"]) for x in watch_items if len(_norm(x["title"])) >= 10]
@@ -322,7 +347,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                     for e in (x.get("evidences") or []) if isinstance(e, dict) and e.get("text")
                 ][:3],
                 "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
-                "heat": str(x.get("heat") or "")[:60],  # 热度证据（热搜第N位/未在榜·备胎）
+                "heat": str(x.get("heat") or ("百度热搜（在榜）" if stage == "board" else "未在榜（备胎）"))[:60],
             }
             t = Topic(
                 title=str(x.get("title"))[:60],
@@ -344,10 +369,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             created.append(t.id)
         s.commit()
 
-    ctx.set_progress(100, f"完成：{len(created)} 条靶子入选题库"
-                          f"（替代 {len(superseded)} 条当日旧批次）")
+    ctx.set_progress(100, f"完成：{len(created)} 条靶子入选题库（{'热榜内挑靶' if stage == 'board' else '备胎批：榜内无可结合'}；替代 {len(superseded)} 条当日旧批次）")
     return {"radar_notes": radar_notes, "topic_ids": created, "superseded": superseded,
-            "targets": len(created),
+            "targets": len(created), "stage": stage,
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "queries": queries, "web": search_metas}}
 
