@@ -55,7 +55,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       ])
       const t = { items: [...(tp.items || []), ...(tl.items || [])] } as { items: Topic[] }
       const s = await fetchMenuStats()
-      setTodos({ failed: s.failed, active: Math.max(0, s.tasks - s.failed) })
+      setTodos({ failed: s.failed, active: s.tasks }) // tasks=在途、failed=终态（2026-11-11 口径分离，不再相减）
       // 候选待定夺两线真实数字：p_cand/l_cand 即 TodoStats.openCandidatesPersona/Leadgen 的透传
       setCands({ persona: s.p_cand, leadgen: s.l_cand })
       const ranked = (t.items || []).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
