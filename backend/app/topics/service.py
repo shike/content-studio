@@ -238,10 +238,10 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         material_parts.append("【对标圈近 2 天新视频】（无——站内采集空窗）")
     material = "\n\n".join(material_parts)
 
-    # ── 两段式挑靶（2026-11-11 三版修正的根治：口头「在榜优先」没用，改成结构上没退路）──
-    # Stage 1：只给榜（board 专属 prompt + 程序化校验靶子确实长在榜内条目上）；
-    # Stage 2：榜内挑不出才允许科技媒体/检索备胎，且批次明确标注备胎。
-    ctx.set_progress(58, "整理你的近期爆款（续集靶子上下文）")
+    # ── 行业挑靶（2026-11-11 第四版定版：靶子=AI/科技行业内大事件，社会热点一律不选）──
+    # 四轮失败反推的用户拍摄史事实：他只拍行业内的事（Anthropic/Workbuddy/提示词工程/业务宣言），
+    # 零条社会热点。泛榜借热点（泡面套验收）整类废除；热度=行业内刷屏（媒体+同行+在榜加分）。
+    ctx.set_progress(58, "整理你的近期爆款（类目标准+续集上下文）")
     own_hits: list[str] = []
     with Session(engine) as s:
         from ..models import SelfVideo
@@ -251,19 +251,31 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         for v in ranked:
             play = int((v.stats or {}).get("play") or 0)
             own_hits.append(f"- 「{(v.title or '')[:40]}」（播放 {play}）")
-    own_hits_text = ("\n".join(own_hits)) if own_hits else "（暂无自有视频数据——续集打法本批不可用）"
+    own_hits_text = ("\n".join(own_hits)) if own_hits else "（暂无自有视频数据）"
 
-    board_material = material_parts[1]  # 百度热搜段（带排名）
-    board_words_norm = [_norm(x.get("word") or "") for x in hot_items if len(_norm(x.get("word") or "")) >= 6]
-
-    def _board_only_check(batch_items: list[dict]) -> list[dict]:
-        """程序化闸：stage1 靶子的 hotspot 必须真长在榜内条目上（防模型偷跑备料）。"""
-        out: list[dict] = []
-        for x in batch_items:
-            hs = _norm(str(x.get("hotspot") or ""))
-            if any(w in hs or hs in w for w in board_words_norm if w):
-                out.append(x)
-        return out
+    # 行业菜单：科技媒体 + 榜内科技条目（带排名加分）+ 对标圈（圈内热度证据）
+    _TECH_KW = ("AI", "人工智能", "大模型", "模型", "智能体", "agent", "机器人", "芯片", "算力",
+                "开源", "自动驾驶", "智能驾驶", "代码", "软件", "互联网", "科技", "数字", "算法",
+                "半导体", "云计算", "无人机", "手机", "汽车",
+                "字节", "阿里", "腾讯", "百度", "华为", "小米", "京东", "美团", "网易", "快手",
+                "deepseek", "openai", "anthropic", "谷歌", "google", "微软", "meta", "苹果",
+                "特斯拉", "英伟达", "亚马逊", "claude", "chatgpt", "gemini", "copilot",
+                "豆包", "通义", "文心", "夸克", "可灵", "即梦", "扣子", "coze", "dify",
+                "飞书", "钉钉", "workbuddy", "智谱", "kimi", "minimax", "阶跃")
+    board_tech = [f"热搜第{i}位：{x.get('word')}" for i, x in enumerate(hot_items, 1)
+                  if any(k.lower() in (x.get("word") or "").lower() for k in _TECH_KW)]
+    industry_parts = [
+        "【科技媒体（AI/科技行业动态，48h 内）】\n"
+        + ("\n".join(f"- {x['title']}（{x['source']}{('/' + x['date']) if x['date'] else ''}）"
+                     for x in news_items) if news_items else f"（未生效：{news_meta.get('status')}）"),
+        "【百度热搜在榜的科技条目（在榜=热度加分证据）】\n"
+        + ("\n".join(f"- {ln}" for ln in board_tech) if board_tech else "（当前榜上无科技类条目）"),
+    ]
+    if watch_items:
+        industry_parts.append("【对标圈近 2 天新视频（圈内热度证据：多家同行在拍=行业刷屏）】\n"
+                              + "\n".join(f"- {x['author']}｜{x['title']}｜{x['likes']}"
+                                          for x in watch_items))
+    industry = "\n\n".join(industry_parts)
 
     async def _llm_targets(system_prompt: str, user_hint: str) -> list[dict]:
         data = await gateway.complete_json(
@@ -272,21 +284,25 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             purpose="trending_target", max_tokens=8000, thinking="disabled")
         return [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("title")]
 
-    ctx.set_progress(64, "第一段：热榜内挑靶（在榜优先，无退路）")
-    items = _board_only_check(await _llm_targets(
-        render("trending_target_board", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
+    ctx.set_progress(64, "行业事件挑靶（社会热点不在菜单）")
+    items = await _llm_targets(
+        render("trending_target_industry", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                TODAY=datetime.now().strftime("%Y-%m-%d"), OWN_HITS=own_hits_text,
-               BOARD=board_material),
-        "从热榜里挑靶子（最多 2 个，挑不出就空数组）。"))
-    stage = "board" if items else "backup"
-    if not items:
-        ctx.set_progress(70, "榜内无可结合——第二段：科技媒体备胎（如实标注未在榜）")
-        items = await _llm_targets(
-            render("trending_target", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
-                   TODAY=datetime.now().strftime("%Y-%m-%d"), MATERIAL=material,
-                   OWN_HITS=own_hits_text, BAN_LIST="\n".join(ban_lines)
-                   or "（近 14 天无出题记录）"),
-            "挑出今天能怼的靶子（最多 3 个，宁缺毋滥；榜内无可选时的备胎批）。")
+               INDUSTRY=industry, BAN_LIST="\n".join(ban_lines) or "（近 14 天无出题记录）"),
+        "从行业原料里挑靶子（最多 3 个；没有够格的大事就空数组）。")
+
+    # 程序化科技闸：靶子（标题+hotspot）必须含科技/行业关键词，防模型拿社会新闻凑数
+    def _industry_gate(batch_items: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for x in batch_items:
+            text = _norm(f"{x.get('title') or ''} {x.get('hotspot') or ''}").lower()
+            if any(k.lower() in text for k in _TECH_KW):
+                out.append(x)
+        return out
+    gated = _industry_gate(items)
+    if items and not gated:
+        print(f"[trending] 行业闸拦截 {len(items)} 条非行业靶子，整批作废")
+    items = gated
 
     # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
     watch_norms = [_norm(x["title"]) for x in watch_items if len(_norm(x["title"])) >= 10]
@@ -347,7 +363,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                     for e in (x.get("evidences") or []) if isinstance(e, dict) and e.get("text")
                 ][:3],
                 "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
-                "heat": str(x.get("heat") or ("百度热搜（在榜）" if stage == "board" else "未在榜（备胎）"))[:60],
+                "heat": str(x.get("heat") or "科技媒体头条")[:60],
             }
             t = Topic(
                 title=str(x.get("title"))[:60],
@@ -369,9 +385,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             created.append(t.id)
         s.commit()
 
-    ctx.set_progress(100, f"完成：{len(created)} 条靶子入选题库（{'热榜内挑靶' if stage == 'board' else '备胎批：榜内无可结合'}；替代 {len(superseded)} 条当日旧批次）")
+    ctx.set_progress(100, f"完成：{len(created)} 条行业靶子入选题库（替代 {len(superseded)} 条当日旧批次）")
     return {"radar_notes": radar_notes, "topic_ids": created, "superseded": superseded,
-            "targets": len(created), "stage": stage,
+            "targets": len(created),
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "queries": queries, "web": search_metas}}
 
