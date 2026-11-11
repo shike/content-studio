@@ -76,12 +76,17 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         if script is None:
             raise RuntimeError(f"script {script_id} 不存在")
         topic = s.get(Topic, script.topic_id) if script.topic_id else None
+        _tgt = ((topic.evidence or {}).get("target") or {}) if topic else {}
         topic_info = {
             "title": topic.title if topic else "",
             "angle": topic.angle if topic else "",
             "audience": topic.audience if topic else "both",
             "pain_points": (topic.evidence or {}).get("pain_points", []) if topic else [],
             "hooks": (topic.evidence or {}).get("hooks", []) if topic else [],
+            # 靶子产线（2026-11-11 观点怼热点主轴）：有靶子材料时稿子必须贴着事件写
+            "target_event": _tgt.get("event", ""),
+            "target_why": _tgt.get("why", ""),
+            "target_evidences": _tgt.get("evidences", []),
         }
     template_id = int(payload.get("template_id") or 0)
     template = None

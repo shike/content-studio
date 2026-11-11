@@ -106,12 +106,13 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
 
 @register_executor("trending_topics")
 async def trending_topics(ctx: JobContext, payload: dict) -> dict:
-    """今日热点选题提炼（R1.4，2026-10-08 质量重构）：四路原料 × 租户画像 → ≤3 个切角。
+    """今日热点靶子提炼（2026-11-11 观点怼热点主轴，原 R1.4 选题切角线升级）：
+    四路原料 × 租户画像 → ≤3 个「今天能怼」的靶子（事件/为什么值得怼/切角×3/论据带源/辣度）。
 
     四路原料：百度热搜今日榜（主力）/ 联网检索（按画像生成的查询词，逐条 1 发）/ 对标圈
-    近 2 天（议题参考，禁止当热点）/ 近 7 天已出题热点（禁写清单）。切角过三层硬校验
+    近 2 天（议题参考，禁止当热点）/ 近 7 天已出题热点（禁写清单）。靶子过三层硬校验
     （对标圈拦截、7 天热点去重、批内去重）才落库，宁缺毋滥；批次替代：当日无下游的旧
-    draft 让位新批次。原料收集失败不阻塞，LLM 输入里如实标注缺料。"""
+    draft 让位新批次；无可怼=诚实空过（不挂失败）。原料收集失败不阻塞，LLM 输入里如实标注缺料。"""
     import re as _re
     from datetime import datetime, timedelta
 
@@ -173,10 +174,6 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 prev_hotspots.append(h[:110])
                 prev_norms.append(_norm(h))
     recent_titles = recent_topic_titles(14)  # 本模块尾部定义的防撞车件
-    # 内容支柱轮转（课程定位 2026-10-12）：欲望钩子常驻（流量引擎），另两席在干货/打假/背书间轮换
-    _doy = datetime.now().timetuple().tm_yday
-    _rest = ["干货切片", "信任打假", "交付背书"]
-    pillars = ["欲望钩子", _rest[_doy % 3], _rest[(_doy + 1) % 3]]
     ban_lines = [f"- {h}" for h in prev_hotspots]
     ban_lines += [f"- （已有选题）{t}" for t in recent_titles]
 
@@ -221,7 +218,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             search_metas.append({"query": q, "status": f"error: {str(e)[:60]}"})
     web_lines = web_lines[:15]
 
-    ctx.set_progress(62, "结合创作者画像提炼切角")
+    ctx.set_progress(62, "结合创作者画像提炼靶子")
     material_parts = []
     material_parts.append("【国内科技/AI 资讯（爱范儿·IT之家，近 48 小时）——创作者领域的主力原料】\n"
                           + ("\n".join(f"- {x['title']}（{x['source']}{('/' + x['date']) if x['date'] else ''}）"
@@ -242,17 +239,16 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     material = "\n\n".join(material_parts)
 
     data = await gateway.complete_json(
-        [{"role": "system", "content": render("trending_topics",
+        [{"role": "system", "content": render("trending_target",
                                               PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                                               TODAY=datetime.now().strftime("%Y-%m-%d"),
-                                              PILLARS="；".join(pillars),
                                               MATERIAL=material,
                                               BAN_LIST="\n".join(ban_lines)
                                               or "（近 14 天无出题记录）")},
-         {"role": "user", "content": "提炼今天可写的 3 个选题切角。"}],
-        purpose="trending_topics", max_tokens=8000, thinking="disabled")
+         {"role": "user", "content": "挑出今天能怼的靶子（最多 3 个，宁缺毋滥）。"}],
+        purpose="trending_target", max_tokens=8000, thinking="disabled")
 
-    items = [x for x in (data.get("topics") or []) if isinstance(x, dict) and x.get("title")]
+    items = [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("title")]
 
     # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
     watch_norms = [_norm(x["title"]) for x in watch_items if len(_norm(x["title"])) >= 10]
@@ -277,9 +273,14 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         if len(batch) >= 3:
             break
     if not batch:
-        raise RuntimeError("热点提炼无有效切角（原料不足或全部未过新鲜度校验），请重试")
+        # 诚实空过（2026-11-11 靶子产线定版：无可怼≠失败，失败是异常不是工作流）
+        ctx.set_progress(100, "今日无可怼靶子（原料不足或全部未过新鲜度校验），诚实空过")
+        return {"radar_notes": radar_notes, "topic_ids": [], "superseded": [],
+                "targets": 0,
+                "material": {"watch": len(watch_items), "news": news_meta,
+                             "hot": hot_meta, "queries": queries, "web": search_metas}}
 
-    ctx.set_progress(85, f"切角落库（{len(batch)} 条过校验，选题库 draft）")
+    ctx.set_progress(85, f"靶子落库（{len(batch)} 条过校验，选题库 draft）")
     created: list[int] = []
     superseded: list[int] = []
     with Session(engine) as s:
@@ -298,18 +299,27 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 t.status = "rejected"
                 s.add(t)
                 superseded.append(t.id)
-        for i, x in enumerate(batch):
+        for x in batch:
+            tgt = {
+                "event": str(x.get("event") or "")[:400],
+                "why": str(x.get("why") or "")[:300],
+                "angles": [str(a)[:90] for a in (x.get("angles") or []) if str(a).strip()][:3],
+                "evidences": [
+                    {"text": str(e.get("text") or "")[:220], "source": str(e.get("source") or "")[:60]}
+                    for e in (x.get("evidences") or []) if isinstance(e, dict) and e.get("text")
+                ][:3],
+                "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
+            }
             t = Topic(
                 title=str(x.get("title"))[:60],
-                angle=str(x.get("angle") or ""),
+                angle="",  # 主切角由用户备稿时点选（PUT /topics/{id}/angle）
                 audience=x.get("audience") if x.get("audience") in ("boss", "fde", "both") else "both",
                 source_type="trending",
                 source_ref=str(x.get("hotspot") or "")[:200],
                 line="persona",  # 站外热点提炼走人设线（获客号有独立挖号进料，2026-11-02）
                 evidence={
                     "hotspot": x.get("hotspot", ""),
-                    "why_now": x.get("why_now", ""),
-                    "pillar": pillars[i % len(pillars)],
+                    "target": tgt,  # 靶子产线（2026-11-11 观点怼热点主轴）
                     "material": {"watch_count": len(watch_items), "news": news_meta,
                                  "hot": hot_meta, "queries": q_status, "web": search_metas},
                 },
@@ -320,9 +330,10 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             created.append(t.id)
         s.commit()
 
-    ctx.set_progress(100, f"完成：{len(created)} 个切角已入选题库"
+    ctx.set_progress(100, f"完成：{len(created)} 条靶子入选题库"
                           f"（替代 {len(superseded)} 条当日旧批次）")
     return {"radar_notes": radar_notes, "topic_ids": created, "superseded": superseded,
+            "targets": len(created),
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "queries": queries, "web": search_metas}}
 

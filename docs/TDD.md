@@ -183,16 +183,21 @@ article:    pending（报题待写）──► generating ──► draft ──
 ### 选题中心
 - `POST /api/topics/ideas` `{text}` → 202 `{topic_id, job_id}`（深研任务）
 - `POST /api/topics/quick` `{title, audience?}` → 201（快速记选题，不触发 LLM；R1.1b）
-- `POST /api/topics/trending` → 202 `{job_id}`（今日热点选题提炼，R1.4）。executor
-  `trending_topics`：站内对标议题（近 2 天非 ignored 视频标题+互动）+ 联网检索（单查询纪律）×
-  租户画像 → `complete_json(purpose="trending_topics", max_tokens=4000)` → 1~3 条
-  `Topic(source_type="trending", evidence={hotspot, why_now, material})` draft 落库；
+- `POST /api/topics/trending` → 202 `{job_id}`（**今日热点靶子提炼**，2026-11-11 人设号
+  「观点怼热点」主轴，取代 R1.4 选题切角线）。executor `trending_topics`：
+  站内对标议题（近 2 天非 ignored 视频标题+互动）+ 联网检索（单查询纪律）× 租户画像 →
+  `complete_json(purpose="trending_target", max_tokens=8000, prompt=trending_target.md)` →
+  ≤3 条靶子 `Topic(source_type="trending", evidence={hotspot, target:{event, why,
+  angles×3, evidences[{text,source}], spice}, material})` draft 落库（angle 列留空，
+  主切角由用户备稿时点选）；靶子标准=有得怼（可反驳/可站队）×绑领域×绑真热点×禁编造，
+  辣度 low/mid/high 只预判不设限；**无可怼=诚实空过（targets:0，不挂失败）**；
   原料收集失败不阻塞（对标空窗/联网关闭均降级并在 evidence.material 留痕）；
-  prompt 占位符 PERSONA/AUDIENCE_NOTE/MATERIAL（render 强制校验）。
+  prompt 占位符 PERSONA/AUDIENCE_NOTE/MATERIAL/BAN_LIST（render 强制校验）。
 - 入库时相似选题检测（R1.1c）：与既有 draft 选题标题相似 → 标记 evidence.similar_to
 - `GET /api/topics?status=&source=&audience=&min_score=&limit=` → `{items:[...]}`
 - `GET /api/topics/{id}` → 详情含 `research_report`
 - `POST /api/topics/{id}/approve` / `POST /api/topics/{id}/reject`
+- `PUT /api/topics/{id}/angle` `{angle}` → 靶子备稿选主切角（仅 draft 态；脚本生成读 topic.angle）
 - `POST /api/topics/{id}/set-type` `{account_type: persona|leadgen}` → 切换选题线（topics.line 落库，evidence 记 account_type_manual）
 - `DELETE /api/topics/{id}` → 删选题并连带删研究报告；文章保留仅解绑 `topic_id`
 - `POST /api/analyze/video` `{url}` → 202 `{job_id}`（下载→ASR→LLM 拆解，产出 benchmark + topic 候选）
@@ -376,7 +381,7 @@ article:    pending（报题待写）──► generating ──► draft ──
   - 自动重试放行（`_reenqueue`）与人工重试同样先做实体复活，failed 状态不跨重试周期。
   - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate）已全部迁移，执行器体内不再自带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
-- **执行器注册表**（20 类）：`article_generate / article_kb_write / article_hotspots（站外热点报题）/ article_style_extract / article_kb_topics / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / trending_topics / idea_research / hl_search_matrix / watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）`。
+- **执行器注册表**（20 类）：`article_generate / article_kb_write / article_hotspots（站外热点报题）/ article_style_extract / article_kb_topics / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；靶子产线 2026-11-11：topic.evidence.target 存在时注入 target_event/target_why/target_evidences，稿贴事件写、论据只用带源事实）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / trending_topics / idea_research / hl_search_matrix / watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）`。
 - **热点雷达（话题查看域）**：`radar_topics` 表（ch_id 全局唯一/seen_ids 防重/recent 最近新视频）。每日 6 点随 `trending_daily` 巡检话题新视频，低粉高赞同口径自动进拆解（R3.7）；`/api/radar` 仅保留查看域 4 端点（契约见 §6 雷达节）。独立话题雷达面与 topic_radar 任务已并入每日热点（2026-11-10 审计定版）。
 - **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，与 acceptance/quality.py 同表）；均只在命中时多花一次 LLM 调用。
 - **媒体即用即弃**：`benchmark_analyze` 成功即删视频文件（转写/拆解已入库；重拆解自动重新下载，本地拆解的原文件删后需重新上传）；reaper 巡检兜底清扫已完成/已忽略条目的遗留媒体，进行中任务的媒体不动。

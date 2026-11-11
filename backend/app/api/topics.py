@@ -152,6 +152,26 @@ def approve_topic(topic_id: int) -> dict:
     return _set_status(topic_id, "approved")
 
 
+@router.put("/{topic_id}/angle")
+def set_topic_angle(topic_id: int, body: dict,
+                    user: User = Depends(require_user)) -> dict:
+    """靶子备稿：用户从靶子切角里选定主切角（2026-11-11 观点怼热点主轴）。
+    只许 draft 态设置；脚本生成读 topic.angle 作主切角。"""
+    angle = str((body or {}).get("angle") or "").strip()
+    if not angle:
+        raise HTTPException(status_code=400, detail="angle 不能为空")
+    with Session(engine) as s:
+        topic = s.get(Topic, topic_id)
+        if topic is None:
+            raise HTTPException(status_code=404, detail="topic not found")
+        if topic.status != "draft":
+            raise HTTPException(status_code=409, detail="只有待备稿（draft）的靶子能选切角")
+        topic.angle = angle[:120]
+        s.add(topic)
+        s.commit()
+    return {"id": topic_id, "angle": angle[:120]}  # commit 后实例已过期，回传本地值（expire_on_commit 坑）
+
+
 @router.post("/{topic_id}/set-type")
 def set_topic_type(topic_id: int, body: dict,
                    user: User = Depends(require_user)) -> dict:

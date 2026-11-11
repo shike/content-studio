@@ -8,6 +8,7 @@ export interface TodoStats {
   draftTopics: number // 待审选题（两线合计）
   draftTopicsPersona: number // 待审选题·人设库
   draftTopicsLeadgen: number // 待审选题·获客库
+  targetsPersona: number // 今日靶子·待备稿（2026-11-11 观点怼热点主轴，选题库叶子徽章口径）
   pendingScriptsPersona: number // 待定稿脚本·人设
   pendingScriptsLeadgen: number // 待定稿脚本·获客
   pendingArticles: number // 内容工场待决策稿（排队写+待发；2026-11-10 系统全干定版）
@@ -25,7 +26,7 @@ export async function fetchTodoStats(): Promise<TodoStats> {
 不再做产线合计——树组徽章由 App 按子叶求和。过程性数字（生成中/排队/待拆）不上菜单。 */
 export interface MenuStats {
   today: number // 今天=待审选题合计
-  p_topics: number // 人设选题库=待审选题·人设
+  p_topics: number // 今日靶子=待备稿靶子（2026-11-11 人设号观点怼热点主轴）
   p_content: number // 内容看板=待定稿脚本·人设
   p_bench: number // 对标拆解=拆解待定夺·人设
   p_cand: number // 候选定夺=候选待定夺·人设
@@ -50,7 +51,7 @@ export async function fetchMenuStats(): Promise<MenuStats> {
   ])
   return {
     today: todo.draftTopics,
-    p_topics: todo.draftTopicsPersona,
+    p_topics: todo.targetsPersona ?? 0,
     p_content: todo.pendingScriptsPersona,
     p_cand: todo.openCandidatesPersona,
     p_bench: bmP.counts.pending,

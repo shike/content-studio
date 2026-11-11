@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Activity,
   Clapperboard,
+  Crosshair,
   Eye,
   FileText,
   Fingerprint,
@@ -25,6 +26,7 @@ import type { LucideIcon } from 'lucide-react'
 import Today from './pages/Today'
 import Workshop from './pages/Workshop'
 import ContentItems from './pages/ContentItems'
+import HotTargets from './pages/HotTargets'
 import ArticleStyle from './pages/ArticleStyle'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
@@ -80,7 +82,7 @@ const TREE: TreeGroup[] = [
   {
     key: 'persona', label: '人设号', icon: Fingerprint,
     children: [
-      { key: 'p_topics', label: '选题库', icon: Lightbulb },
+      { key: 'p_topics', label: '今日靶子', icon: Crosshair },
       { key: 'p_content', label: '内容看板', icon: Clapperboard },
       { key: 'p_own', label: '账号经营', icon: TrendingUp },
       { key: 'p_bench', label: '对标拆解', icon: Scissors },
@@ -312,7 +314,7 @@ export default function App() {
       <main className="h-full flex-1 overflow-y-auto">
         <div key={active} className="fade-in mx-auto max-w-7xl px-8 py-8">
           {active === 'today' && <Today onNavigate={navTo} />}
-          {active === 'p_topics' && <div><Topics accountType="persona" /><div className="mt-6"><TopicInsights /></div></div>}
+          {active === 'p_topics' && <div><HotTargets onNavigate={navTo} /><div className="mt-6"><TopicInsights /></div></div>}
           {active === 'l_topics' && <Topics accountType="leadgen" />}
           {active === 'p_content' && <Scripts onNavigate={navTo} accountType="persona" />}
           {active === 'l_scripts' && <Scripts onNavigate={navTo} accountType="leadgen" />}

@@ -61,6 +61,7 @@ export interface Topic {
   angle: string
   audience: 'boss' | 'fde' | 'both'
   source_type: string
+  source_ref?: string
   score: number | null
   sharpness: number | null
   status: string
