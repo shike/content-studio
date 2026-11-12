@@ -6,8 +6,10 @@
   49 条带真实 hot_value（他发布平台自己的榜=第一优先）。
 - 知乎热榜：api.zhihu.com/topstory/hot-list 匿名 200（web 端 v3 接口 401 别用）。
   微博 hotSearch 匿名 403、GitHub trending 服务器双次超时、36kr RSS 空——别回收。
-- 科技资讯 RSS：爱范儿/IT之家/少数派/雷峰网（虎嗅 rss 已死、量子位/机器之心 RSS
-  废弃——别再回收）。抓取失败一律降级返回 meta，由调用方如实标注"未生效"，绝不静默吞。
+- 科技资讯 RSS：爱范儿/IT之家/少数派/雷峰网/InfoQ（虎嗅 rss 已死、机器之心 rss 返回
+  SPA 壳非 feed——别再回收）。AI 原生源：量子位走 WordPress REST（wp-json 实测全开，
+  rss 早已废弃）、GitHub 新起爆仓库走 api.github.com（网页 trending 服务器超时但 API
+  通——别混用）。抓取失败一律降级返回 meta，由调用方如实标注"未生效"，绝不静默吞。
 """
 from __future__ import annotations
 
@@ -23,13 +25,20 @@ _DOUYIN_HOT_URL = ("https://www.douyin.com/aweme/v1/web/hot/search/list/"
                    "?device_platform=webapp&aid=6383&channel=channel_pc_web"
                    "&version_code=170400&pc_client_type=1")
 _ZHIHU_HOT_URL = "https://api.zhihu.com/topstory/hot-list?limit=50"
-# 国内科技/AI 资讯（RSS 实测可用清单；虎嗅 rss 已死、量子位/机器之心 RSS 废弃——别再回收）
+# 国内科技/AI 资讯（RSS 实测可用清单；虎嗅 rss 已死、机器之心 rss 是 SPA 壳——别再回收）
 _TECH_FEEDS: list[tuple[str, str]] = [
     ("爱范儿", "https://www.ifanr.com/feed"),
     ("IT之家", "https://www.ithome.com/rss/"),
     ("少数派", "https://sspai.com/feed"),
     ("雷峰网", "https://www.leiphone.com/feed"),
+    ("InfoQ", "https://www.infoq.cn/feed.xml"),
 ]
+# AI 垂直媒体（WordPress REST，title.rendered+date_gmt 实测可用；量子位 rss 废弃走此口）
+_WP_FEEDS: list[tuple[str, str]] = [
+    ("量子位", "https://www.qbitai.com/wp-json/wp/v2/posts?per_page=12&_fields=title,date_gmt"),
+]
+_GH_SEARCH_URL = ("https://api.github.com/search/repositories"
+                  "?q=created%3A%3E{date}+stars%3A%3E100&sort=stars&order=desc&per_page=12")
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
@@ -134,12 +143,45 @@ def fetch_zhihu_hot(limit: int = 30, timeout: float = 12.0) -> tuple[list[dict],
     return items, meta
 
 
+def fetch_github_hot(days: int = 5, per: int = 12, timeout: float = 12.0) -> tuple[list[dict], dict]:
+    """GitHub 近 N 天新起爆仓库（api.github.com 实测服务器可用；github.com 网页超时别混用）。
+
+    新仓库星速=开源圈内刷屏信号；匿名 search API 限额 10 次/分，一天一次足够。
+    返回 ([{word=owner/repo, desc?, stars}], meta)。"""
+    meta: dict = {"source": "github_hot", "status": "ok", "count": 0, "note": ""}
+    url = _GH_SEARCH_URL.format(date=(datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d"))
+    try:
+        resp = httpx.get(url, headers={"User-Agent": _UA, "Accept": "application/vnd.github+json"},
+                         timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:  # noqa: BLE001 降级：原料缺一路不阻塞，调用方如实标注
+        meta["status"] = f"error: {type(e).__name__}: {str(e)[:80]}"
+        return [], meta
+    items: list[dict] = []
+    for x in (data.get("items") or []):
+        name = str(x.get("full_name") or "").strip()
+        if not name:
+            continue
+        items.append({"word": name,
+                      "desc": str(x.get("description") or "").strip()[:60],
+                      "stars": int(x.get("stargazers_count") or 0)})
+        if len(items) >= per:
+            break
+    meta["count"] = len(items)
+    if not items:
+        meta["status"] = "error: items 为空（结构可能变了）"
+    return items, meta
+
+
 def fetch_tech_news(per_source: int = 8, fresh_hours: int = 48,
                     timeout: float = 12.0) -> tuple[list[dict], dict]:
-    """抓国内科技/AI 资讯（爱范儿/IT之家/少数派/雷峰网 RSS），只留近 fresh_hours 小时的条目。
+    """抓国内科技/AI 资讯（爱范儿/IT之家/少数派/雷峰网/InfoQ RSS + 量子位 wp-json），
+    只留近 fresh_hours 小时的条目。
 
     返回 ([{title, source, date}], meta)。这是"领域内今日热点"的主力原料——
-    泛热搜榜上领域条目稀少，科技媒体的日更能保证切角有料可绑。"""
+    泛热搜榜上领域条目稀少（用户实证：抖音榜 49 条 AI 相关仅 1 条），科技媒体/AI 垂媒
+    的日更才是靶子菜单的密度担当。"""
     meta: dict = {"source": "tech_news", "status": "ok", "count": 0, "note": ""}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=fresh_hours)
     items: list[dict] = []
@@ -173,8 +215,37 @@ def fetch_tech_news(per_source: int = 8, fresh_hours: int = 48,
             src_stats.append(f"{name}: error {type(e).__name__}")
             continue
         src_stats.append(f"{name}: {got} 条")
+    for name, url in _WP_FEEDS:  # AI 垂媒走 WordPress REST（wp-json），新鲜度口径与 RSS 一致
+        got = 0
+        try:
+            resp = httpx.get(url, headers={"User-Agent": _UA}, timeout=timeout,
+                             follow_redirects=True)
+            resp.raise_for_status()
+            for raw in (resp.json() or []):
+                title = re.sub(r"\s+", " ", re.sub(
+                    r"<[^>]+>", "", str(((raw.get("title") or {}).get("rendered")) or ""))).strip()
+                if not title:
+                    continue
+                when = None
+                dg = str(raw.get("date_gmt") or "")
+                if dg:
+                    try:
+                        when = datetime.strptime(dg[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+                    except Exception:  # noqa: BLE001 日期坏条目按无日期处理
+                        when = None
+                if when is not None and when < cutoff:
+                    continue  # 只留新鲜条目（旧闻不许当"今日"）
+                items.append({"title": title, "source": name,
+                              "date": when.astimezone(timezone.utc).strftime("%m-%d") if when else ""})
+                got += 1
+                if got >= per_source:
+                    break
+        except Exception as e:  # noqa: BLE001 单源失败不拖垮整路
+            src_stats.append(f"{name}: error {type(e).__name__}")
+            continue
+        src_stats.append(f"{name}: {got} 条")
     meta["count"] = len(items)
     meta["note"] = "；".join(src_stats)
     if not items:
-        meta["status"] = "error: 四个源都没有可用条目"
+        meta["status"] = "error: 六个源都没有可用条目"
     return items, meta

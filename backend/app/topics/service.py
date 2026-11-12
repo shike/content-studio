@@ -120,7 +120,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     from ..models import Article as _A, BenchmarkVideo, Script as _S
     from ..tenant_brand import audience_note_of, brand_of
-    from .hotlist import fetch_baidu_hot, fetch_douyin_hot, fetch_tech_news, fetch_zhihu_hot
+    from .hotlist import fetch_baidu_hot, fetch_douyin_hot, fetch_github_hot, fetch_tech_news, fetch_zhihu_hot
 
     tenant_id = payload.get("tenant_id") or 1
     with Session(engine) as s:
@@ -179,11 +179,12 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     ban_lines = [f"- {h}" for h in prev_hotspots]
     ban_lines += [f"- （已有选题）{t}" for t in recent_titles]
 
-    ctx.set_progress(24, "抓国内热点榜与科技资讯（抖音/知乎/百度三榜+四源科技媒体）")
+    ctx.set_progress(24, "抓国内热点榜与科技资讯（三榜+六源科技媒体+GitHub 新库）")
     hot_items, hot_meta = await asyncio.to_thread(fetch_baidu_hot, 50)
     dy_items, dy_meta = await asyncio.to_thread(fetch_douyin_hot, 50)
     zh_items, zh_meta = await asyncio.to_thread(fetch_zhihu_hot, 30)
     news_items, news_meta = await asyncio.to_thread(fetch_tech_news)
+    gh_items, gh_meta = await asyncio.to_thread(fetch_github_hot)
 
     ctx.set_progress(36, "按画像生成今日检索词")
     queries: list[str] = []
@@ -251,7 +252,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 "gpu", "显卡", "服务器", "数据中心", "v100", "a100", "h100", "4090", "5090",
                 "鸿蒙", "昇腾", "问界", "比亚迪", "蔚来", "小鹏", "极氪", "联想", "大疆",
                 "宇树", "unitree", "manus", "suno", "cursor", "notion", "figma", "vscode",
-                "qwen", "grok", "xai", "deepmind", "saas", "办公")
+                "qwen", "grok", "xai", "deepmind", "saas", "办公", "ios", "android", "app", "github", "仓库")
     raw_board = []
     for label, rows in (("抖音热点", dy_items), ("知乎热榜", zh_items), ("百度热搜", hot_items)):
         raw_board += [(label, i + 1, str(x.get("word") or ""), str(x.get("desc") or ""))
@@ -283,12 +284,15 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     board_multi = [_bl(g) for g in groups if len(g["boards"]) > 1 and _kw_hit(g)]
     board_single = [_bl(g) for g in groups if len(g["boards"]) == 1 and _kw_hit(g)]
     board_lines = ([f"- ★真热点·多榜同在：{ln}" for ln in board_multi] + board_single)
+    gh_lines = [f"- {x['word']}（★{x['stars']}）｜{x['desc']}" for x in gh_items]
     industry_parts = [
-        "【科技媒体（AI/科技行业动态，48h 内，四源）】\n"
+        "【科技媒体+AI 垂媒（行业动态，48h 内，六源）】\n"
         + ("\n".join(f"- {x['title']}（{x['source']}{('/' + x['date']) if x['date'] else ''}）"
                      for x in news_items) if news_items else f"（未生效：{news_meta.get('status')}）"),
         "【三榜在榜科技条目（在榜排名=热度硬证据；多榜同在=真热点第一优先）】\n"
         + ("\n".join(board_lines) if board_lines else "（当前三榜均无科技类条目）"),
+        "【GitHub 近 5 天新起爆仓库（开源圈内刷屏信号，星数=知名度证据）】\n"
+        + ("\n".join(gh_lines) if gh_lines else f"（未生效：{gh_meta.get('status')}）"),
     ]
     if web_lines:
         industry_parts.append("【联网检索线索（今日补充，可能含隔夜大事件）】\n"
@@ -398,7 +402,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 "targets": 0,
                 "material": {"watch": len(watch_items), "news": news_meta,
                              "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                             "queries": queries, "web": search_metas}}
+                             "github": gh_meta, "queries": queries, "web": search_metas}}
 
     ctx.set_progress(85, f"靶子落库（{len(batch)} 条过校验，选题库 draft）")
     created: list[int] = []
@@ -438,7 +442,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                     "target": tgt,  # 半句话靶子（2026-11-12 三秒半句话方法论定版）
                     "material": {"watch_count": len(watch_items), "news": news_meta,
                                  "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                                 "queries": q_status, "web": search_metas},
+                                 "github": gh_meta, "queries": q_status, "web": search_metas},
                 },
                 status="draft",
             )
