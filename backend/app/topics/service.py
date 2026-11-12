@@ -316,6 +316,9 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     # 程序化科技闸：靶子（标题+hotspot）必须含科技/行业关键词，防模型拿社会新闻凑数
     _CLAUSE_PUNCT = _re.compile(r"[，,。？?：:；;、]")
+    # 劝告开头闸（2026-11-12 实战漏网「显卡跳水别急着抄底」）：行动指导不是判决——
+    # 他的判决只有「靶子名+判词」（祝XX倒闭/XX就是收割），劝告句式一律废
+    _ADVICE_OPENER = _re.compile(r"^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨|记得)")
     def _industry_gate(batch_items: list[dict]) -> list[dict]:
         out: list[dict] = []
         for x in batch_items:
@@ -325,6 +328,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 continue  # 非行业靶子
             if not sentence or len(sentence) > 16 or _CLAUSE_PUNCT.search(sentence):
                 continue  # 半句话闸：超长/复合句物理废掉（三秒半句话方法论，不信任模型自觉）
+            if _ADVICE_OPENER.match(sentence):
+                continue  # 劝告开头=行动指导，废
             x["sentence"] = sentence
             out.append(x)
         return out
