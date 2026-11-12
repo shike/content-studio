@@ -120,7 +120,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     from ..models import Article as _A, BenchmarkVideo, Script as _S
     from ..tenant_brand import audience_note_of, brand_of
-    from .hotlist import fetch_baidu_hot, fetch_douyin_hot, fetch_github_hot, fetch_tech_news, fetch_zhihu_hot
+    from .hotlist import fetch_aihot_hot, fetch_baidu_hot, fetch_douyin_hot, fetch_github_hot, fetch_tech_news, fetch_zhihu_hot
 
     tenant_id = payload.get("tenant_id") or 1
     with Session(engine) as s:
@@ -185,6 +185,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     zh_items, zh_meta = await asyncio.to_thread(fetch_zhihu_hot, 30)
     news_items, news_meta = await asyncio.to_thread(fetch_tech_news)
     gh_items, gh_meta = await asyncio.to_thread(fetch_github_hot)
+    ah_items, ah_meta = await asyncio.to_thread(fetch_aihot_hot)
 
     ctx.set_progress(36, "按画像生成今日检索词")
     queries: list[str] = []
@@ -289,6 +290,10 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         "【科技媒体+AI 垂媒（行业动态，48h 内，六源）】\n"
         + ("\n".join(f"- {x['title']}（{x['source']}{('/' + x['date']) if x['date'] else ''}）"
                      for x in news_items) if news_items else f"（未生效：{news_meta.get('status')}）"),
+        "【AIHot 精选 AI 热点（aihot.news·大模型两轮打分筛过，条目自带摘要）】\n"
+        + ("\n".join(f"- {x['title']}" + (f"｜{x['summary']}" if x['summary'] else "")
+                      + (f"（{x['date']}）" if x['date'] else "") for x in ah_items)
+           if ah_items else f"（未生效：{ah_meta.get('status')}）"),
         "【三榜在榜科技条目（在榜排名=热度硬证据；多榜同在=真热点第一优先）】\n"
         + ("\n".join(board_lines) if board_lines else "（当前三榜均无科技类条目）"),
         "【GitHub 近 5 天新起爆仓库（开源圈内刷屏信号，星数=知名度证据）】\n"
@@ -402,7 +407,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 "targets": 0,
                 "material": {"watch": len(watch_items), "news": news_meta,
                              "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                             "github": gh_meta, "queries": queries, "web": search_metas}}
+                             "github": gh_meta, "aihot": ah_meta, "queries": queries, "web": search_metas}}
 
     ctx.set_progress(85, f"靶子落库（{len(batch)} 条过校验，选题库 draft）")
     created: list[int] = []
@@ -442,7 +447,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                     "target": tgt,  # 半句话靶子（2026-11-12 三秒半句话方法论定版）
                     "material": {"watch_count": len(watch_items), "news": news_meta,
                                  "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                                 "github": gh_meta, "queries": q_status, "web": search_metas},
+                                 "github": gh_meta, "aihot": ah_meta, "queries": q_status, "web": search_metas},
                 },
                 status="draft",
             )
@@ -456,7 +461,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             "targets": len(created),
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                         "github": gh_meta, "queries": queries, "web": search_metas}}
+                         "github": gh_meta, "aihot": ah_meta, "queries": queries, "web": search_metas}}
 
 
 def recent_topic_titles(days: int = 14, limit: int = 24, line: str = "") -> list[str]:

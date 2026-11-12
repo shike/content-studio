@@ -39,6 +39,7 @@ _WP_FEEDS: list[tuple[str, str]] = [
 ]
 _GH_SEARCH_URL = ("https://api.github.com/search/repositories"
                   "?q=created%3A%3E{date}+stars%3A%3E100&sort=stars&order=desc&per_page=12")
+_AIHOT_FEED_URL = "https://aihot.news/feed.xml"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
@@ -171,6 +172,48 @@ def fetch_github_hot(days: int = 5, per: int = 12, timeout: float = 12.0) -> tup
     meta["count"] = len(items)
     if not items:
         meta["status"] = "error: items 为空（结构可能变了）"
+    return items, meta
+
+
+def fetch_aihot_hot(limit: int = 30, fresh_hours: int = 48, timeout: float = 12.0) -> tuple[list[dict], dict]:
+    """AIHot 精选 AI 热点（aihot.news，数字生命卡兹克出品；2026-11-12 服务器实测 50 条可抓）。
+
+    他们用大模型两轮打分筛过的 AI 热点榜 RSS（/feed.xml=精选档，另有 /feed/daily.xml
+    日报档 /feed/all.xml 全量档——日报档条目是整期日报聚合不适合当靶子原料，全量档含
+    未筛水分），条目自带一句话摘要。返回 ([{title, summary, date}], meta)。"""
+    meta: dict = {"source": "aihot", "status": "ok", "count": 0, "note": ""}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=fresh_hours)
+    try:
+        resp = httpx.get(_AIHOT_FEED_URL, headers={"User-Agent": _UA},
+                         timeout=timeout, follow_redirects=True)
+        resp.raise_for_status()
+    except Exception as e:  # noqa: BLE001 降级：原料缺一路不阻塞，调用方如实标注
+        meta["status"] = f"error: {type(e).__name__}: {str(e)[:80]}"
+        return [], meta
+    items: list[dict] = []
+    for raw in re.findall(r"<item>(.*?)</item>", resp.text, re.S):
+        tm = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", raw, re.S)
+        title = re.sub(r"\s+", " ", tm.group(1)).strip() if tm else ""
+        if not title:
+            continue
+        dm = re.search(r"<description>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</description>", raw, re.S)
+        summary = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", dm.group(1))).strip()[:80] if dm else ""
+        pm = re.search(r"<pubDate>([^<]+)</pubDate>", raw)
+        when = None
+        if pm:
+            try:
+                when = parsedate_to_datetime(pm.group(1).strip())
+            except Exception:  # noqa: BLE001 日期坏条目按无日期处理
+                when = None
+        if when is not None and when < cutoff:
+            continue  # 只留新鲜条目（旧闻不许当"今日"）
+        items.append({"title": title, "summary": summary,
+                      "date": when.astimezone(timezone.utc).strftime("%m-%d") if when else ""})
+        if len(items) >= limit:
+            break
+    meta["count"] = len(items)
+    if not items:
+        meta["status"] = "error: item 解析为空（结构可能变了）"
     return items, meta
 
 
