@@ -112,7 +112,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     五路原料（2026-11-12 生产服务器逐一实测）：百度热搜前 50 / 抖音热点榜 50（他发布
     平台自己的榜，第一优先）/ 知乎热榜 30 / 科技媒体 RSS 四源 48h / 对标圈近 2 天
     （议题参考，禁止当热点）。三榜条目跨榜合并：同一件事多榜同在=真热点，复合热度
-    证据排最前。靶子过三层硬校验（对标圈拦截、7 天热点去重、批内去重）才落库，
+    证据排最前。靶子过硬校验（对标圈拦截、14 天判决句撞车、批内由头去重；由头层 7 天禁撞已废——续集合法）才落库，
     宁缺毋滥；批次替代：当日无下游的旧 draft 让位新批次；无可怼=诚实空过（不挂失败）。
     原料收集失败不阻塞，LLM 输入里如实标注缺料。"""
     import re as _re
@@ -162,22 +162,11 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             for b in rows if b.title
         ][:40]
 
-    # 近 7 天已出题热点（旧闻连出两天=质量事故：最高法 9-07 旧闻曾连续两天被当"今日"出题）
-    ctx.set_progress(16, "整理禁写清单（7 天热点 + 14 天已有选题）")
-    prev_hotspots: list[str] = []
-    prev_norms: list[str] = []
-    pcutoff = datetime.now() - timedelta(days=7)
-    with Session(engine) as s:
-        for t in s.exec(select(Topic).where(
-                Topic.source_type == "trending",  # type: ignore[attr-defined]
-                Topic.created_at >= pcutoff)).all():  # type: ignore[attr-defined]
-            h = str((t.evidence or {}).get("hotspot") or t.source_ref or "").strip()
-            if h:
-                prev_hotspots.append(h[:110])
-                prev_norms.append(_norm(h))
-    recent_titles = recent_topic_titles(14)  # 本模块尾部定义的防撞车件
-    ban_lines = [f"- {h}" for h in prev_hotspots]
-    ban_lines += [f"- （已有选题）{t}" for t in recent_titles]
+    # 防撞车（2026-11-13 实现修正，用户指认锁错对象）：唯一冷饭闸=判决句层 14 天去重——
+    # 由头层 7 天禁撞废除（按字面比对拦续集放复述，正好反了；新鲜度由 48h 新鲜菜单保证，
+    # 同一事件的新进展=合法续集，判词必须换新）
+    ctx.set_progress(16, "整理防撞车清单（14 天已出靶子的判决句）")
+    ban_lines = [f"- （已出过靶子）{t}" for t in recent_topic_titles(14, line="persona")]
 
     ctx.set_progress(24, "抓国内热点榜与科技资讯（三榜+六源科技媒体+GitHub 新库）")
     hot_items, hot_meta = await asyncio.to_thread(fetch_baidu_hot, 50)
@@ -390,9 +379,6 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         if is_similar_title(str(x.get("sentence") or ""), line="persona"):  # 标题撞车兜底（提炼走人设线）
             continue
         hn = _norm(hotspot)
-        if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
-               for p in prev_norms):
-            continue
         if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
             continue
         if any(hn in w for w in watch_norms):
@@ -500,19 +486,8 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
         lines.append(f"【{(v.title or '无标题')[:30]}｜播放 {play}】{tr}")
     transcripts = "\n\n".join(lines)
 
-    # 防撞车清单：近 7 天 persona 靶子 context + 近 14 天已有选题标题
-    pcutoff = datetime.now() - timedelta(days=7)
-    prev_norms: list[str] = []
-    with Session(engine) as s:
-        for t in s.exec(select(Topic).where(
-                Topic.line == "persona",  # type: ignore[attr-defined]
-                Topic.status.in_(["draft", "rejected"]),  # type: ignore[attr-defined]
-                Topic.created_at >= pcutoff)).all():  # type: ignore[attr-defined]
-            h = str((t.evidence or {}).get("hotspot") or t.source_ref or "").strip()
-            if h:
-                prev_norms.append(_norm(h)[:110])
-    ban_lines = [f"- （已有靶子）{t}" for t in recent_topic_titles(14, line="persona")]
-    ban_lines += [f"- （近期故事梗概）{h}" for h in prev_norms[:20]]
+    # 防撞车清单=已出过靶子的判决句（由头/梗概层禁撞废除，2026-11-13 同 trending 修正）
+    ban_lines = [f"- （已出过靶子）{t}" for t in recent_topic_titles(14, line="persona")]
 
     ctx.set_progress(45, "从交付故事锻半句话靶子")
     data = await gateway.complete_json(
@@ -539,7 +514,7 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
         print(f"[self_story] 半句话闸：{len(items)} 条进 → {len(gated)} 条出")
     items = gated
 
-    # 三层硬校验：7 天故事梗概去重 → 14 天标题撞车 → 批内去重；上限 3 条宁缺毋滥
+    # 硬校验：14 天判决句撞车 → 批内梗概去重（由头层禁撞已废，同故事多侧面合法）；上限 3 条宁缺毋滥
     batch: list[dict] = []
     seen_norms: list[str] = []
     for x in items:
@@ -549,9 +524,6 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
         if is_similar_title(str(x.get("sentence") or ""), line="persona"):
             continue
         hn = _norm(context)
-        if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
-               for p in prev_norms):
-            continue
         if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
             continue
         seen_norms.append(hn)

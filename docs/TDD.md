@@ -187,8 +187,8 @@ article:    pending（报题待写）──► generating ──► draft ──
   2026-11-12 方向1）：素材=SelfVideo.transcript 非空的转写（播放 Top12，各截 600 字），
   `complete_json(purpose="self_story_target", max_tokens=8000, prompt=self_story_target.md)`
   → 从真实交付故事锻半句话靶子（禁编造=细节必须在转写原文有出处）；半句话闸+劝告开头
-  闸（判词词根闸/行业闸不适用——故事靶形态是反差不是攻击）；7 天故事梗概去重+14 天标题
-  撞车+批内去重，上限 3 条；批次替代只让位同源；落库 source_type="self_story",
+  闸（判词词根闸/行业闸不适用——故事靶形态是反差不是攻击）；14 天判决句撞车+批内梗概去重
+  （由头/梗概层禁撞已废，同故事多侧面合法），上限 3 条；批次替代只让位同源；落库 source_type="self_story",
   heat="一线交付"；**挖不出=诚实空过**；prompt 占位符 PERSONA/AUDIENCE_NOTE/TODAY/
   TRANSCRIPTS/BAN_LIST（render 强制校验）。
 - `POST /api/topics/trending` → 202 `{job_id}`（**热点靶子·饭碗判决**，2026-11-12 三方向
@@ -217,8 +217,9 @@ article:    pending（报题待写）──► generating ──► draft ──
   （^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)=行动指导非判决）；
   对标圈近 2 天标题做 SequenceMatcher≥0.42 贪心聚类，**≥3 家同行的刷屏主题=争论已被
   验证，注入菜单供锻自己的判决**（同行标题本身仍禁当靶子；对标变体拦截 v7 起只拦照抄
-  hn-in-w）；三层硬校验（对标圈拦截/7 天热点去重/
-  批内去重）+14 天标题撞车兜底；上限 6 条宁缺毋滥；批次替代（当日无下游旧 draft 让位）；
+  hn-in-w）；硬校验（对标圈拦截/批内由头去重/14 天判决句撞车——**由头层 7 天禁撞已废**
+  （2026-11-13 用户指认实现错误：按字面锁由头=拦续集放复述，正好反了；防炒冷饭由 48h
+  新鲜菜单+判决句去重承担，BAN_LIST 喂已出靶子的判决句，同事件实质新进展=合法续集）；上限 6 条宁缺毋滥；批次替代（当日无下游旧 draft 让位）；
   **无可怼=诚实空过（targets:0，不挂失败）**；原料收集失败不阻塞（各路 meta 落
   evidence.material 留痕）；prompt 占位符 PERSONA/AUDIENCE_NOTE/TODAY/OWN_HITS/INDUSTRY/
   BAN_LIST（render 强制校验）。
