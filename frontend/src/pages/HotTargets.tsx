@@ -60,7 +60,8 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
       ])
       setTrending(d.items.filter((t) => t.source_type === 'trending'))
       setBench(d.items.filter((t) => t.source_type !== 'trending'))
-      setRejected(r.items)
+      // 「不怼」=你亲手点的校准样本；系统批次替代的让位行（evidence.superseded）不是你判的，不混进来
+      setRejected(r.items.filter((t) => !t.evidence?.superseded))
       const map: Record<number, string> = {}
       for (const s of sc.items || []) if (s.topic_id) map[s.topic_id] = s.status
       setScriptsMap(map)
