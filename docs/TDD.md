@@ -187,8 +187,11 @@ article:    pending（报题待写）──► generating ──► draft ──
   「观点怼热点」主轴：扩供应不降标准）。executor `trending_topics` 五路原料（生产服务器
   逐一实测免登录）：百度热搜前 50（hotlist.fetch_baidu_hot，内嵌 s-data）· 抖音热点榜 50
   （fetch_douyin_hot，www 域+Referer，带 hot_value，他发布平台自己的榜=第一优先）·
-  知乎热榜 30（fetch_zhihu_hot，api.zhihu.com；微博 hotSearch 匿名 403、GitHub trending
-  服务器超时、36kr RSS 空=不接线）· 科技媒体 RSS 四源 48h（爱范儿/IT之家/少数派/雷峰网）·
+  知乎热榜 30（fetch_zhihu_hot，api.zhihu.com；微博 hotSearch 匿名 403、36kr RSS 空=
+  不接线）· 科技媒体+AI 垂媒六源 48h（爱范儿/IT之家/少数派/雷峰网/InfoQ RSS + 量子位
+  WordPress REST wp-json；机器之心 rss 是 SPA 壳、百度 tab=tech/it 无 s-data=不接线）·
+  GitHub 近 5 天新起爆仓库 12（fetch_github_hot，api.github.com 匿名 search——github.com
+  网页超时但 API 通；新仓库星速=开源圈内刷屏信号，★星数=仓库靶子的知名度证据）·
   对标圈近 2 天（议题参考禁当靶子）。三榜条目 `_norm` 后互为子串（len≥4）即同一事件跨榜
   合并，多榜同在=★真热点排最前；榜条目过 `_TECH_KW` 行业关键词闸才进菜单（社会热点整类
   不进菜单）；联网检索线索作补充段。OWN_HITS（self_videos 播放 Top4）=类目与烈度标准 +
