@@ -456,7 +456,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             "targets": len(created),
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                         "queries": queries, "web": search_metas}}
+                         "github": gh_meta, "queries": queries, "web": search_metas}}
 
 
 def recent_topic_titles(days: int = 14, limit: int = 24, line: str = "") -> list[str]:
