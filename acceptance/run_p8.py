@@ -69,7 +69,7 @@ if llm_ready:
     check("热点提炼任务完成", (done or {}).get("status") == "succeeded",
           f"status={(done or {}).get('status')} err={(done or {}).get('error')}")
     ids = ((done or {}).get("result") or {}).get("topic_ids") or []
-    check("切角落库（1~3 条 trending 选题）", 1 <= len(ids) <= 3, f"ids={ids}")
+    check("切角落库（1~6 条 trending 选题）", 1 <= len(ids) <= 6, f"ids={ids}")
     if ids:
         code, t = request("GET", f"/api/topics/{ids[0]}", timeout=30)
         check("切角选题结构（trending + hotspot 切角证据）",

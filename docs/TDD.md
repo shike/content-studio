@@ -183,16 +183,25 @@ article:    pending（报题待写）──► generating ──► draft ──
 ### 选题中心
 - `POST /api/topics/ideas` `{text}` → 202 `{topic_id, job_id}`（深研任务）
 - `POST /api/topics/quick` `{title, audience?}` → 201（快速记选题，不触发 LLM；R1.1b）
-- `POST /api/topics/trending` → 202 `{job_id}`（**今日热点靶子提炼**，2026-11-11 人设号
-  「观点怼热点」主轴，取代 R1.4 选题切角线）。executor `trending_topics`：
-  站内对标议题（近 2 天非 ignored 视频标题+互动）+ 联网检索（单查询纪律）× 租户画像 →
-  `complete_json(purpose="trending_target", max_tokens=8000, prompt=trending_target.md)` →
-  ≤3 条靶子 `Topic(source_type="trending", evidence={hotspot, target:{event, why,
-  angles×3, evidences[{text,source}], spice}, material})` draft 落库（angle 列留空，
-  主切角由用户备稿时点选）；靶子标准=有得怼（可反驳/可站队）×绑领域×绑真热点×禁编造，
-  辣度 low/mid/high 只预判不设限；**无可怼=诚实空过（targets:0，不挂失败）**；
-  原料收集失败不阻塞（对标空窗/联网关闭均降级并在 evidence.material 留痕）；
-  prompt 占位符 PERSONA/AUDIENCE_NOTE/MATERIAL/BAN_LIST（render 强制校验）。
+- `POST /api/topics/trending` → 202 `{job_id}`（**今日热点靶子提炼**，2026-11-12 第六版
+  「观点怼热点」主轴：扩供应不降标准）。executor `trending_topics` 五路原料（生产服务器
+  逐一实测免登录）：百度热搜前 50（hotlist.fetch_baidu_hot，内嵌 s-data）· 抖音热点榜 50
+  （fetch_douyin_hot，www 域+Referer，带 hot_value，他发布平台自己的榜=第一优先）·
+  知乎热榜 30（fetch_zhihu_hot，api.zhihu.com；微博 hotSearch 匿名 403、GitHub trending
+  服务器超时、36kr RSS 空=不接线）· 科技媒体 RSS 四源 48h（爱范儿/IT之家/少数派/雷峰网）·
+  对标圈近 2 天（议题参考禁当靶子）。三榜条目 `_norm` 后互为子串（len≥4）即同一事件跨榜
+  合并，多榜同在=★真热点排最前；榜条目过 `_TECH_KW` 行业关键词闸才进菜单（社会热点整类
+  不进菜单）；联网检索线索作补充段。OWN_HITS（self_videos 播放 Top4）=类目与烈度标准 +
+  续集上下文。`complete_json(purpose="trending_target", max_tokens=8000,
+  prompt=trending_target_industry.md)` → 半句话判决靶子（用户方法论「三秒钟，半句话」）：
+  `Topic(title=判决句, source_type="trending", line="persona", evidence={hotspot=context,
+  target:{sentence ≤16 字单句无逗号冒号问号顿号（程序化 `_CLAUSE_PUNCT` 闸物理废复合句）,
+  context ≤30 字, heat 在榜排名/多榜同在, spice}, material})` draft 落库；sentence/context
+  必含 `_TECH_KW` 行业关键词（程序化科技闸）；三层硬校验（对标圈拦截/7 天热点去重/
+  批内去重）+14 天标题撞车兜底；上限 6 条宁缺毋滥；批次替代（当日无下游旧 draft 让位）；
+  **无可怼=诚实空过（targets:0，不挂失败）**；原料收集失败不阻塞（各路 meta 落
+  evidence.material 留痕）；prompt 占位符 PERSONA/AUDIENCE_NOTE/TODAY/OWN_HITS/INDUSTRY/
+  BAN_LIST（render 强制校验）。
 - 入库时相似选题检测（R1.1c）：与既有 draft 选题标题相似 → 标记 evidence.similar_to
 - `GET /api/topics?status=&source=&audience=&min_score=&limit=` → `{items:[...]}`
 - `GET /api/topics/{id}` → 详情含 `research_report`
