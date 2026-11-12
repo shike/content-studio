@@ -294,9 +294,31 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         industry_parts.append("【联网检索线索（今日补充，可能含隔夜大事件）】\n"
                               + "\n".join(f"- {x}" for x in web_lines[:10]))
     if watch_items:
-        industry_parts.append("【对标圈近 2 天新视频（圈内热度证据：多家同行在拍=行业刷屏）】\n"
-                              + "\n".join(f"- {x['author']}｜{x['title']}｜{x['likes']}"
-                                          for x in watch_items))
+        # 圈内刷屏主题聚类（2026-11-12 v7）：多家同行同题=争论已被验证（比榜排名更硬的价值
+        # 信号——同行已经用互动量投过票），供模型锻自己的判决；同行标题本身仍禁当靶子
+        theme_groups: list[dict] = []
+        for x in watch_items:
+            tn = _norm(x["title"])
+            if len(tn) < 6:
+                continue
+            g = next((g for g in theme_groups
+                      if SequenceMatcher(None, tn, g["norm"]).ratio() >= 0.42), None)
+            if g:
+                g["members"].append(x)
+                if len(tn) < len(g["norm"]):
+                    g["norm"] = tn
+                    g["label"] = x["title"]
+            else:
+                theme_groups.append({"norm": tn, "label": x["title"], "members": [x]})
+        hot_themes = [g for g in theme_groups
+                      if len({m["author"] for m in g["members"]}) >= 3]
+        parts = ["【对标圈近 2 天新视频（圈内热度证据；同行视频标题本身不当靶子）】"]
+        if hot_themes:
+            parts.append("★多家同行在拍的主题=圈内争论已被验证——锻你自己的判决，别复述同行：")
+            parts += [f"- ★{g['label'][:40]}（{len({m['author'] for m in g['members']})} 家同行在拍）"
+                      for g in hot_themes]
+        parts += [f"- {x['author']}｜{x['title']}｜{x['likes']}" for x in watch_items]
+        industry_parts.append("\n".join(parts))
     industry = "\n\n".join(industry_parts)
 
     async def _llm_targets(system_prompt: str, user_hint: str) -> list[dict]:
@@ -319,6 +341,13 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     # 劝告开头闸（2026-11-12 实战漏网「显卡跳水别急着抄底」）：行动指导不是判决——
     # 他的判决只有「靶子名+判词」（祝XX倒闭/XX就是收割），劝告句式一律废
     _ADVICE_OPENER = _re.compile(r"^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨|记得)")
+    # 判词词根闸（2026-11-12 v7）：句子必须含判词词根——「谁干了什么」的新闻复述不算判决
+    # （实战漏网「英伟达敢罢免黄仁勋」「软银别想买下ABB」全是转发新闻，没有立场）
+    _JUDGE_KW = ("就是", "全是", "纯", "垃圾", "收割", "智商税", "骗局", "割韭菜", "倒闭", "必死",
+                 "迟早", "注定", "没法用", "没人用", "认输", "吹爆", "吹上", "吹过", "神话", "泡沫",
+                 "凉了", "要凉", "烂", "难用", "复杂", "别碰", "高估", "低估", "幻觉", "伪需求",
+                 "套壳", "翻车", "接盘", "过时", "淘汰", "取代", "终结", "杀死", "白干", "白嫖",
+                 "白送", "硬刚", "落后", "耍猴", "当猴耍", "镰刀", "韭菜")
     def _industry_gate(batch_items: list[dict]) -> list[dict]:
         out: list[dict] = []
         for x in batch_items:
@@ -330,6 +359,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 continue  # 半句话闸：超长/复合句物理废掉（三秒半句话方法论，不信任模型自觉）
             if _ADVICE_OPENER.match(sentence):
                 continue  # 劝告开头=行动指导，废
+            if not any(k in sentence for k in _JUDGE_KW):
+                continue  # 无判词词根=新闻复述，废（判决必须有立场词）
             x["sentence"] = sentence
             out.append(x)
         return out
@@ -354,8 +385,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             continue
         if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
             continue
-        if any(hn in w or SequenceMatcher(None, hn, w).ratio() >= 0.5 for w in watch_norms):
-            continue  # hotspot 实为对标视频标题的变体
+        if any(hn in w for w in watch_norms):
+            continue  # hotspot 照抄对标视频标题（v7 起只拦照抄——圈内刷屏主题锻自己的判决合法）
         seen_norms.append(hn)
         batch.append(x)
         if len(batch) >= 6:
