@@ -183,8 +183,18 @@ article:    pending（报题待写）──► generating ──► draft ──
 ### 选题中心
 - `POST /api/topics/ideas` `{text}` → 202 `{topic_id, job_id}`（深研任务）
 - `POST /api/topics/quick` `{title, audience?}` → 201（快速记选题，不触发 LLM；R1.1b）
-- `POST /api/topics/trending` → 202 `{job_id}`（**今日热点靶子提炼**，2026-11-12 第六版
-  「观点怼热点」主轴：扩供应不降标准）。executor `trending_topics` 五路原料（生产服务器
+- 调度 `self_story_daily`（每日 06:00）→ executor `self_story_targets`（**一线交付靶子**，
+  2026-11-12 方向1）：素材=SelfVideo.transcript 非空的转写（播放 Top12，各截 600 字），
+  `complete_json(purpose="self_story_target", max_tokens=8000, prompt=self_story_target.md)`
+  → 从真实交付故事锻半句话靶子（禁编造=细节必须在转写原文有出处）；半句话闸+劝告开头
+  闸（判词词根闸/行业闸不适用——故事靶形态是反差不是攻击）；7 天故事梗概去重+14 天标题
+  撞车+批内去重，上限 3 条；批次替代只让位同源；落库 source_type="self_story",
+  heat="一线交付"；**挖不出=诚实空过**；prompt 占位符 PERSONA/AUDIENCE_NOTE/TODAY/
+  TRANSCRIPTS/BAN_LIST（render 强制校验）。
+- `POST /api/topics/trending` → 202 `{job_id}`（**热点靶子·饭碗判决**，2026-11-12 三方向
+  定版后第九版 prompt：公司事件只当由头，**判决主语=受众角色/现象**（中层/老板/岗位），
+  骂公司的行业判决方向已废；受众闸（判词主语必须是受众角色）+争吵自检（谁会来评论区
+  反对？答不出=废靶）+半句话/劝告开头/判词词根三程序闸）。executor `trending_topics` 五路原料（生产服务器
   逐一实测免登录）：百度热搜前 50（hotlist.fetch_baidu_hot，内嵌 s-data）· 抖音热点榜 50
   （fetch_douyin_hot，www 域+Referer，带 hot_value，他发布平台自己的榜=第一优先）·
   知乎热榜 30（fetch_zhihu_hot，api.zhihu.com；微博 hotSearch 匿名 403、36kr RSS 空=

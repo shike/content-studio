@@ -58,8 +58,9 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
         api<{ items: Topic[] }>('/topics?status=rejected&line=persona&source=trending&limit=100'),
         api<{ items: ScriptRow[] }>('/scripts?account_type=persona&limit=300'),
       ])
-      setTrending(d.items.filter((t) => t.source_type === 'trending'))
-      setBench(d.items.filter((t) => t.source_type !== 'trending'))
+      // 待备稿主流=热点饭碗靶(trending)+一线交付靶(self_story)，其余进拆解产题
+      setTrending(d.items.filter((t) => t.source_type === 'trending' || t.source_type === 'self_story'))
+      setBench(d.items.filter((t) => t.source_type !== 'trending' && t.source_type !== 'self_story'))
       // 「不怼」=你亲手点的校准样本；系统批次替代的让位行（evidence.superseded）不是你判的，不混进来
       setRejected(r.items.filter((t) => !t.evidence?.superseded))
       const map: Record<number, string> = {}
@@ -156,7 +157,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   return (
     <div>
       <PageHeader icon={Crosshair} title="今日靶子"
-        desc="每天 06:00 抓热点×FDE 关联，评出值得怼的靶子——选中切角直接备三版口播稿，改完拍。观点怼热点是人设号唯一主轴。" />
+        desc="每天 06:00 出两路半句话靶子：热点落饭碗（公司事件只当由头，判决落在角色身上）+ 一线交付（从你自己的口播转写挖真实故事）。选中备三版口播稿，改完拍。" />
       {error && <div className="mt-4"><ErrorLine text={error} /></div>}
 
       {/* 回显带 */}

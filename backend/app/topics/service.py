@@ -342,8 +342,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         render("trending_target_industry", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
                TODAY=datetime.now().strftime("%Y-%m-%d"), OWN_HITS=own_hits_text,
                INDUSTRY=industry, BAN_LIST="\n".join(ban_lines) or "（近 14 天无出题记录）"),
-        "把菜单里的行业实体逐个过一遍，每个够格的大事件先锻造半句话判决，锻不出来就跳过；"
-        "多榜同在的真热点和同行多家在拍的优先。最多 6 个，宁缺毋滥，没有就空数组。")
+        "把菜单里每条事件逐个过一遍，每条先问『这事砸了谁的饭碗/开了谁的口子』，"
+        "判决落在角色或现象身上（公司名只进 context 当由头）。最多 6 个，宁缺毋滥，没有就空数组。")
 
     # 程序化科技闸：靶子（标题+hotspot）必须含科技/行业关键词，防模型拿社会新闻凑数
     _CLAUSE_PUNCT = _re.compile(r"[，,。？?：:；;、]")
@@ -356,7 +356,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                  "迟早", "注定", "没法用", "没人用", "认输", "吹爆", "吹上", "吹过", "神话", "泡沫",
                  "凉了", "要凉", "烂", "难用", "复杂", "别碰", "高估", "低估", "幻觉", "伪需求",
                  "套壳", "翻车", "接盘", "过时", "淘汰", "取代", "终结", "杀死", "白干", "白嫖",
-                 "白送", "硬刚", "落后", "耍猴", "当猴耍", "镰刀", "韭菜")
+                 "白送", "硬刚", "落后", "耍猴", "当猴耍", "镰刀", "韭菜",
+                 "干掉", "吃掉", "抢走", "饭碗", "消失", "出局", "上位", "没出路", "上岸")
     def _industry_gate(batch_items: list[dict]) -> list[dict]:
         out: list[dict] = []
         for x in batch_items:
@@ -462,6 +463,150 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             "material": {"watch": len(watch_items), "news": news_meta,
                          "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
                          "github": gh_meta, "aihot": ah_meta, "queries": queries, "web": search_metas}}
+
+
+@register_executor("self_story_targets")
+async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
+    """一线交付靶子（2026-11-12 方向1=123都要定版）：从创作者自己的口播转写里挖真实
+    交付故事，锻半句话靶子。素材=SelfVideo.transcript（自有素材别人抄不走）；禁编造=
+    铁律（细节必须在转写原文有出处，prompt 硬规则）。半句话闸+劝告开头闸照走；判词
+    词根闸与行业关键词闸不适用——故事靶子的形态是反差不是攻击。批次替代只让位同源
+    旧批次（不踢 trending）；挖不出=诚实空过。"""
+    import re as _re
+    from datetime import datetime, timedelta
+
+    from ..models import SelfVideo as _SV, Article as _A, Script as _S
+    from ..tenant_brand import audience_note_of, brand_of
+
+    tenant_id = payload.get("tenant_id") or 1
+    with Session(engine) as s:
+        persona_text = brand_of(tenant_id)["persona"]
+        audience_note = audience_note_of(tenant_id)
+
+    def _norm(t: str) -> str:
+        return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-]+", "", str(t)).lower()
+
+    ctx.set_progress(10, "收集自有素材（口播转写，播放高的优先）")
+    with Session(engine) as s:
+        vids = s.exec(select(_SV).where(_SV.transcript != "")).all()  # type: ignore[attr-defined]
+        ranked = sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0), reverse=True)[:12]
+    if not ranked:
+        ctx.set_progress(100, "自有素材为空（无口播转写），诚实空过")
+        return {"topic_ids": [], "targets": 0, "material": {"transcripts": 0}}
+    lines = []
+    for v in ranked:
+        tr = _re.sub(r"\s+", " ", (v.transcript or ""))[:600]
+        play = int((v.stats or {}).get("play") or 0)
+        lines.append(f"【{(v.title or '无标题')[:30]}｜播放 {play}】{tr}")
+    transcripts = "\n\n".join(lines)
+
+    # 防撞车清单：近 7 天 persona 靶子 context + 近 14 天已有选题标题
+    pcutoff = datetime.now() - timedelta(days=7)
+    prev_norms: list[str] = []
+    with Session(engine) as s:
+        for t in s.exec(select(Topic).where(
+                Topic.line == "persona",  # type: ignore[attr-defined]
+                Topic.status.in_(["draft", "rejected"]),  # type: ignore[attr-defined]
+                Topic.created_at >= pcutoff)).all():  # type: ignore[attr-defined]
+            h = str((t.evidence or {}).get("hotspot") or t.source_ref or "").strip()
+            if h:
+                prev_norms.append(_norm(h)[:110])
+    ban_lines = [f"- （已有靶子）{t}" for t in recent_topic_titles(14, line="persona")]
+    ban_lines += [f"- （近期故事梗概）{h}" for h in prev_norms[:20]]
+
+    ctx.set_progress(45, "从交付故事锻半句话靶子")
+    data = await gateway.complete_json(
+        [{"role": "system", "content": render(
+            "self_story_target", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
+            TODAY=datetime.now().strftime("%Y-%m-%d"), TRANSCRIPTS=transcripts,
+            BAN_LIST="\n".join(ban_lines) or "（近 14 天无出题记录）")}],
+        purpose="self_story_target", max_tokens=8000, thinking="disabled")
+    items = [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("sentence")]
+
+    # 半句话闸 + 劝告开头闸（判词词根闸/行业闸不适用于故事靶）
+    _CLAUSE_PUNCT = _re.compile(r"[，,。？?：:；;、]")
+    _ADVICE_OPENER = _re.compile(r"^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)")
+    gated: list[dict] = []
+    for x in items:
+        sentence = str(x.get("sentence") or "").strip()
+        if not sentence or len(sentence) > 14 or _CLAUSE_PUNCT.search(sentence):
+            continue  # 半句话闸
+        if _ADVICE_OPENER.match(sentence):
+            continue  # 劝告开头=行动指导
+        x["sentence"] = sentence
+        gated.append(x)
+    if len(items) != len(gated):
+        print(f"[self_story] 半句话闸：{len(items)} 条进 → {len(gated)} 条出")
+    items = gated
+
+    # 三层硬校验：7 天故事梗概去重 → 14 天标题撞车 → 批内去重；上限 3 条宁缺毋滥
+    batch: list[dict] = []
+    seen_norms: list[str] = []
+    for x in items:
+        context = str(x.get("context") or "").strip()
+        if not context or "对标圈" in context:
+            continue
+        if is_similar_title(str(x.get("sentence") or ""), line="persona"):
+            continue
+        hn = _norm(context)
+        if any(SequenceMatcher(None, hn, p).ratio() >= 0.55 or (len(p) >= 12 and (hn in p or p in hn))
+               for p in prev_norms):
+            continue
+        if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
+            continue
+        seen_norms.append(hn)
+        batch.append(x)
+        if len(batch) >= 3:
+            break
+    if not batch:
+        ctx.set_progress(100, "今日无可挖的交付故事（或全部未过校验），诚实空过")
+        return {"topic_ids": [], "targets": 0,
+                "material": {"transcripts": len(ranked)}}
+
+    ctx.set_progress(85, f"一线交付靶子落库（{len(batch)} 条，选题库 draft）")
+    created: list[int] = []
+    superseded: list[int] = []
+    with Session(engine) as s:
+        day_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        for t in s.exec(select(Topic).where(
+                Topic.source_type == "self_story",  # type: ignore[attr-defined]
+                Topic.status == "draft",  # type: ignore[attr-defined]
+                Topic.created_at >= day_start)).all():  # type: ignore[attr-defined]
+            has_down = s.exec(select(_S).where(_S.topic_id == t.id)).first() is not None \
+                or s.exec(select(_A).where(_A.topic_id == t.id)).first() is not None
+            if not has_down:
+                ev = dict(t.evidence or {})
+                ev["superseded"] = f"被 {datetime.now():%H:%M} 新批次替代"
+                t.evidence = ev
+                t.status = "rejected"
+                s.add(t)
+                superseded.append(t.id)
+        for x in batch:
+            t = Topic(
+                title=str(x["sentence"])[:60],  # 标题=半句话靶子
+                angle="",
+                audience="both",
+                source_type="self_story",
+                source_ref=str(x.get("context") or "")[:200],
+                line="persona",
+                evidence={
+                    "hotspot": str(x.get("context") or ""),
+                    "target": {"sentence": str(x["sentence"])[:20],
+                               "context": str(x.get("context") or "")[:60],
+                               "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
+                               "heat": "一线交付"},
+                    "material": {"transcripts": len(ranked)},
+                },
+                status="draft",
+            )
+            s.add(t)
+            s.flush()
+            created.append(t.id)
+        s.commit()
+
+    ctx.set_progress(100, f"完成：{len(created)} 条一线交付靶子入选题库（替代 {len(superseded)} 条当日旧批次）")
+    return {"topic_ids": created, "targets": len(created), "superseded": superseded,
+            "material": {"transcripts": len(ranked)}}
 
 
 def recent_topic_titles(days: int = 14, limit: int = 24, line: str = "") -> list[str]:

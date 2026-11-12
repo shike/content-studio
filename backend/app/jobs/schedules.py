@@ -251,8 +251,20 @@ async def _run_trending_daily() -> str:
     return f"job #{job.id}"
 
 
-register_schedule(Schedule(key="trending_daily", label="热点雷达（抖音话题飙升 + 站外热点提炼）",
+register_schedule(Schedule(key="trending_daily", label="热点靶子·饭碗判决（抖音话题飙升 + 站外热点提炼）",
                            daily_hour=6, run=_run_trending_daily))
+
+
+async def _run_self_story_daily() -> str:
+    from .runner import runner
+    job = await runner.submit("self_story_targets", {"tenant_id": 1},
+                              dedup_key="1:self_story_targets:daily",
+                              actor=(1, 0, "platform_admin"))
+    return f"job #{job.id}"
+
+
+register_schedule(Schedule(key="self_story_daily", label="一线交付靶子（自有口播转写挖故事）",
+                           daily_hour=6, run=_run_self_story_daily))
 
 
 async def _run_creator_data() -> str:
