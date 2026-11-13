@@ -95,9 +95,8 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             template = s.get(ScriptTemplate, template_id)
         if template is None:
             print(f"[script] 结构模板 #{template_id} 不存在，按不使用处理")
-    # 结构模板：prompt 里没有 {{STRUCTURE}} 占位符，注入一直是静默失效（usage_count 照加、
-    # 模型收不到结构）——2026-09-27 待用户拍板：恢复注入（模板收尾步要按「不刻意 CTA」改写）
-    # 还是下线该功能；定了再补占位符 + 让 render() 强制校验。
+    # 结构模板注入已生效（script_generate.md 有 {{STRUCTURE}} 占位符 + render() 强制校验；
+    # 2026-09-27 的「静默失效待拍板」问题已在恢复注入时闭环，此注释 2026-11-13 更新）。
 
     length = payload.get("length", "short")
     # 打法：指定（≤3 个，每版一种）或自动挑
@@ -119,9 +118,11 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     else:
         structure_text = "（未选用结构模板：按上方「口播结构」硬规则组织——判断开场、单判断推进、可转述判断收尾）"
     # 两类号策略（2026-10-28）：账号模式决定内容风格——人设号禁引导，获客号要求获客引导
-    account_type = str(payload.get("account_type")
-                       or (topic.evidence or {}).get("account_type") if topic is not None else ""
-                       ) or "persona"
+    # 2026-11-13 修复：原三元式在 topic 有但 evidence 无 account_type 时 str(None)="None"
+    # 落库脏值，列表按 persona/leadgen 筛选两边都不中
+    _raw_at = payload.get("account_type") \
+        or ((topic.evidence or {}).get("account_type") if topic is not None else "")
+    account_type = str(_raw_at or "") or "persona"
     account_mode = ("。本条面向【获客号】：结尾必须切获客引导——评论区扣指定词/私信关键词/主页入口，引导要具体"
                     if account_type == "leadgen"
                     else "。本条面向【人设号】：结尾判断之外允许带一句自然的关注/合集引导（软引导 2026-11-02 放开），"

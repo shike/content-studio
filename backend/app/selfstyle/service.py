@@ -110,7 +110,7 @@ def build_my_style(enabled: bool = True) -> str:
 
 
 def _list_self_videos(url: str) -> tuple[Optional[list], Optional[str]]:
-    """与同行扫描同款四链路，返回 (entries, error)。"""
+    """与同行扫描同款三链路瀑布，返回 (entries, error)。"""
     entries, err, is_anchor = _list_author_videos_via_anchor(url)
     if entries is not None:
         return entries, None
@@ -281,7 +281,20 @@ async def self_analyze(ctx: JobContext, payload: dict) -> dict:
                 WatchAccount.enabled == True,  # noqa: E712
             )).first()
         own_cookie = (acc.creator_cookie if acc else "") or ""
-        media_path = await asyncio.to_thread(downloader.download_video, v.url, _SELF_DIR, own_cookie)
+        # 2026-11-13 修复：原路径直接调 downloader.download_video，绕过了验证码熔断
+        # 与 45s 下载节流（两者只在 benchmark_analyze 路径生效）——自有下载同样吃家宽
+        # IP 的风控，统一走 benchmarks 的节流+熔断闸门再下载
+        from ..benchmarks.service import _captcha_breaker, _captcha_record, _throttle_download
+        from ..jobs.errors import CaptchaError as _CaptchaError
+        await asyncio.to_thread(_captcha_breaker)
+        await asyncio.to_thread(_throttle_download)
+        try:
+            media_path = await asyncio.to_thread(downloader.download_video, v.url, _SELF_DIR, own_cookie)
+        except Exception as e:
+            if "验证码" in str(e):
+                _captcha_record()
+                raise _CaptchaError(f"自有视频下载失败（抖音风控验证码）：{str(e)[:120]}") from e
+            raise
         with Session(engine) as s:
             v = s.get(SelfVideo, video_id)
             v.media_path = media_path

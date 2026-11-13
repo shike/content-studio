@@ -129,7 +129,10 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
         try:
             note = await gateway.complete_json(
                 [{"role": "user", "content": render("article_kb_miner_eval",
-                                                    DOC=f"《{title}》\n\n{text}")}],
+                                                    DOC=f"《{title}》\n\n{text}",
+                                                    # 2026-11-13：评分线可被 AppSetting.adapt_gen_line
+                                                    # 覆盖，prompt 内同步注入真实线（原写死 7.5）
+                                                    GEN_LINE=f"{line:g}")}],
                 purpose="article_kb_miner", max_tokens=2000, thinking="disabled")
         except Exception as e:  # noqa: BLE001 单篇评估失败按跳过计（不阻塞整批）
             print(f"[kb-miner] 评估失败（{title[:24]}）: {type(e).__name__}: {str(e)[:80]}")

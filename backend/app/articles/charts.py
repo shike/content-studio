@@ -86,8 +86,7 @@ def validate_spec(raw: str | bytes) -> dict[str, Any]:
 
 
 def render_chart(spec: dict[str, Any], primary: str = _BRAND) -> str:
-    """primary = 租户主色 hex（图表柱/线颜色）。"""
-    """渲染图表规格 → PNG 文件路径。"""
+    """渲染图表规格 → PNG 文件路径。primary = 租户主色 hex（图表柱/线颜色）。"""
     _setup_font()
     ctype = spec["type"]
     cats: list[str] = spec["categories"]

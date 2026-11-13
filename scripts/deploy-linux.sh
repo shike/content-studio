@@ -51,7 +51,7 @@ install_all() {
 
   cat > "$UNIT" <<EOF
 [Unit]
-Description=Content Studio（多租户内容生产流水线）
+Description=Content Studio（单管理员内容生产流水线）
 After=network-online.target
 Wants=network-online.target
 

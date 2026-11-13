@@ -400,10 +400,7 @@ async def generate_image(body: GenImageIn) -> dict:
     计费约 0.06 元/张（cogview-3-flash）；生成 URL 有时效，必须下载落盘。"""
     if not settings.zhipu_api_key:
         raise HTTPException(status_code=400, detail="未配置 ZHIPU_API_KEY")
-    theme = (body.caption or body.keywords or "").strip()[:80]
-    prompt = (f"为一篇行业深度分析文章生成配图。配图主题：{theme}。"
-              "现代简洁的商务科技插画风格，冷色调蓝灰为主，画面干净专业，构图疏朗，"
-              "画面中不要出现任何文字，横版构图")
+    # prompt 组装在 images.gen_image 内部（此处的 theme/prompt 死变量 2026-11-13 清除）
     out_dir = settings.data_dir / "article_images"
     out_dir.mkdir(parents=True, exist_ok=True)
 

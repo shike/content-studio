@@ -77,21 +77,26 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
   }, [fetchPage, filter, page])
 
   useEffect(() => {
-    (async () => {
+    // 首挂载引导：全库有待定夺时预选「待定夺」chip（只跑一次——此前 bootedRef 写了
+    // 没读、effect 跟着 [reload] 每次筛选变化重跑，点「全部」会被强制弹回待定夺）
+    if (bootedRef.current) return
+    bootedRef.current = true
+    ;(async () => {
       try {
         const first = await api<{ counts: BenchCounts }>('/benchmarks?limit=1')
-        bootedRef.current = true
         if (first.counts.pending > 0 && filter === '' && page === 0) {
           setFilter('pending')
           await fetchPage('pending', 0)
-        } else {
-          await reload()
+          return
         }
       } catch (e) {
         setError(apiErrText(e))
+        return
       }
+      await reload()
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- 引导只跑一次，刻意的空依赖
     })()
-  }, [reload])
+  }, [])
 
   useEffect(() => {
     setShowTranscript(false)

@@ -18,18 +18,6 @@ def main() -> int:
         return finish("P6")
     section("P6 任务体系·去重与异常分类")
 
-    # ---- 任务列表暴露五要素字段 ----
-    st, body = request("GET", "/api/jobs?limit=1")
-    ok = st == 200 and body.get("items")
-    if ok:
-        item = body["items"][0]
-        missing = [k for k in ("dedup_key", "lane", "retry_count", "max_retries",
-                               "next_retry_at", "fail_class") if k not in item]
-        check("任务列表暴露五要素字段", not missing, f"缺: {missing}")
-        check("counts 含 parked 口径", "parked" in body.get("counts", {}))
-    else:
-        check("任务列表暴露五要素字段", False, f"status={st}")
-
     # ---- 拆解 URL 实体去重：同一链接两次提交 → 同一 benchmark ----
     stamp = int(time.time())
     url = f"https://v.douyin.com/p6fix{stamp}/"
@@ -48,6 +36,22 @@ def main() -> int:
               str(bj.get("dedup_key"))[:40])
         check("拆解任务分道 heavy", stj == 200 and bj.get("lane") == "heavy")
 
+    # ---- 任务列表暴露五要素字段（放在去重建任务之后：全新库此节前无任务行）----
+    st, body = request("GET", "/api/jobs?limit=1")
+    ok = st == 200 and body.get("items")
+    if ok:
+        item = body["items"][0]
+        missing = [k for k in ("dedup_key", "lane", "retry_count", "max_retries",
+                               "next_retry_at", "fail_class") if k not in item]
+        check("任务列表暴露五要素字段", not missing, f"缺: {missing}")
+        # 2026-11-13 对齐退役口径：parked 已并入 failed+梯子，counts 不再暴露该键
+        check("counts 暴露五状态口径（parked 已退役不出现）",
+              {"running", "queued", "superseded", "failed", "succeeded", "summary"} <= set(body.get("counts", {}))
+              and "parked" not in body.get("counts", {}),
+              f"keys={sorted(body.get('counts', {}))}")
+    else:
+        check("任务列表暴露五要素字段", False, f"status={st}")
+
     # ---- watch_resolve 分享口令全文 → 提取后识别（不等待外网结果，只验提交与 dedup 键）----
     paste = f"长按复制此条消息，打开抖音搜索 https://v.douyin.com/p6rsx{stamp}/ 尾部乱码 :9pm"
     st3, b3 = request("POST", "/api/watch/resolve", {"url": paste})
@@ -65,10 +69,15 @@ def main() -> int:
     else:
         check("口令全文提取出的 URL 作为 dedup 键", False, f"status={st3}")
 
-    # ---- 失败分类：非抖音域 URL → SSRF 闸门 400 拒绝（确定性拒绝前移到 API 门禁）----
+    # ---- 失败分类：SSRF 闸门（TDD §12：仅放行 douyin.com/iesdouyin.com 及其子域）----
+    # 2026-11-13 修正断言：原用 douyin 子域却断言 400——按契约子域应过闸（拒真实来源
+    # 是「提不出视频 id」的下游失败，不是闸），真非抖音域才 400
     st4, b4 = request("POST", "/api/watch/resolve",
-                      {"url": f"https://p6-nonexistent-{stamp}.douyin.com/garbage/"})
-    check("非抖音域 URL 被闸门拒绝（400）", st4 == 400, f"status={st4}")
+                      {"url": f"https://p6-nonexistent-{stamp}.example.com/garbage/"})
+    check("真非抖音域 URL 被闸门拒绝（400）", st4 == 400, f"status={st4}")
+    st4b, _b4b = request("POST", "/api/watch/resolve",
+                         {"url": f"https://p6-nonexistent-{stamp}.douyin.com/garbage/"})
+    check("抖音子域过闸受理（202；识别失败走下游终态）", st4b == 202, f"status={st4b}")
 
     # ---- retry-failed 批量跳过确定性失败（限定 watch_resolve，避免波及继承的旧失败任务烧 LLM 额度）----
     st6, b6 = request("POST", "/api/jobs/retry-failed", {"type": "watch_resolve"})
@@ -81,21 +90,25 @@ def main() -> int:
         import sqlite3
         db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           os.environ.get("DATA_DIR", "data"), "studio.db")
-        conn = sqlite3.connect(db, timeout=30)
+        conn = sqlite3.connect(db, timeout=30, isolation_level=None)
         # 自愈：清掉上一轮遗留的 p6owed 夹具任务（否则 6h 失败退避会拦住本轮补队断言）
         conn.execute(
             "DELETE FROM jobs WHERE type='benchmark_analyze' AND status IN ('failed','superseded')"
             " AND dedup_key IN (SELECT 'bm:' || CAST(id AS TEXT) FROM benchmark_videos"
             " WHERE url LIKE '%p6owed%')")
         cur = conn.execute(
-            "INSERT INTO benchmark_videos (created_at, updated_at, url, author, title, stats,"
-            " transcript, analysis, media_path, source, scan_status)"
-            " VALUES (datetime('now'), datetime('now'), ?, 'P6', 'owed 夹克', '{}', '', '{}', '', 'local', 'approved')",
+            "INSERT INTO benchmark_videos (created_at, updated_at, tenant_id, url, author, title, stats,"
+            " transcript, analysis, media_path, quality_score, account_type, notes, source, scan_status)"
+            " VALUES (datetime('now'), datetime('now'), 0, ?, 'P6', 'owed 夹克', '{}', '', '{}', '', 0.0, 'persona', '', 'local', 'approved')",
             (f"https://v.douyin.com/p6owed{stamp}/",))
         conn.commit()
         fixture_bid = cur.lastrowid
         conn.close()
     except Exception as e:  # noqa: BLE001
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
         skip("owed 夹具", str(e)[:80])
 
     if fixture_bid:
@@ -119,17 +132,22 @@ def main() -> int:
         import sqlite3
         db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           os.environ.get("DATA_DIR", "data"), "studio.db")
-        conn = sqlite3.connect(db, timeout=30)
+        conn = sqlite3.connect(db, timeout=30, isolation_level=None)
         conn.execute(
-            "INSERT INTO jobs (created_at, updated_at, type, status, progress, message, payload,"
-            " result, error, dedup_key, lane, retry_count, max_retries, next_retry_at, fail_class)"
-            " VALUES (datetime('now'), datetime('now'), 'watch_resolve', 'failed', 0, '', ?, '{}',"
-            " 'P6 到期重试夹具', '', 'light', 0, 1, datetime('now', '-1 minute'), 'transient')",
+            "INSERT INTO jobs (created_at, updated_at, tenant_id, user_id, type, status, progress, message, payload,"
+            " result, error, dedup_key, lane, retry_count, max_retries, next_retry_at, fail_class,"
+            " error_fp, archived, retry_of, history)"
+            " VALUES (datetime('now'), datetime('now'), 0, 0, 'watch_resolve', 'failed', 0, '', ?, '{}',"
+            " 'P6 到期重试夹具', '', 'light', 0, 1, datetime('now', '-1 minute'), 'transient', '', 0, 0, '[]')",
             ('{"url": "https://v.douyin.com/p6retry/", "p6": 1}',))
         conn.commit()
         rid = conn.execute("SELECT MAX(id) FROM jobs WHERE error='P6 到期重试夹具'").fetchone()[0]
         conn.close()
     except Exception as e:  # noqa: BLE001
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
         skip("到期重试夹具", str(e)[:80])
         rid = None
 
@@ -147,8 +165,10 @@ def main() -> int:
                     if bj.get("next_retry_at"):
                         break
             time.sleep(3)
-        check("到期重试被循环放行（不再滞留 failed）", st_r in ("queued", "running", "succeeded") or (st_r == "failed"),
-              f"job={rid} status={st_r}")
+        # 2026-11-13 修正断言：原写法覆盖一切状态恒真——滞留终态（failed 且无下轮排期）才算坏
+        check("到期重试被循环放行（不再滞留 failed）",
+              st_r in ("queued", "running", "succeeded") or (st_r == "failed" and bool(bj.get("next_retry_at"))),
+              f"job={rid} status={st_r} next_retry_at={bj.get('next_retry_at')}")
 
     # ---- 任务中台：错误指纹聚类 / 按指纹复活 / 指纹处置 ----
     section("P6 任务中台·错误指纹与按指纹复活")
@@ -205,13 +225,15 @@ def main() -> int:
     import sqlite3 as _sq
     _db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        os.environ.get("DATA_DIR", "data"), "studio.db")
-    _conn = _sq.connect(_db, timeout=30)
+    _conn = _sq.connect(_db, timeout=30, isolation_level=None)
     import time as _t
     _t0 = _t.time()
     for _i in range(150):
         try:
-            _conn.execute("INSERT OR IGNORE INTO articles (id, topic_id, md, html, status, created_at, updated_at) "
-                          "VALUES (998001, NULL, '', '', 'failed', datetime('now'), datetime('now'))")
+            _conn.execute("INSERT INTO articles (id, tenant_id, topic_id, md, title, note, publish_url,"
+                          " published_at, html, status, created_at, updated_at) "
+                          "VALUES (998001, 0, NULL, '', 'P6 孤儿夹具', '', '', '', '', 'failed',"
+                          " datetime('now'), datetime('now'))")
             print(f"[P6探针] 第{_i}次写入成功，耗时 {_t.time()-_t0:.1f}s")
             break
         except _sq.OperationalError as _e:
@@ -231,7 +253,7 @@ def main() -> int:
     check("实体孤儿按指纹重提 202（实体回在途态）", _strv == 202 and _brv.get("requeued", 0) >= 1,
           f"status={_strv}, {str(_brv)[:60]}")
     # 断言后立即拆夹具（删任务行=取消执行，避免空跑 LLM；文末清理兜底）
-    _conn2 = _sq.connect(_db, timeout=30)
+    _conn2 = _sq.connect(_db, timeout=30, isolation_level=None)
     _conn2.execute("DELETE FROM jobs WHERE payload LIKE '%998001%'")
     _conn2.execute("DELETE FROM articles WHERE id = 998001")
     _conn2.commit()
@@ -242,7 +264,7 @@ def main() -> int:
         import sqlite3
         db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           os.environ.get("DATA_DIR", "data"), "studio.db")
-        conn = sqlite3.connect(db, timeout=30)
+        conn = sqlite3.connect(db, timeout=30, isolation_level=None)
         like = f"%p6fix{stamp}%"
         conn.execute("DELETE FROM jobs WHERE payload LIKE ? OR dedup_key LIKE ?",
                      (f"%{stamp}%", f"%p6rsx{stamp}%"))

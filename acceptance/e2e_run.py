@@ -52,25 +52,26 @@ def main() -> int:
               f"E2E 种子正文第二段。\n")
     art_html = "<section><h2>试点产线怎么选</h2><p>E2E 种子正文第一段。</p></section>"
     conn.execute(
-        "INSERT INTO articles (tenant_id, topic_id, title, md, html, status, created_at, updated_at) "
-        "VALUES (1, NULL, ?, ?, ?, 'rendered', datetime('now'), datetime('now'))",
+        # 2026-11-13：全新库无 server default，直插必须覆盖全部 NOT NULL 列
+        "INSERT INTO articles (tenant_id, topic_id, title, note, publish_url, published_at, md, html, status, created_at, updated_at) "
+        "VALUES (1, NULL, ?, '', '', '', ?, ?, 'rendered', datetime('now'), datetime('now'))",
         (f"E2E 种子文章 {stamp}", art_md, art_html))
     conn.execute(
-        "INSERT INTO topics (tenant_id, title, angle, audience, source_type, source_ref, status, "
+        "INSERT INTO topics (tenant_id, line, title, angle, audience, source_type, source_ref, status, "
         "score, created_at, updated_at) "
-        "VALUES (1, ?, 'E2E 验收角度', 'both', 'manual', 'e2e', 'approved', 8.0, "
+        "VALUES (1, 'persona', ?, 'E2E 验收角度', 'both', 'manual', 'e2e', 'approved', 8.0, "
         "datetime('now'), datetime('now'))",
         (f"E2E 种子选题 {stamp}",))
     # 同行监测周报夹具：一条待定夺的抖音视频（digest 卡有数据可渲染）
     conn.execute(
         "INSERT INTO benchmark_videos (tenant_id, url, author, title, transcript, media_path, "
-        "source, scan_status, created_at, updated_at) "
+        "quality_score, account_type, notes, source, scan_status, created_at, updated_at) "
         "VALUES (1, 'https://www.douyin.com/video/e2e001', 'E2E测试作者', "
-        "'E2E 同行视频样例 #企业AI落地', '', '', 'douyin', 'pending', datetime('now'), datetime('now'))")
+        "'E2E 同行视频样例 #企业AI落地', '', '', 0.0, 'persona', '', 'douyin', 'pending', datetime('now'), datetime('now'))")
     conn.execute(
-        "INSERT INTO topics (tenant_id, title, angle, audience, source_type, source_ref, status, "
+        "INSERT INTO topics (tenant_id, line, title, angle, audience, source_type, source_ref, status, "
         "score, created_at, updated_at) "
-        "VALUES (1, 'E2E 高分选题样例', 'E2E 切角：从验收单切入', 'both', 'benchmark', 'e2e-topic', "
+        "VALUES (1, 'persona', 'E2E 高分选题样例', 'E2E 切角：从验收单切入', 'both', 'benchmark', 'e2e-topic', "
         "'approved', 8.5, datetime('now'), datetime('now'))")
     conn.execute("UPDATE users SET must_change_password = 0")
     conn.commit()
@@ -120,7 +121,7 @@ def main() -> int:
         check("正确密码进入工作台（侧栏「今天」在位）", "今天" in page.inner_text("nav"))
 
         # ---------- 全站逐页零报错 + 页头断言 ----------
-        section("E2E · 全站逐页零报错（16 页）")
+        section("E2E · 全站逐页零报错（17 页）")
 
         def goto_page(label: str) -> None:
             """locator 点击侧栏菜单（evaluate 的 .click() 不触发 React 导航，勿用）。"""
@@ -128,11 +129,12 @@ def main() -> int:
             page.wait_for_timeout(900)
 
         # （侧栏叶按钮, 页头期望）：现行侧栏=今天 + 产线树三组（App.tsx TREE，默认全展开）+ 任务/设置。
+        # 2026-11-13 对齐 11-11/11-12 改版：选题库→今日靶子（人设号第一叶）、新增内容清单；
         # 有 PageHeader 的页面期望=第一个 main h2（title 常与侧栏叶不同名，如 内容看板→脚本工场）；
         # 候选两页（DiscoveredAccounts）无页级标题，改验页内签名文本。
         PAGES = [
             ("今天", "今天要拍"),
-            ("选题库", "选题库"),
+            ("今日靶子", "今日靶子"),
             ("内容看板", "脚本工场"),
             ("账号经营", "账号经营"),
             ("对标拆解", "拆解库"),
@@ -143,6 +145,7 @@ def main() -> int:
             ("纯获客候选", "开始搜索"),
             ("获客监控", "监控的账号"),
             ("打法卡库", "拆解库"),
+            ("内容清单", "内容清单"),
             ("内容工场", "公众号内容工场"),
             ("风格画像", "公众号风格画像"),
             ("任务", "任务"),
@@ -170,21 +173,23 @@ def main() -> int:
         # ---------- 内容工场：文章展开与渲染 ----------
         section("E2E · 内容工场文章展开与渲染")
         goto_page("内容工场")
-        # 种子文章按标题点行展开（现行行兜底文案是「草稿 #N」，不再是「文章 #N」）
+        # 2026-11-13 对齐 11-11 决策队列制改版：rendered 文章展开=HTML 预览（排版在产线内
+        # 完成，页面已无「渲染」按钮）；真实决策闭环=展开预览 → 发布登记 → 状态流转 published
         page.locator(f'text={article_title}').first.click()
         page.wait_for_timeout(800)
-        check("文章行展开（md 编辑器出现）", page.locator("textarea").count() >= 1)
-        render_btn = page.locator('button:has-text("渲染公众号格式")')
-        if render_btn.count() == 0:
-            render_btn = page.locator('button:has-text("已渲染 ✓")')
-        render_btn.first.click()
+        check("文章行展开（HTML 预览出现）", page.locator("text=E2E 种子正文第一段").count() >= 1)
+        page.locator('button:has-text("已发布 · 登记")').first.click()
+        page.wait_for_timeout(600)
+        page.locator('input[placeholder*="http"], input[placeholder*="链接"], input').first.fill(
+            "https://mp.weixin.qq.com/s/e2e-seed")
+        page.locator('button:has-text("确认已发布")').first.click()
         page.wait_for_timeout(1200)
-        check("渲染交互出 HTML 预览", page.locator("text=复制公众号 HTML").count() >= 1
-              or page.locator("text=已渲染 ✓").count() >= 1)
+        check("发布登记闭环（行流转已发布）", page.locator('text=已发布').count() >= 1,
+              "登记后行状态徽章应变为已发布")
 
-        # ---------- 账号经营页：品牌卡（BrandForm 已从设置页迁到账号经营） ----------
-        section("E2E · 账号经营页品牌卡")
-        goto_page("账号经营")
+        # ---------- 设置页：品牌卡（2026-11-13 对齐现 UI：BrandForm 宿主=设置页） ----------
+        section("E2E · 设置页品牌卡")
+        goto_page("设置")
         page.locator('label', has_text='角标 · 第一行').first.wait_for(state='visible', timeout=8000)
         check("品牌卡字段在位",
               all(page.locator(f'text={t}').count() >= 1 for t in

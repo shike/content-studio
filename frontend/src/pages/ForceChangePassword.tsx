@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { KeyRound } from 'lucide-react'
 import { api } from '../api'
 
 /** 首登强制改密屏：一次性密码登录后全屏拦截，改完才放行（R11.2）。 */

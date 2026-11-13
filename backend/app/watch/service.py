@@ -316,7 +316,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
         ctx.set_progress(
             5 + int(85 * i / max(1, len(douyin_accounts))),
             f"扫描 {acc.name}（{i + 1}/{len(douyin_accounts)}）")
-        # 列表四链路：① 锚点视频（免登录）② 移动分享主页（免登录，需 sec_uid 链接）
+        # 列表三链路瀑布：① 锚点视频（免登录）② 移动分享主页（免登录，需 sec_uid 链接）
         # ③ PC 主页拦截。降级原因可见。
         entries, err, is_anchor = await asyncio.to_thread(_list_author_videos_via_anchor, acc.url)
         if entries is not None:
@@ -366,7 +366,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
                     stats=stats,
                     source="douyin",
                     account_type=acc.account_type,  # 两类号策略：拆解 prompt 按账号类型分叉
-                    scan_status="pending",  # 短暂待定夺态，扫描末尾全量批准排队拆解（2026-11-08 定版）
+                    scan_status="pending",  # 短暂待定夺态，扫描末尾过拆解质量闸（达标自动批准，未达标 ignored 可手动强拆）
                 )
                 s.add(b)
                 s.commit()
@@ -379,10 +379,10 @@ async def watch_scan(ctx, payload: dict) -> dict:
         with Session(engine) as s:
             row = s.get(WatchAccount, acc.id)
             if row is not None:
-                row.last_scan_at = datetime.now(timezone.utc)
+                row.last_scan_at = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC
                 s.add(row)
                 s.commit()
-        notes.append(f"{acc.name}：新入库 {created} 条（待定夺，批准后进拆解队列）"
+        notes.append(f"{acc.name}：新入库 {created} 条（过拆解质量闸：评论≥20或赞≥300 自动批准拆）"
                      + (f"，回填互动数 {backfilled} 条" if backfilled else ""))
 
     # 质量闸自动拆解（2026-11-11 用户定版：评论≥20或赞≥300 才拆）：达标新作品自动批准
@@ -398,7 +398,7 @@ async def watch_scan(ctx, payload: dict) -> dict:
             rows = [r for r in rows if r is not None]
             n_auto = await bms.auto_dissect_rows(rows, "同行扫描")
             if n_auto:
-                notes.append(f"自动拆解 {n_auto} 条（监控内容全量自动，无门槛）")
+                notes.append(f"自动拆解 {n_auto} 条（过拆解质量闸：评论≥20 或 赞≥300，未达标行保留可手动强拆）")
         except Exception as e:  # noqa: BLE001 自动拆解失败不影响扫描本身
             notes.append(f"质量闸自动拆解失败：{type(e).__name__}: {str(e)[:80]}")
 
@@ -710,7 +710,7 @@ async def watch_discover(ctx, payload: dict) -> dict:
         if limited:
             raise TransientError(
                 "DDG 限流惩罚窗中，各组检索都没挖到链接；任务会自动重试"
-                "（约 10 分钟后，期间不再消耗检索配额），无需换词")
+                "（退避梯子第一跳 30 分钟，期间不再消耗检索配额），无需换词")
         raise RuntimeError(
             f"搜索引擎未挖到抖音视频链接（{'；'.join(notes)}）。可换关键词重试，"
             "或直接在 App 分享视频链接走「添加账号→贴链接识别」")
@@ -758,7 +758,7 @@ async def watch_discover(ctx, payload: dict) -> dict:
     ranked.sort(key=lambda d: (d.get("account_type") == "leadgen",
                                d.get("leadgen_density", 0),
                                _rank_key(d)), reverse=True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC
     new_cnt = added_cnt = 0
     with Session(engine) as s:
         watched_secs = set()
@@ -864,7 +864,7 @@ _HL_CITIES = ["苏州", "上海", "杭州", "南京", "无锡", "宁波", "温�
 _HL_KEYWORDS = ["线下沙龙", "组局", "AI沙龙", "同城聚会", "主理人", "AI活动", "创业沙龙",
                 "读书会", "女性创业", "破圈", "私董会", "资源对接", "AI互助", "同城创业",
                 "AI圈子", "饭局"]
-_HL_SEARCH_BUDGET = 12      # 每晚搜索数（全矩阵 ~9 晚轮完，账号会长新）
+_HL_SEARCH_BUDGET = 12      # 每晚搜索数（16城×16词=256 组合 ≈21 晚轮完，账号会长新）
 _HL_VERIFY_BUDGET = 25      # 每晚取证作者数
 _HL_MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 "
                  "(KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1")
@@ -973,11 +973,29 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
                     pass
 
         page.on("response", on_resp)
+
+        def _routerdata_fallback(pg) -> None:
+            """页面没发 search XHR 时读 HTML 内嵌 _ROUTER_DATA 兜底（downloader 同款）。"""
+            try:
+                m = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>",
+                              pg.content(), re.S)
+                if m:
+                    walk(json.loads(m.group(1)), authors)
+            except Exception:  # noqa: BLE001
+                pass
+
         for m in batch:
             try:
                 page.goto(f"https://www.douyin.com/search/{quote(m)}", timeout=30000,
                           wait_until="domcontentloaded")
-                page.wait_for_timeout(6000)
+                # 2026-11-13 取证升级：本路线并非登录墙（双出口实跑：标题正常、无验证码、
+                # 无登录标记，homeproxy 出口截到 sec_uid），真正的病是固定 6s 窗——数据
+                # XHR 到达慢且抖（同跑 direct 0 个 / 隧道 5 个），是「12s 窗」同类事故。
+                # 升级为 60s 轮询（本查询对作者池有增量即走）+ _ROUTER_DATA 兜底
+                q_mark = len(authors)
+                end = time.time() + 60
+                while time.time() < end and len(authors) == q_mark:
+                    page.wait_for_timeout(2000)
                 try:
                     tab = page.locator("text=用户").first
                     if tab.count() > 0:
@@ -988,6 +1006,8 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
                 for _ in range(2):
                     page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
                     page.wait_for_timeout(2000)
+                if len(authors) == q_mark:
+                    _routerdata_fallback(page)
                 searched.append(m)
                 ctx.set_progress(int(50 * len(searched) / max(len(batch), 1)),
                                  f"搜索 {len(searched)}/{len(batch)}：{m}（作者池 {len(authors)}）")

@@ -245,13 +245,13 @@ export default function Workshop() {
                             </button>
                           )}
                           {['rendered', 'draft', 'edited'].includes(a.status) && pubFor !== a.id && (
-                            <button className="btn-sm btn" disabled={!!busy}
+                            <button className="btn-ghost btn-sm" disabled={!!busy}
                               onClick={(e) => { e.stopPropagation(); setPubFor(a.id); setPubUrl('') }}>
                               已发布 · 登记
                             </button>
                           )}
                           {a.status === 'published' && rfFor !== a.id && (
-                            <button className="btn-sm btn" disabled={!!busy}
+                            <button className="btn-ghost btn-sm" disabled={!!busy}
                               onClick={(e) => {
                                 e.stopPropagation(); setRfFor(a.id)
                                 setRf({ reads: String(a.stats?.reads ?? ''), welook: String(a.stats?.welook ?? ''),
@@ -271,7 +271,7 @@ export default function Workshop() {
                               <input value={pubUrl} onChange={(e) => setPubUrl(e.target.value)}
                                 placeholder="https://mp.weixin.qq.com/s/…"
                                 className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[12.5px] outline-none focus:border-slate-400" />
-                              <button className="btn-sm btn" disabled={!!busy || !pubUrl.trim().startsWith('http')}
+                              <button className="btn-ghost btn-sm" disabled={!!busy || !pubUrl.trim().startsWith('http')}
                                 onClick={(e) => { e.stopPropagation(); registerPublish(a) }}>确认已发布</button>
                               <button className="btn-sm btn-ghost" onClick={(e) => { e.stopPropagation(); setPubFor(null) }}>取消</button>
                             </div>
@@ -288,7 +288,7 @@ export default function Workshop() {
                                     inputMode="numeric" className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-right num-serif outline-none focus:border-slate-400" />
                                 </label>
                               ))}
-                              <button className="btn-sm btn" disabled={!!busy} onClick={() => saveReflow(a)}>保存</button>
+                              <button className="btn-ghost btn-sm" disabled={!!busy} onClick={() => saveReflow(a)}>保存</button>
                               <button className="btn-sm btn-ghost" onClick={() => setRfFor(null)}>取消</button>
                             </div>
                           </div>

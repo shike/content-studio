@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Content Studio 验收脚本公共库（仅标准库）。
 
-供 run_p0.py ~ run_p4.py 引用。判定规则见 README.md：
+供 run_p0/p1/p2/p6/p7/p8 与 e2e_run.py 引用（P3/P4/P5 已随退役面删除）。判定规则见 README.md：
 FAIL = 契约被打破；SKIP = 外部依赖缺失。
 """
 from __future__ import annotations

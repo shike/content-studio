@@ -234,7 +234,7 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
                             <ConfirmDeleteButton onConfirm={() => act(it, 'dismiss')} confirmText="不做" />
                           )}
                           {(it.status === 'low' || it.status === 'dismissed') && (
-                            <button className="btn-sm btn" disabled={!!busy} onClick={(e) => { e.stopPropagation(); act(it, 'pending') }}>
+                            <button className="btn-ghost btn-sm" disabled={!!busy} onClick={(e) => { e.stopPropagation(); act(it, 'pending') }}>
                               {it.status === 'low' ? '强制入清单' : '恢复待改编'}
                             </button>
                           )}

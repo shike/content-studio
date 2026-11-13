@@ -99,6 +99,8 @@ _POLICIES: dict[str, RetryPolicy] = {
     "article_adapt": RetryPolicy(task_timeout=3600),  # 改编器：拉源文全文+成文+原创度闸+机检
     "idea_research": RetryPolicy(task_timeout=1800),
     "trending_topics": RetryPolicy(task_timeout=900),
+    "self_story_targets": RetryPolicy(task_timeout=900),   # 与 trending 同量级（清单盘靶+LLM 生成）
+    "hl_search_matrix": RetryPolicy(task_timeout=3600),    # 同城搜索矩阵：预算 12 组搜索+取证（2026-11-13 补硬超时）
     "creator_data_scan": RetryPolicy(task_timeout=300),
     "video_weekly_report": RetryPolicy(task_timeout=600),
     "self_analyze": RetryPolicy(task_timeout=2700),
@@ -461,14 +463,22 @@ class JobRunner:
                 await self._run_one(asyncio.get_running_loop(), job_id)
             except Exception as e:  # noqa: BLE001 执行器外异常（如 DB 抖动）：任务不得卡 running
                 print(f"[job-run] {job_type}#{job_id} 执行器外异常: {type(e).__name__}: {str(e)[:120]}")
-                with Session(engine) as s:
-                    job = s.get(Job, job_id)
-                    if job is not None and job.status == "running":
-                        job.status = "failed"
-                        job.fail_class = "transient"
-                        job.error = f"执行器外异常: {scrub_paths(str(e))[:300]}"
-                        s.add(job)
-                        s.commit()
+                # 2026-11-13 修复：原路径只标 failed 不设 next_retry_at/不进指纹/不进梯子，
+                # 直接成终态红警，与 _handle_failure 行为脱节——先走标准失败处置（其自带
+                # 状态护栏），标准处置自身也炸（DB 整体不可用）才退回最小直写兜底
+                try:
+                    await self._handle_failure(job_id, job_type, e)
+                except Exception as e2:  # noqa: BLE001
+                    print(f"[job-run] {job_type}#{job_id} 标准失败处置也异常，退回最小直写: "
+                          f"{type(e2).__name__}: {str(e2)[:120]}")
+                    with Session(engine) as s:
+                        job = s.get(Job, job_id)
+                        if job is not None and job.status == "running":
+                            job.status = "failed"
+                            job.fail_class = "transient"
+                            job.error = f"执行器外异常: {scrub_paths(str(e))[:300]}"
+                            s.add(job)
+                            s.commit()
             finally:
                 if self._inflight.get(job_type) == job_id:
                     self._inflight.pop(job_type, None)

@@ -107,16 +107,17 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
 @register_executor("trending_topics")
 async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     """今日热点靶子提炼（2026-11-12 第六版=扩供应不降标准，观点怼热点主轴）：
-    五路原料 × 租户画像 → ≤6 个半句话判决靶子（sentence/context/heat/spice）。
+    六路原料 × 租户画像 → ≤6 个半句话判决靶子（sentence/context/heat/spice）。
 
-    五路原料（2026-11-12 生产服务器逐一实测）：百度热搜前 50 / 抖音热点榜 50（他发布
-    平台自己的榜，第一优先）/ 知乎热榜 30 / 科技媒体 RSS 四源 48h / 对标圈近 2 天
-    （议题参考，禁止当热点）。三榜条目跨榜合并：同一件事多榜同在=真热点，复合热度
+    六路原料（2026-11-12 生产服务器逐一实测，11-13 扩 GitHub/AIHot）：百度热搜前 50 /
+    抖音热点榜 50（他发布平台自己的榜，第一优先）/ 知乎热榜 30 / 科技媒体 RSS 六源 48h
+    + GitHub 新库 + AIHot / 对标圈近 2 天（议题参考，禁止当热点）/ 已发视频清单（冷饭判据）。
+    三榜条目跨榜合并：同一件事多榜同在=真热点，复合热度
     证据排最前。靶子过硬校验（对标圈拦截、14 天判决句撞车、批内由头去重；由头层 7 天禁撞已废——续集合法）才落库，
     宁缺毋滥；批次替代：当日无下游的旧 draft 让位新批次；无可怼=诚实空过（不挂失败）。
     原料收集失败不阻塞，LLM 输入里如实标注缺料。"""
     import re as _re
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from ..models import Article as _A, BenchmarkVideo, Script as _S
     from ..tenant_brand import audience_note_of, brand_of
@@ -151,14 +152,17 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-]+", "", str(t)).lower()
 
     ctx.set_progress(8, "收集站内原料（对标圈近 2 天议题 + 已发视频清单=冷饭判据）")
-    cutoff = datetime.now() - timedelta(days=2)
+    # created_at 是 naive UTC（2026-11-13 修正此前本地时间比对，窗口差 8h）
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
     with Session(engine) as s:
         rows = s.exec(select(BenchmarkVideo).where(
             BenchmarkVideo.created_at >= cutoff,  # type: ignore[attr-defined]
             BenchmarkVideo.scan_status != "ignored")).all()  # type: ignore[attr-defined]
         watch_items = [
             {"author": b.author, "title": b.title,
-             "likes": (b.stats or {}).get("digg_count") or (b.stats or {}).get("likes", "")}
+             # 2026-11-13 修复：stats 真实键是 digg/comment/share/collect（watch._extract_stats），
+             # 原先读 digg_count/likes 两个不存在的键，对标圈互动量证据恒为空串
+             "likes": (b.stats or {}).get("digg", "")}
             for b in rows if b.title
         ][:40]
 
@@ -435,8 +439,12 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     created: list[int] = []
     superseded: list[int] = []
     with Session(engine) as s:
-        # 批次替代：当日更早批次且无下游产物的 draft 让位（今日热点=今日最新一批）
-        day_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # 批次替代：当日更早批次且无下游产物的 draft 让位（今日热点=今日最新一批）。
+        # 「当日」=本地自然日（与 dedup_key 的本地日期同口径）；created_at 是 naive UTC，
+        # 须把本地零点换算成 naive UTC 再比（2026-11-13 修复：原用本地 naive 直接比，
+        # UTC+8 服务器清晨跑批时 day_start > now_utc 条件恒假，批次替代静默失效）
+        _local_mid = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = (_local_mid - _local_mid.utcoffset()).replace(tzinfo=None)
         for t in s.exec(select(Topic).where(
                 Topic.source_type == "trending",  # type: ignore[attr-defined]
                 Topic.status == "draft",  # type: ignore[attr-defined]
@@ -576,7 +584,9 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
     created: list[int] = []
     superseded: list[int] = []
     with Session(engine) as s:
-        day_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # 同 trending：本地自然日零点换算 naive UTC 再比（2026-11-13 修复，见上文注释）
+        _local_mid = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = (_local_mid - _local_mid.utcoffset()).replace(tzinfo=None)
         for t in s.exec(select(Topic).where(
                 Topic.source_type == "self_story",  # type: ignore[attr-defined]
                 Topic.status == "draft",  # type: ignore[attr-defined]
@@ -620,9 +630,9 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
 
 def recent_topic_titles(days: int = 14, limit: int = 24, line: str = "") -> list[str]:
     """近 N 天已有选题标题（防撞车清单：生成前注入 prompt，让模型主动避开）。三库独立按线。"""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)  # created_at 是 naive UTC
     with Session(engine) as s:
         q = select(Topic.title).where(Topic.created_at >= cutoff)  # type: ignore[attr-defined]
         if line in ("persona", "leadgen"):
@@ -645,7 +655,7 @@ def is_similar_title(title: str, days: int = 14, threshold: float = 0.55,
 
     生成链路（热点/拆解）落库前硬拦截；人工链路（快速记题/深研）只标记不拦。
     三库独立（2026-11-02）：line 传入时只与本线选题比对，跨线不拦。"""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     if not (title or "").strip():
         return None
@@ -655,7 +665,7 @@ def is_similar_title(title: str, days: int = 14, threshold: float = 0.55,
     n = _norm(title)
     if not n:
         return None
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)  # created_at 是 naive UTC
     with Session(engine) as s:
         q = select(Topic).where(Topic.created_at >= cutoff)  # type: ignore[attr-defined]
         if line in ("persona", "leadgen"):

@@ -53,7 +53,19 @@ const TYPE_NAMES: Record<string, string> = {
   self_profile_update: '画像重算',
   watch_resolve: '链接识别',
   watch_discover: '账号发现',
-  topic_radar: '话题雷达',
+  topic_radar: '话题雷达', // 已退役类型：历史行仍可能见到
+  trending_topics: '今日靶子',
+  self_story_targets: '一线交付靶子',
+  hl_search_matrix: '同城获客挖掘',
+  article_hotspots: '公众号热点报题',
+  article_kb_miner: '知识库挖掘',
+  article_adapt: '源文改编',
+  article_deepread: '知识库深读',
+  article_kb_write: '知识库成文',
+  article_kb_topics: '知识库选题',
+  article_style_extract: '文风提取',
+  creator_data_scan: '账号指标回流',
+  video_weekly_report: '视频周报',
 }
 
 // 用户可见三态（2026-10-12 引擎统一）：failed+next_retry_at=退避中（属"进行中"）
@@ -132,8 +144,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
   const [scheds, setScheds] = useState<ScheduleRow[]>([])
   const [editHour, setEditHour] = useState<string | null>(null)
 
-  // 页面按"来这想问什么"分四个标签：运行总览 / 待处置 / 调度中心 / 历史记录（2026-10-30 重构）
-  // 落位规则：待处置非空且用户没点过标签 → 自动停在待处置
+  // 页面按"来这想问什么"分三个标签：运行总览（chips 切进行中/失败/全部）/ 调度中心 / 历史记录
   const switchTab = (k: Tab) => { setTab(k); setPage(0); setExpandedId(null) }
 
   // 查询口径随标签走：历史记录固定 done，其余标签由运行总览的 chips 决定
@@ -222,22 +233,8 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
       }
     })()
 
-  const retryAllFailed = () =>
-    (async () => {
-      setError('')
-      setConfirmClear(null)
-      try {
-        const r = await api<{ requeued: number }>('/jobs/retry-failed', {
-          method: 'POST',
-          body: JSON.stringify({}),
-        })
-        setBusy(`已重新入队 ${r.requeued} 个失败任务`)
-        setTimeout(() => setBusy(''), 3000)
-        await reload()
-      } catch (e) {
-        setError(String(e))
-      }
-    })()
+  // retryAllFailed 已删（2026-11-13）：调用的 /jobs/retry-failed「复活整批」是
+  // 2026-10-30 定版移除的失败工作流，前端死函数成对残留
 
   const retryOne = (id: number) =>
     (async () => {
@@ -322,7 +319,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
       {/* 状态行 */}
       <div className="card flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>进行中 <b className="text-sky-600">{counts.summary.active}</b></span>
-        <span className="text-xs text-slate-400">（运行中 {counts.running} · 排队 {counts.queued} · 等重试 {counts.failed && counts.summary.active - counts.running - counts.queued >= 0 ? counts.summary.active - counts.running - counts.queued : 0}）</span>
+        <span className="text-xs text-slate-400">（运行中 {counts.running} · 排队 {counts.queued} · 等重试 {Math.max(0, counts.summary.active - counts.running - counts.queued)}）</span>
         <span>失败 <b className="text-zinc-900">{counts.summary.todo}</b></span>
         <span>完成 <b className="text-zinc-900">{counts.summary.done}</b></span>
         <span className="ml-auto text-[11px] text-slate-400">

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/jobs")
 
 _CLEARABLE = {"failed", "superseded", "succeeded"}
 
-_WEIGHT = {"running": 0, "queued": 1, "parked": 2, "superseded": 3, "failed": 4, "succeeded": 5}
+_WEIGHT = {"running": 0, "queued": 1, "superseded": 3, "failed": 4, "succeeded": 5}  # parked 已退役（2026-10-30 并入 failed+梯子）
 
 
 def _actor_of(j: Job):
@@ -141,19 +141,21 @@ async def retry_job(job_id: int) -> dict:
             raise HTTPException(status_code=404, detail="job not found")
         if job.status != "failed":
             raise HTTPException(status_code=400, detail="只有失败/挂起的任务可以重试")
+        # 归属要在 commit 前取好：commit 会 expire 实例，出 with 块后即 detached
+        actor = _actor_of(job)
+        new_payload = dict(job.payload)
+        new_type = job.type
         job.status = "superseded"
         job.error = "已手动重试，重新入队"
         s.add(job)
-        new_payload = dict(job.payload)
-        new_type = job.type
+        s.commit()  # 2026-11-13 修复：此前漏 commit，superseded 标记随会话关闭回滚，原行仍挂红
     from ..jobs.revive import revive_entity
     try:
         revive_entity(new_type, new_payload)  # 实体先回在途态，重试期间不显示失败
     except Exception as e:  # noqa: BLE001
         print(f"[jobs] 手动重试实体回退失败: {type(e).__name__}: {str(e)[:100]}")
     _runner.manual_retry_reset(job_id)
-    new_job = await _runner.submit(new_type, new_payload, retry_of=job_id,
-                                   actor=_actor_of(job))
+    new_job = await _runner.submit(new_type, new_payload, retry_of=job_id, actor=actor)
     return {"job_id": new_job.id}
 
 

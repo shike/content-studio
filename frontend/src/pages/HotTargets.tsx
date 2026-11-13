@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown, ChevronRight, Clapperboard, Crosshair, Flame, RefreshCw, X,
 } from 'lucide-react'
@@ -89,13 +89,18 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
     }
   }
 
-  /* 手动刷新：触发提炼任务 → 3s 轮询直到跑完 → 重载 */
+  /* 手动刷新：触发提炼任务 → 3s 轮询直到跑完 → 重载。
+     轮询句柄挂 ref + 卸载清理（2026-11-13 修复：原裸 setInterval 无清理，切页后
+     轮询继续打 /jobs 直到任务离开运行态才自清） */
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
   const refresh = async () => {
     setRefreshing(true)
     setRefreshMsg('已提交提炼任务…')
     try {
       await api('/topics/trending', { method: 'POST' })
-      const poll = setInterval(async () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = setInterval(async () => {
         try {
           const d = await api<{ items: { status: string; progress: number; message: string }[] }>(
             '/jobs?limit=3&type=trending_topics')
@@ -104,7 +109,8 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
             setRefreshMsg(`提炼中 ${run.progress || 0}% ${run.message || ''}`)
             return
           }
-          clearInterval(poll)
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = null
           setRefreshing(false)
           setRefreshMsg('')
           await load()
@@ -246,7 +252,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
                             </button>
                           )}
                           {scriptSt && scriptSt !== 'failed' && (
-                            <button className="btn-sm btn justify-center"
+                            <button className="btn-ghost btn-sm justify-center"
                               onClick={(e) => { e.stopPropagation(); onNavigate('p_content') }}>
                               去内容看板定稿 →
                             </button>

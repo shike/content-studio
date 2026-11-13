@@ -110,48 +110,13 @@ _BANNED_TABLE = json.loads((Path(__file__).parent / "banned_words.json").read_te
 BANNED_PATTERNS = _BANNED_TABLE["banned_patterns"]
 DEFAULT_STYLE = "deep_dive"  # Q13：用户常用"深度长文"，默认固化+选择器弱化
 
-# 双档位（2026-10-02 用户拍板：双档位·默认公众号版）。feed=公众号版（推荐流完读率优先：
-# 1200~1800 字、开头即答案、判断式小节标题、金句收尾）；deep=深度版（原 3000~5000 长文规格，
-# 铺垫式开头、机制拆解/方法框架/边界条件三件套）。规格文本分别注入三个 prompt 的占位符。
-# deep 档 2026-10-08 按「数字生命卡兹克」爆款拆解吸收四条：判决句标题（废论文腔）、
-# 可转述原创框架、术语必跟类比、数字体感锚+人物年代叙事锚（一句话事实，不破去故事化裁定）。
+# 档位规格（feed 档 2026-11-02 三线定版退役，现唯一档位 deep：3000~5000 字长文规格）。
+# 规格文本注入三个 prompt 的占位符。deep 档 2026-10-08 按「数字生命卡兹克」爆款拆解
+# 吸收四条：判决句标题（废论文腔）、可转述原创框架、术语必跟类比、
+# 数字体感锚+人物年代叙事锚（一句话事实，不破去故事化裁定）。
 ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
-    "feed": {
-        "words": "300~450",
-        "title": (
-            "- 微信公众号标题，≤32 字（展示上限）\n"
-            "- 本篇发公众号推荐流：标题要在信息流里 0.5 秒内让目标读者（{{WHO}}）"
-            "判断「这说的就是我」\n"
-            "- 公式（至少占两条）：人群定位（点明 {{WHO}} 里的具体人群）+ 具体数字或金额 + "
-            "冲突/反常识 + 可带走的判断\n"
-            "- 用目标读者的痛感词（从受众域口径提炼：踩过什么坑、怕什么损失、想要什么保障）——"
-            "「被坑过」「怕没效果」「钱花了没效果」「先别急着上」这类具体痛感词可用；"
-            "「验收」「归因」「机制」「链路」「边界」这类项目管理词不许出现在标题里\n"
-            "- 主标题 1 个 + 备选 2 个（备选换角度，不改事实；其中 1 个可以是更克制专业式的陈述句）\n"
-            "- 禁止（出现即返工）：论文标题腔——「X 的 Y：从 A 到 B 的 Z 拆解」「XX 的机制/归因/边界」"
-            "式对仗主副题；悬念钩子腔——「只问一句」「终于有人讲清了」「你以为…其实」"
-            "（平台判定标题党会限流）；口语情绪词——「准不准」「说白了」"
-        ),
-        "outline": (
-            "- 本篇是「公众号版」（默认档）：总字数 1200~1800 字，3~4 个小节，每节 300~450 字\n"
-            "- 开头即答案：第一节第一句=全文最重的结论或最反直觉的数字（从素材里挑最狠的），"
-            "再用 2~3 句交代背景与冲突；禁止铺垫式开头（「随着……」「近年来……」「在……的大背景下」"
-            "出现即报废）\n"
-            "- 小节标题=判断句或利益句（句式示范：「80% 的行业投入，死在标准没写进约定里」，内容按受众域替换），"
-            "禁止名词术语式标题（例：「XX 的机制拆解」）\n"
-            "- 3~4 节里至少 1 节是完整机制/方法拆解（步骤+反例，读者能直接套用）；"
-            "边界条件并进对应小节，不单开一节\n"
-            "- 每节至少带 1 个素材里的具体数字\n"
-            "- 结尾节先用一句可转发的金句收束（替目标读者说出他想说而不敢说的话），"
-            "再给读者业务上的下一步动作（句式示范：「动手之前，先把验收标准写进约定」，按受众域替换）；"
-            "严禁任何读者与作者互动的转化话术（评论区/私信/关注/扣字/领资料——出现即报废）"
-        ),
-        "section": (
-            "篇幅 300~450 字，Markdown，关键数字与结论加粗\n"
-            "- 段落 1~3 行一段，给足呼吸感（读者在手机上扫读）\n"
-            "- 每节至少一个具体数字；若本节是全文第一节，第一句直接给全文最重的判断或数字，禁止任何铺垫"
-        ),
-    },
+    # feed 档 2026-11-02 三线定版退役（公众号做深度内容，唯一档位 deep），
+    # 2026-11-13 清除死规格（此前 payload.length 传 feed 会命中不存在键静默回落）
     "deep": {
         "words": "700~1100",
         "title": (
@@ -441,9 +406,9 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
           + "\n\n选题与素材（JSON）：\n" + json.dumps(material, ensure_ascii=False)}],
         purpose="article_outline", max_tokens=8192, thinking="disabled")
     sections_plan = [x for x in (outline.get("sections") or []) if isinstance(x, dict) and x.get("heading")]
-    # 节数依从性守卫：模型偶尔无视档位节数要求只出 1~2 节（#11 实测：feed 档大纲只给 1 节，
+    # 节数依从性守卫：模型偶尔无视档位节数要求只出 1~2 节（#11 实测：大纲只给 1 节，
     # 成文 475 字就"完成"了）——带明确节数重试一次，仍不达标才放行（质量评审/长度窗兜底拦截）
-    min_sections = 3 if length == "feed" else 5
+    min_sections = 5
     if sections_plan and len(sections_plan) < min_sections:
         print(f"[article] 大纲只出 {len(sections_plan)} 节（要求 {min_sections}+），重试一次")
         retry_prompt = (render("article_outline", STYLE_GUIDE=style_guide,
@@ -855,7 +820,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(25, "按读者受众预筛热点")
     screen = await gateway.complete_json(
         [{"role": "user", "content":
-          "本号的生意：卖一门 1999 元的线下课，教不懂技术的普通人做 AI 落地（FDE）。"
+          "本号的生意：卖一门 1980 元的线下实训营，教不懂技术的普通人做 AI 落地（FDE）。"
           "读者=这类人：实体老板、想转行的普通人，关心生意成本、用人、赚钱、职业机会。\n"
           "候选热点必须过**双锚**，缺一即剔除：\n"
           "① 受众锚：他们（不懂技术）看得懂、用得上；需要写代码/调 API/懂模型圈的话题剔除\n"
@@ -1095,7 +1060,9 @@ async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
                         if hit:
                             doc_ids.append({"media_id": hit["media_id"], "title": hit["title"]})
                     if not doc_ids:
-                        dropped.append(f"依据对不上：{dt[:24]}")
+                        # 2026-11-13 修复：原引 dt[:24]，LLM 输出缺 docs/为空数组时 dt 未绑定 →
+                        # NameError 炸整轮任务；改用必有值的 title，且 dropped 进进度消息可见
+                        dropped.append(f"依据对不上：{title[:24]}")
                         continue
                     s.add(KBTopic(title=title,
                                   judgment=str(t.get("judgment") or "")[:200],
@@ -1114,8 +1081,9 @@ async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
                 s.commit()
             added_total += added
             recent = ([f"{t.get('title', '')}"] if topics else []) + recent[:20]
+            _drop_note = f"｜弃 {len(dropped)}（{'；'.join(dropped[:2])}）" if dropped else ""
             ctx.set_progress(min(95, 10 + batch_no * 3),
-                             f"批 {batch_no}（{fname}）：读 {len(chunk)} 篇 → 新选题 {added}｜累计入池 {added_total}")
+                             f"批 {batch_no}（{fname}）：读 {len(chunk)} 篇 → 新选题 {added}{_drop_note}｜累计入池 {added_total}")
             await asyncio.sleep(0.6)
         await asyncio.sleep(0.8)
 
@@ -1134,66 +1102,7 @@ async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
             "pool_new": pool_new, "exhausted": exhausted, "message": msg}
 
 
-_KB_AUTO_DAILY = 2  # 每日自动圈题成文篇数（系统全干，用户只决策；2026-11-10 定版）
-
-
-@register_executor("article_kb_auto", on_fail=_article_generate_fail)
-async def article_kb_auto(ctx: JobContext, payload: dict) -> dict:
-    """全自动圈题成文（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：
-    每日从选题池按策略自动挑题 → 建稿 → 链写成文（成文自带质量自评+自动排版）。
-    选题池降级为系统内部机制——不再倒给用户挑选。策略：跳过与已有稿件标题
-    相似（≥0.55）的题和缺依据文档的题，按池内顺序（最早挖掘优先）取满当日预算。"""
-    budget = int(payload.get("budget") or _KB_AUTO_DAILY)
-    import difflib
-
-    with Session(engine) as s:
-        existing_titles = [row[0] for row in s.exec(
-            select(Article.title).where(  # type: ignore[attr-defined]
-                Article.status.in_(ACTIVE_ARTICLE_STATUSES))).all()]  # type: ignore[attr-defined]
-        topics = s.exec(select(KBTopic).where(  # type: ignore[attr-defined]
-            KBTopic.status == "new").order_by(KBTopic.id)).all()  # type: ignore[attr-defined]
-
-    chosen: list[KBTopic] = []
-    for t in topics:
-        if not t.docs:
-            continue
-        if any(difflib.SequenceMatcher(None, t.title, et).ratio() >= 0.55
-               for et in existing_titles):
-            continue
-        chosen.append(t)
-        if len(chosen) >= budget:
-            break
-    if not chosen:
-        ctx.set_progress(100, "池中无可用的全新题（都写过或缺依据文档），今日不产出")
-        return {"picked": 0, "message": "池中无可用新题"}
-
-    results = []
-    for t in chosen:
-        with Session(engine) as s:
-            topic = s.get(KBTopic, t.id)
-            if topic is None or topic.status != "new":
-                continue
-            art = Article(title=topic.title, status="pending",
-                          note=f"判断：{topic.judgment[:80]}｜读者：{topic.audience[:12]}｜依据：{topic.why[:80]}")
-            art.kb_doc_ids = list(topic.docs or [])
-            s.add(art)
-            s.commit()
-            s.refresh(art)
-            aid, docs = art.id, list(art.kb_doc_ids or [])
-            topic.status = "selected"
-            topic.article_id = aid
-            s.add(topic)
-            s.commit()
-        from ..jobs.runner import runner
-        job = await runner.submit("article_kb_write", {"article_id": aid, "kb_doc_ids": docs})
-        with Session(engine) as s:
-            art = s.get(Article, aid)
-            if art is not None:
-                art.status = "generating"
-                s.add(art)
-                s.commit()
-        results.append({"article_id": aid, "job_id": job.id, "title": t.title[:40]})
-        ctx.set_progress(min(95, 20 * len(results)), f"已圈题成文 {len(results)}/{len(chosen)}：{t.title[:24]}")
-
-    ctx.set_progress(100, f"今日自动圈题 {len(results)} 篇，后台写稿中（写完自动排版待发）")
-    return {"picked": len(results), "results": results}
+# article_kb_auto（全自动圈题成文，2026-11-10 定版）于 2026-11-13 删除：注册后从未有
+# 调度/API/链发提交方（同日被 article_deepread_daily 取代，深读调度又于同日下线），
+# 回滚窗口已过。知识库成文现行三线=挖掘器→清单→改编器（自动）、kb-topics 选用→
+# kb_write（手动）、热点直出→article_generate（自动）。

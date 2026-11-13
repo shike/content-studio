@@ -103,9 +103,11 @@ async def scan(user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
         if _self_account(s) is None:
             raise HTTPException(status_code=400, detail="未添加我的账号：先在同行监测页添加并勾选「这是我的账号」")
-    from datetime import datetime, timezone
+    from datetime import datetime
+    # dedup 用本地日期（与调度中心 self_scan 的 dedup 同口径——此前 API 用 UTC 日期，
+    # 本地 0~8 点窗口内手动扫描与夜间调度可互不拦截双跑）
     job = await runner.submit("self_scan", {"auto": True},
-                              dedup_key=f"{user.tenant_id}:selfscan:all:{datetime.now(timezone.utc):%Y%m%d}")
+                              dedup_key=f"{user.tenant_id}:selfscan:all:{datetime.now():%Y%m%d}")
     return {"job_id": job.id}
 
 

@@ -209,10 +209,13 @@ async def _run_deepread() -> str:
     return f"job #{job.id}（深读一个域 → 成文）"
 
 
-# 深读产线（2026-11-11）：4 点跑（承接原自动圈题时段），读什么写什么，日产 1 篇量服从质
-register_schedule(Schedule(key="article_deepread_daily", label="知识库深读写（域轮读·综合成文）",
-                           daily_hour=4, enabled_by="ima_kb_enabled",
-                           run=_run_deepread))
+# 深读线调度 2026-11-13 下线（TDD §6「停用中」口径落地：cb76a56 建线当日被 25b7ed6
+# 源文改编产线取代，但调度一直没摘——与挖掘器同挂 ima 门同为 4 点，ima 启用日每天
+# 双跑多烧 18 篇全文 + 20 余次 LLM 调用并多产一篇进待发。执行器与 prompt 保留作回滚
+# 窗口；如需复活，恢复下面这行注册即可：
+# register_schedule(Schedule(key="article_deepread_daily", label="知识库深读写（域轮读·综合成文）",
+#                            daily_hour=4, enabled_by="ima_kb_enabled",
+#                            run=_run_deepread))
 async def _run_kb_miner() -> str:
     """挖掘器（2026-11-11 源文改编产线）：每日评一批 ima 源文，高质量入内容清单。"""
     from .runner import runner

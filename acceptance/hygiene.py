@@ -49,7 +49,8 @@ if rows:
     issues.append(f"选题评分含 performance 回流残留×{len(rows)}（新契约已移除评分反哺；ids: {[r[0] for r in rows[:8]]}）")
 
 # ④ 中断任务（提示级，不计入退出码）
-interrupted = q("SELECT COUNT(*) FROM jobs WHERE error LIKE '%服务重启中断%'")[0][0]
+_rows = q("SELECT COUNT(*) FROM jobs WHERE error LIKE '%服务重启中断%'")
+interrupted = _rows[0][0] if _rows else 0  # 空壳库（无表）视为 0
 
 print(f"[hygiene] 扫描 {DB}")
 print(f"  fixture 行: {'干净' if not issues or 'sample' not in str(issues) else '有'}"

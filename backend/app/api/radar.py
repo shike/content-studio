@@ -1,4 +1,5 @@
-"""热点雷达·话题洞察只读接口（2026-10-30：话题雷达并入热点雷达后，仅保留查看）。"""
+"""热点雷达·话题洞察接口：查看 + 手动巡检 + 贴链提取话题 + 添加监测
+（并入每日热点原料路后，自动巡检由 trending_topics 执行器内联驱动）。"""
 from fastapi import APIRouter, Depends
 
 from ..auth import require_user
@@ -43,7 +44,6 @@ async def check_topic_now(topic_id: int, user: User = Depends(require_user)) -> 
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="话题不存在")
         r = await check_topic(row)
-        await asyncio.sleep(0)
     return {"name": r["name"], "new": r["new"], "spiked": r["spiked"]}
 
 

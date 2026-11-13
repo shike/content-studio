@@ -76,6 +76,12 @@
   .btn-xs {
     @apply px-2.5 py-1 text-xs;
   }
+  /* 尺寸修饰类（配 btn-primary/ghost/accent 等用）：2026-11-13 补 .btn-sm——
+  此前 HotTargets/Workshop/ContentItems 按 .btn-sm/.btn 书写但两者都不存在，
+  22 处类名无效、6 个按钮完全无样式 */
+  .btn-sm {
+    @apply px-3 py-1.5 text-[13px];
+  }
 
   /* 输入：中圆角 + 绿聚焦环（moxt 产品层语法） */
   .input {

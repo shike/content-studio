@@ -128,23 +128,9 @@ def _glm_search(query: str, max_results: int) -> tuple[list[dict], str]:
                 results.append({"title": title or link,
                                 "snippet": str(it.get("content") or "")[:150],
                                 "url": link})
-        # 成本台账：web_search 按次计费（search_std 官方价约 ¥0.01/次，估算口径）
-        if results:
-            try:
-                from sqlmodel import Session
-
-                from ..db import engine
-                from ..models import LLMCall
-
-                from ..auth import ACTOR
-
-                _actor_tenant, _uid, _role = ACTOR.get()
-                with Session(engine) as s:
-                    s.add(LLMCall(tenant_id=_actor_tenant, purpose="web_search", model="search_std",
-                                  tokens_in=0, tokens_out=0, cost_est=0.01))
-                    s.commit()
-            except Exception:  # noqa: BLE001 台账失败不影响搜索
-                pass
+        # 成本台账已于 2026-10-27 整体拆除（用户裁定：要花销概算看服务商控制台）——
+        # 此处曾残留一段写 LLMCall 的死代码（模型已删，每次成功搜索抛 ImportError 被
+        # 静默吞），2026-11-13 清除。
         if not results:
             return [], "glm_empty（未返回搜索来源）"
         return results, "ok"
@@ -249,14 +235,16 @@ def _ddg_search(query: str, max_results: int) -> tuple[list[dict], str]:
                     return results, "ok"
     except Exception:  # noqa: BLE001
         pass
-    # html 限流/坏掉 → lite 端点兜底（不同前端不同限流池，2026-09-25 实测可用）
+    # html 限流/坏掉 → lite 端点兜底（不同前端不同限流池，2026-09-25 实测可用）。
+    # 2026-11-13 修复：lite 此前没带 proxy——境内直连 lite.duckduckgo.com 同样
+    # Errno 101，html 202 后的换端点兜底在境内服务器上一直空转
     try:
         resp = httpx.get(
             "https://lite.duckduckgo.com/lite/",
             params={"q": query},
             headers={"User-Agent": _UA,
                      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
-            timeout=15, follow_redirects=True,
+            timeout=15, follow_redirects=True, proxy=proxy,
         )
         if resp.status_code == 200:
             results = _parse_ddg_lite(resp.text)[:max_results]

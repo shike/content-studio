@@ -53,8 +53,8 @@ class Job(TenantScoped, TimestampMixin, table=True):
     history: list = Field(default_factory=list, sa_column=Column(JSON))  # 阶段轨迹 [{p,m,t}]
     error: Optional[str] = None
     # 任务体系五要素（P1 骨架）：去重键 / 分道 / 重试策略状态
-    dedup_key: str = Field(default="", index=True)  # 类型内去重键（空=不去重）；活跃任务(queued/running/parked)中唯一
-    lane: str = Field(default="heavy")  # heavy(LLM串行) | light(并发池) | external(外部渲染) | scheduled(定时)
+    dedup_key: str = Field(default="", index=True)  # 类型内去重键（空=不去重）；活跃任务(queued/running)中唯一（部分唯一索引兜底）
+    lane: str = Field(default="heavy")  # heavy(单 worker LLM 串行) | light(并发池 Semaphore 2)——实际只此两道
     retry_count: int = 0  # 已自动重试/挂起次数
     max_retries: int = 0  # 提交时按类型策略写入
     next_retry_at: Optional[datetime] = None  # 到点由 runner 重试循环放行
@@ -197,7 +197,7 @@ class Script(TenantScoped, TimestampMixin, table=True):
     teleprompter_text: str = ""
     storyboard: list = Field(default_factory=list, sa_column=Column(JSON))
     title_candidates: list = Field(default_factory=list, sa_column=Column(JSON))
-    status: str = "generating"  # generating | polishing | final
+    status: str = "generating"  # generating | polishing | generated（待定稿，徽章计数依赖）| final
     account_type: str = Field(default="persona")  # persona | leadgen（两类号：内容看板过滤/风格分叉）
 
 

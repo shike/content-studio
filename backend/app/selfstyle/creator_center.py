@@ -6,8 +6,9 @@
 路线（2026-10-09 真实接口校准）：Playwright 注入 cookie → 打开内容管理页 →
 拦页面自己的 work_list XHR（janus/douyin/creator/pc/work_list，GET 分页，键是
 max_cursor/has_more）→ 在页面上下文内同源重放改 max_cursor 翻页（同源 fetch
-带站点自己的凭据与签名，不怕参数变化）。出口随 browser.launch 统一走
-douyin_proxy 住宅出口（出口 IP=家宽，与账号日常登录环境一致）。
+带站点自己的凭据与签名，不怕参数变化）。出口走 douyin_proxy（login=True，
+2026-11-13 修正：此前误跟 scrape_proxy）——登录态出口 IP 与账号日常登录
+环境一致是刻意设计。
 cookie 失效明确报错，绝不静默回落公开路线——两条路线数据口径不同（播放量
 全量 vs 点赞快照），混着刷会把新数据刷没。
 """
@@ -132,7 +133,7 @@ def fetch_all_videos(cookie: str, max_pages: int = 60) -> tuple[Optional[list[di
             state["has_more"] = bool(body.get("has_more"))
 
     with sync_playwright() as p:
-        browser = launch(p)  # 统一出口（含可选代理=住宅出口）
+        browser = launch(p, login=True)  # 登录态出口=douyin_proxy（与账号日常环境一致）
         try:
             ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
                                       viewport={"width": 1440, "height": 900})

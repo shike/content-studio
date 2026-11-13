@@ -153,7 +153,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
     () => allScripts
       .filter((s) => s.status === 'generated')
       .filter((s) => !accountType || (s.account_type ?? 'persona') === accountType),
-    [scripts],
+    [allScripts, accountType],  // 2026-11-13 修复：函数体过滤的是 allScripts，依赖原写 [scripts]（靠 reload 同时 set 两者侥幸正确）
   )
   const queue = useMemo(
     () => pendingScripts.filter((s) => !skipped.has(s.id)),
@@ -329,7 +329,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
               <b className="text-slate-600">{session.skipped}</b> 个
             </div>
             <div className="mt-3 text-xs text-slate-400">
-              定稿产物（提词器/分镜/标题）在下方表格展开可见；下一步到「视频生产线」上传原片或「公众号」写长文。
+              定稿产物（提词器/分镜/标题）在下方表格展开可见；拍摄发布后到「今天」登记，长文走「内容工场」。
             </div>
             <div className="mt-6 flex justify-center gap-2">
               {session.skipped > 0 && pendingScripts.some((s) => skipped.has(s.id)) && (
@@ -585,7 +585,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
             <span>已定审但还没有脚本的选题，点行看详情，行尾按钮直接生成三版</span>
             <div className="segment ml-auto shrink-0">
-              <button onClick={() => setLength('short')} className={`segment-item ${length === 'short' ? 'segment-item-active' : ''}`}>短版 60~90s</button>
+              <button onClick={() => setLength('short')} className={`segment-item ${length === 'short' ? 'segment-item-active' : ''}`}>黄金档 50~70s</button>
               <button onClick={() => setLength('long')} className={`segment-item ${length === 'long' ? 'segment-item-active' : ''}`}>长版 2~3min</button>
             </div>
             <div className="segment shrink-0">
@@ -755,7 +755,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
                                 <Clapperboard size={12} /> 分镜提示
                               </div>
                               <ul className="max-h-64 space-y-2 overflow-auto">
-                                {s.storyboard.map((sb, i) => (
+                                {(s.storyboard || []).map((sb, i) => (
                                   <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed">
                                     <span className="grid size-5 shrink-0 place-items-center rounded-full bg-slate-900 text-[10px] font-bold text-sky-400">
                                       {i + 1}
@@ -779,7 +779,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
                                 <FileText size={12} /> 标题候选
                               </div>
                               <ul className="space-y-1.5">
-                                {s.title_candidates.map((c, i) => (
+                                {(s.title_candidates || []).map((c, i) => (
                                   <li key={i} className="flex items-start gap-2 text-[13px]">
                                     <span className="badge mt-px shrink-0 bg-slate-100 text-slate-500">{c.platform}</span>
                                     <span className={c.platform === 'cover' ? 'font-bold text-slate-900' : 'text-slate-700'}>

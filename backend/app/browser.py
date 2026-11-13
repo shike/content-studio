@@ -62,14 +62,20 @@ def ua(mobile: bool = False) -> str:
     return _UA_MAC if _platform.system() == "Darwin" else _UA_LINUX
 
 
-def launch(p, *, mobile: bool = False):
+def launch(p, *, mobile: bool = False, login: bool = False):
     """统一启动 Chromium：反自动化特征 + 可选代理 + **完整版内核**。
 
     用完整版（channel="chromium"，headless 新模式）而非 playwright 的
     chromium-headless-shell：shell 是精简构建，指纹更易被抖音挑战
     （2026-09-27 实测同环境下 shell 0/5、完整版 4/4）。
+
+    出口语义（2026-11-13 修正：此前登录态流量误跟 scrape_proxy，douyin_proxy 全库
+    只剩 DDG 一个生效点，与 settings 注释/AGENTS 的设计相悖）：
+    - login=False（匿名采集，默认）→ scrape_proxy（空=机房直连）
+    - login=True（创作者中心登录态）→ douyin_proxy（空=直连）——出口 IP 与账号
+      日常登录环境一致是刻意设计，登录态流量永不混用匿名采集出口。
     """
-    proxy = (settings.scrape_proxy or "").strip()
+    proxy = ((settings.douyin_proxy if login else settings.scrape_proxy) or "").strip()
     return p.chromium.launch(
         headless=True,
         channel="chromium",  # 完整内核（依赖 playwright install chromium 装的完整包）
@@ -78,7 +84,8 @@ def launch(p, *, mobile: bool = False):
     )
 
 
-def httpx_proxy() -> str | None:
-    """给 httpx 用的代理参数（None=直连）。匿名采集走 scrape_proxy（空=机房直连）。"""
-    proxy = (settings.scrape_proxy or "").strip()
+def httpx_proxy(login: bool = False) -> str | None:
+    """给 httpx 用的代理参数（None=直连）。分口语义同 launch()：匿名=scrape_proxy，
+    登录态=douyin_proxy。"""
+    proxy = ((settings.douyin_proxy if login else settings.scrape_proxy) or "").strip()
     return proxy or None

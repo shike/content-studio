@@ -10,7 +10,6 @@ import subprocess
 from datetime import datetime, timezone
 
 import httpx
-from playwright.sync_api import sync_playwright
 from sqlmodel import Session, select
 
 from ..db import engine
@@ -24,9 +23,7 @@ SPIKE_NEW = 5  # 单次巡检新增视频数达到即判飙升
 PROBE_PER_CHECK = 5  # 每次巡检每话题探测的最新视频条数（每条 ~10s，控制巡检时长）
 LOW_FANS = 100_000   # 低粉线：粉丝 <10 万
 RATIO_MIN = 2.0      # 高赞线：赞/粉比 ≥2
-
-SEED_TOPICS: list[tuple[str, str]] = []  # 监控话题是运营资产不入库：部署者在雷达页添加
-                                         # （贴一条带话题的视频链接可自动提取 ch_id，见 extract_hashtags）
+# （SEED_TOPICS 死常量 2026-11-13 清除：监控话题是运营资产不入库，部署者在雷达页添加）
 
 
 def fetch_topic_videos(ch_id: str, count: int = 20) -> list[dict]:
@@ -60,6 +57,36 @@ def _notify(text: str) -> None:
         pass
 
 
+def _wait_detail(page, detail: dict, deadline_s: float = 60.0) -> None:
+    """60s 轮询等待 detail XHR + _ROUTER_DATA 兜底（2026-11-13 从固定 5s/6s 窗升级）。
+
+    此前固定短窗与全站「60s 耐心轮询」教义（downloader 12s 窗误判事故同源）脱节：
+    慢出口下 detail 恒缺席 → digg=0 → 低粉高赞探测静默归零、话题提取拿不到 text_extra。
+    """
+    import json as _json
+    import re as _re
+    import time as _time
+
+    end = _time.time() + deadline_s
+    while _time.time() < end:
+        if detail:
+            return
+        page.wait_for_timeout(2000)
+    if not detail:
+        try:  # 页面没发 detail XHR 时读 HTML 内嵌 _ROUTER_DATA 兜底（downloader 同款）
+            m = _re.search(r"window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>",
+                           page.content(), _re.S)
+            if m:
+                data = _json.loads(m.group(1))
+                for v in (data.get("loaderData") or {}).values():
+                    items = (v.get("videoInfoRes") or {}).get("item_list") or []
+                    if items:
+                        detail.update({"aweme_detail": items[0]})
+                        return
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _probe_video(vid: str) -> dict:
     """免登录 探测单视频：点赞数 + 作者粉丝数（PC web detail 双字段齐备）。"""
     from playwright.sync_api import sync_playwright
@@ -84,7 +111,7 @@ def _probe_video(vid: str) -> dict:
             page.on("response", on_response)
             page.goto(f"https://www.douyin.com/video/{vid}",
                       timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
+            _wait_detail(page, detail)
         finally:
             browser.close()
 
@@ -138,7 +165,7 @@ def _extract_hashtags(vid: str) -> list[dict]:
             page.on("response", on_response)
             page.goto(f"https://www.douyin.com/video/{vid}",
                       timeout=45000, wait_until="domcontentloaded")
-            page.wait_for_timeout(6000)
+            _wait_detail(page, detail)
         finally:
             browser.close()
 
@@ -176,7 +203,7 @@ async def check_topic(row: RadarTopic) -> dict:
         row.seen_ids = ((row.seen_ids or []) + sorted(fresh_ids))[-SEEN_CAP:]
         row.new_since_last = len(fresh_ids)
         row.recent = recent
-        row.last_checked_at = datetime.now(timezone.utc)
+        row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC
         spiked = bool(row.enabled and row.notify and row.new_since_last >= SPIKE_NEW and seen)
         s.add(row)
         s.commit()

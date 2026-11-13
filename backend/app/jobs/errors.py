@@ -1,9 +1,13 @@
 """任务失败分类学（任务体系 P1 骨架）：fail_class 决定重试策略。
 
-- transient      瞬时故障（网络/超时/5xx/LLM 通道抖动）→ 按任务类型策略自动重试（指数退避）
-- quota          额度窗口耗尽（LLM 套餐/按量余额）→ 任务转 parked 挂起，到点自动放行，不算失败
-- captcha        平台风控/验证墙 → 失败，标注"可人工重试"（人工重试会清零计数）
-- deterministic  其余一切（默认，含参数/配置/内容问题）→ 立即失败，永不自动重试
+机制统一（2026-10-30）：fail_class 只影响文案，不影响机制——transient/quota/captcha
+全部走同一条退避梯子（30min→2h→6h→24h，梯子尽头每日慢巡，PATROL_CAP=30 后安静终态）；
+deterministic 立即失败永不自动重试。（parked 挂起语义已退役，2026-11-13 注释同步。）
+
+- transient      瞬时故障（网络/超时/5xx/LLM 通道抖动）
+- quota          额度窗口耗尽（LLM 套餐/按量余额）
+- captcha        平台风控/验证墙（人工重试会清零计数）
+- deterministic  其余一切（默认，含参数/配置/内容问题）
 
 历史包袱：LLM 网关与各执行器大量直接 raise RuntimeError，靠 classify() 的消息
 特征分诊兜底；新代码请直接抛本模块的异常类。

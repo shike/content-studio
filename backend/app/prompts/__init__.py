@@ -10,6 +10,11 @@ def load(name: str) -> str:
         end = text.find("\n---\n", 4)
         if end != -1:
             text = text[end + 5:]
+    elif text[:200].lstrip().startswith(("purpose:", "version:")):
+        # 2026-11-13 新增闸：frontmatter 缺开头 --- 时，purpose/version/--- 三行会原样
+        # 进 prompt（静默失效——article_hotspots/self_style_extract/self_profile_update
+        # 三篇实际坏过）。与 render() 的防静默哲学同源，坏格式直接抛而不是带病运行。
+        raise RuntimeError(f"prompt {name}.md frontmatter 坏：缺开头 ---，元数据会原样进 prompt")
     return text.strip()
 
 

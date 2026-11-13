@@ -112,10 +112,12 @@ class _WechatTransformer(HTMLParser):
         （2026-09-27 修：公众号粘贴后图片永远是裂图，根因即此）。"""
         attrs_d = dict(attrs)
         srcv = (attrs_d.get("src") or "").strip()
-        if ":" in srcv and srcv.split(":", 1)[0].lower() in ("cover", "chart", "gen", "flow"):
+        if ":" in srcv and srcv.split(":", 1)[0].lower() in ("cover", "chart", "gen", "flow", "kg"):
             srcv = srcv.split(":", 1)[1].strip()
-        if srcv.startswith(("gen_", "chart_", "cover_", "flow_")):
-            # 已生成的本地图片（AI 插画/数据图表）：直接内嵌，公众号粘贴即带图
+        if srcv.startswith(("gen_", "chart_", "cover_", "flow_", "kg_")):
+            # 已生成的本地图片（AI 插画/数据图表/知识图解）：直接内嵌，公众号粘贴即带图。
+            # 2026-11-13 补 kg_：images.py 白名单一直放行 kg_ 前缀，这里漏了——
+            # 历史文章引用 kg_ 图时公众号粘贴即裂图
             keep = [(k, v) for k, v in attrs if k not in ("src", "style")]
             return self._styled_open("img", keep + [("src", f"/api/articles/images/{srcv}")])
         if srcv.startswith("search:"):

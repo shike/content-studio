@@ -33,7 +33,7 @@ def main() -> int:
 
     if args.check:
         print(f"ffmpeg: {'OK' if has_ffmpeg else '缺失（brew install ffmpeg）'}")
-        print(f"say(中文语音): {'OK' if has_say else '缺失（P2/P3 语音 fixture 不可用）'}")
+        print(f"say(中文语音): {'OK' if has_say else '缺失（P2 语音 fixture 不可用）'}")
         return 0 if has_ffmpeg else 1
 
     if not has_ffmpeg:

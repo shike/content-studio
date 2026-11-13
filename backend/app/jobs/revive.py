@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from ..db import engine
@@ -17,6 +18,11 @@ ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
     "script_generate": (Script, "script_id", "generating"),
     "script_polish": (Script, "script_id", "polishing"),
     "article_generate": (Article, "article_id", "generating"),
+    # kb_write/adapt/deepread 三条公众号成文线同样产出 Article 且注册了
+    # _article_generate_fail（2026-11-13 补映射：此前它们的失败文章不在复活/孤儿射程）
+    "article_kb_write": (Article, "article_id", "generating"),
+    "article_adapt": (Article, "article_id", "generating"),
+    "article_deepread": (Article, "article_id", "generating"),
     # SelfVideo 无失败态（分析失败行保持 approved），coverage/孤儿判定需要它的映射
     "self_analyze": (SelfVideo, "video_id", "approved"),
 }
@@ -46,13 +52,17 @@ def entity_orphans() -> list[dict]:
     """实体孤儿盘点：status=failed 且没有任何活跃/排期中的同源任务。
 
     任务记录可能已被清理，所以按实体表反查（活跃任务 payload 里含同 id 才算有主）。
+    退避中/慢巡中（failed + next_retry_at 非空）也算有主，不算孤儿——
+    否则同一实体在「失败行红警」与「孤儿组」双重呈现（2026-11-13 修复）。
     """
     ACTIVE = ("queued", "running")
     out: list[dict] = []
     with Session(engine) as s:
         active_payloads: dict[str, list[dict]] = {}
         for j in s.exec(select(Job).where(  # type: ignore[attr-defined]
-                Job.status.in_(ACTIVE))).all():  # type: ignore[attr-defined]
+                or_(Job.status.in_(ACTIVE),  # type: ignore[attr-defined]
+                    and_(Job.status == "failed",  # type: ignore[attr-defined]
+                         Job.next_retry_at.is_not(None))))).all():  # type: ignore[attr-defined]
             active_payloads.setdefault(j.type, []).append(j.payload or {})
         for job_type, (model, id_key, _in_flight) in ENTITY_TABLE.items():
             live_ids = {p.get(id_key) for p in active_payloads.get(job_type, [])}
@@ -86,7 +96,7 @@ def _entity_title(row) -> str:
 
 
 def _revive_payload(job_type: str, row) -> dict:
-    if job_type == "article_generate":
+    if job_type in ("article_generate", "article_kb_write", "article_adapt", "article_deepread"):
         return {"article_id": row.id}
     if job_type in ("script_generate", "script_polish"):
         return {"script_id": row.id}

@@ -40,11 +40,30 @@ def _captcha_breaker() -> None:
             f"下载熔断：抖音风控窗中（近期 {len(_CAPTCHA_FAILS)} 次验证码失败），"
             f"约 {wait_min} 分钟后自动重试")
 
+
+def _download_wait_s() -> float:
+    """当前还需等待的节流秒数（0=可立即下载）。供进度回显用。"""
+    _min_gap = float(os.environ.get("CS_DOWNLOAD_MIN_INTERVAL", "45"))
+    now_ts = _time.time()
+    if _LAST_DOWNLOAD_TS and now_ts - _LAST_DOWNLOAD_TS < _min_gap:
+        return _min_gap - (now_ts - _LAST_DOWNLOAD_TS)
+    return 0.0
+
+
+def _throttle_download() -> None:
+    """全局下载节流：两次下载最小间隔（默认 45s，CS_DOWNLOAD_MIN_INTERVAL 可调）——
+    批量连续高频下载会触发抖音 IP 级验证码（家宽出口 IP 被 punishing）。
+    同步阻塞版（配 asyncio.to_thread 用）。2026-11-13 从 benchmark_analyze 内联
+    提取为公共闸：self_analyze 的自有下载此前绕过此闸与熔断，统一收编。"""
+    global _LAST_DOWNLOAD_TS
+    wait_s = _download_wait_s()
+    if wait_s > 0:
+        _time.sleep(wait_s)
+    _LAST_DOWNLOAD_TS = _time.time()
+
+
 _BENCHMARK_DIR = settings.data_dir / "benchmarks"
 
-
-
-_BENCHMARK_DIR = settings.data_dir / "benchmarks"
 
 def _heat_score(stats: dict) -> float:
     """热度分（2026-11-11 用户定版指标：评论为主、赞为辅的透明公式）：
@@ -116,10 +135,12 @@ def cleanup_completed_media() -> int:
     """媒体卫生（磁盘防线）：删除已完成/已忽略拆解的媒体文件（即用即弃，重拆解重新下载）。
 
     排除仍有活跃任务的行（拆解进行中的媒体不能删）；执行器成功路径已即时删除，
-    这里兜底清理失败残留与历史存量。"""
+    这里兜底清理失败残留与历史存量。2026-11-13 扩展：SelfVideo 媒体此前只增不减
+    （self_analyze 成功路径不删、media_cleanup 只清 BenchmarkVideo），一并收编。"""
     import os
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
-    from ..models import Job
+    from ..models import Job, SelfVideo
     from sqlmodel import select as _select
     deleted = 0
     with Session(engine) as s:
@@ -149,6 +170,37 @@ def cleanup_completed_media() -> int:
                 deleted += 1
             except OSError:
                 continue
+
+        # SelfVideo：已分析完的媒体即用即弃；下载后 24h 仍未分析完且无活跃任务
+        # 的行按死残留清（转写空等终态失败行不会自己恢复）
+        active_self = {
+            (j.payload or {}).get("video_id")
+            for j in s.exec(
+                _select(Job).where(
+                    Job.type == "self_analyze",  # type: ignore[attr-defined]
+                    Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
+                )  # type: ignore[attr-defined]
+            ).all()
+        }
+        stale_line = _dt.now(_tz.utc).replace(tzinfo=None) - _td(hours=24)
+        for v in s.exec(_select(SelfVideo).where(
+                SelfVideo.media_path != "",  # type: ignore[arg-type]
+        )).all():
+            if v.id in active_self:
+                continue
+            done = v.analyzed_at is not None or (
+                not (v.transcript or "").strip() and v.created_at is not None
+                and v.created_at < stale_line)
+            if not done:
+                continue
+            try:
+                if v.media_path and os.path.exists(v.media_path):
+                    os.remove(v.media_path)
+                v.media_path = ""
+                s.add(v)
+                deleted += 1
+            except OSError:
+                continue
         s.commit()
     return deleted
 
@@ -165,7 +217,7 @@ def owed_benchmarks() -> list[tuple[dict, str]]:
     """
     from datetime import datetime, timedelta
 
-    from sqlmodel import Session, select, select
+    from sqlmodel import Session, select
 
     from ..db import engine
     from ..models import BenchmarkVideo, Job
@@ -242,15 +294,10 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         _captcha_breaker()  # 下载熔断：风控窗中不再撞墙（快速失败进 30min 退避重试）
         # 全局下载节流：两次下载最小间隔（默认 45s）——批量拆解连续高频下载会触发抖音
         # IP 级验证码（家宽出口 IP 被 punishing）；夜间低密度批次全部成功证明低频可过
-        import os as _os
-        _min_gap = float(_os.environ.get("CS_DOWNLOAD_MIN_INTERVAL", "45"))
-        global _LAST_DOWNLOAD_TS
-        now_ts = _time.time()
-        if _LAST_DOWNLOAD_TS and now_ts - _LAST_DOWNLOAD_TS < _min_gap:
-            wait_s = _min_gap - (now_ts - _LAST_DOWNLOAD_TS)
+        wait_s = _download_wait_s()
+        if wait_s > 0:
             ctx.set_progress(8, f"下载节流：等待 {int(wait_s)} 秒（防触发抖音风控）")
-            await asyncio.sleep(wait_s)
-        _LAST_DOWNLOAD_TS = _time.time()
+        await asyncio.to_thread(_throttle_download)
         ctx.set_progress(10, "打开视频页获取无水印直链")
         try:
             media_path = await asyncio.to_thread(downloader.download_video, url, _BENCHMARK_DIR)
@@ -309,11 +356,15 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     if stats:
         # R3.4b 数据归因：把赞/评/转带给 LLM，分析"为什么这条（没）爆"
         llm_input += f"\n\n互动数据（做数据归因用）：{json.dumps(stats, ensure_ascii=False)}"
+    from ..tenant_brand import audience_note_of
     # 双模式判定式拆解（2026-10-28 两类号策略修正）：类型是内容本身的属性，
     # 拆解时由 LLM 判定（content_type），账号类型只作先验记录——判定结果回写样本行
     analysis = await gateway.complete_json(
         [{"role": "system", "content": render(
             "benchmark_analyze", PERSONA=persona_text,
+            # 2026-11-13 修复：模板里的 {{AUDIENCE_NOTE}} 此前无人传，占位符字面量
+            # 原样进了每一条拆解的 system prompt
+            AUDIENCE_NOTE=audience_note_of(tenant_id),
             RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(
                 14, line=account_type if account_type in ("persona", "leadgen") else ""))
             or "（近 14 天无出题记录）")},

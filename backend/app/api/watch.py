@@ -32,7 +32,9 @@ def watch_digest(user: User = Depends(require_user)) -> dict:
     高分选题 Top3（带切角一句话）。数据按租户隔离。"""
     tid = user.tenant_id
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    cutoff_s = cutoff.isoformat(timespec="seconds")
+    # SQLite DATETIME 存 "YYYY-MM-DD HH:MM:SS.ffffff"（空格分隔）；isoformat 的 'T'/'+' 会
+    # 让字符串比较错位（' ' < 'T'，截止日当天恒被排除）——2026-11-13 修复为同构格式
+    cutoff_s = cutoff.strftime("%Y-%m-%d %H:%M:%S.%f")
     with Session(engine) as s:
         vids = s.exec(
             select(BenchmarkVideo).where(  # type: ignore[attr-defined]
@@ -200,9 +202,10 @@ def delete_account(account_id: int) -> dict:
 
 @router.post("/scan", status_code=202)
 async def scan(user: User = Depends(require_user)) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
+    # dedup 用本地日期（与调度中心 watch_scan 同口径，防 0~8 点窗口双跑）
     job = await runner.submit("watch_scan", {"auto": True},
-                              dedup_key=f"{user.tenant_id}:scan:all:{datetime.now(timezone.utc):%Y%m%d}")
+                              dedup_key=f"{user.tenant_id}:scan:all:{datetime.now():%Y%m%d}")
     return {"job_id": job.id}
 
 
@@ -211,9 +214,9 @@ async def scan_account(account_id: int, user: User = Depends(require_user)) -> d
     with Session(engine) as s:
         if s.get(WatchAccount, account_id) is None:
             raise HTTPException(status_code=404, detail="account not found")
-    from datetime import datetime, timezone
+    from datetime import datetime
     job = await runner.submit("watch_scan", {"account_id": account_id},
-                              dedup_key=f"{user.tenant_id}:scan:{account_id}:{datetime.now(timezone.utc):%Y%m%d}")
+                              dedup_key=f"{user.tenant_id}:scan:{account_id}:{datetime.now():%Y%m%d}")
     return {"job_id": job.id}
 
 
@@ -324,7 +327,7 @@ def dismiss_candidate(cid: int) -> dict:
         if c is None:
             raise HTTPException(status_code=404, detail="candidate not found")
         c.status = "dismissed"
-        c.updated_at = datetime.now(timezone.utc)
+        c.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC（2026-11-13 修复 aware 写入）
         s.add(c)
         s.commit()
         s.refresh(c)

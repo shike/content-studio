@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import {
-  CircleAlert, ExternalLink, Pencil, Play, Plus, Power, Radar, Scissors, Search, Wand2,
+  CircleAlert, ExternalLink, Pencil, Play, Plus, Power, Radar, Scissors, Wand2,
 } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import {
@@ -445,7 +445,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                         <div className="flex items-center gap-2">
                           <input type="password" value={editForm.creator_cookie} onChange={(e) => setEditForm({ ...editForm, creator_cookie: e.target.value })} placeholder={acc.has_cookie ? '已配置创作者中心 Cookie（粘贴新值=更换，留空=不变）' : '创作者中心 Cookie：creator.douyin.com 登录后 F12 → Network → 复制整串 Cookie'} className="input min-w-72 flex-1 font-mono text-xs" />
                           {acc.has_cookie && (
-                            <button onClick={() => clearCookie(acc.id)} className="btn btn-xs">清除</button>
+                            <button onClick={() => clearCookie(acc.id)} className="btn-ghost btn-xs">清除</button>
                           )}
                         </div>
                       )}

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
 import { api } from './api'
 
 interface OpenCand { id: number; name: string; follower_count: number; signature: string; keyword: string }

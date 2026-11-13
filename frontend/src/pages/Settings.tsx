@@ -293,7 +293,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
             <button onClick={save} className="btn-accent btn-xs">
               <Save size={13} /> 保存
             </button>
-            <button onClick={() => { setModel(conf.llm_model); setSearch(conf.search_provider);  }} className="text-xs text-slate-400 hover:text-slate-200">
+            <button onClick={() => { setModel(conf.llm_model); setSearch(conf.search_provider); setScanEnabled(conf.watch_scan_enabled); setScanHour(conf.watch_scan_hour) }} className="text-xs text-slate-400 hover:text-slate-200">
               撤销
             </button>
           </div>

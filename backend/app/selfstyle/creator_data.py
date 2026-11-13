@@ -29,11 +29,16 @@ _FIELDS = {
 
 
 def fetch_account_overview(cookie: str, timeout: float = 15.0) -> dict:
-    """拉账号数据总览。返回 {date: {field: value}}（含平台给的 7 天日序）。"""
+    """拉账号数据总览。返回 {date: {field: value}}（含平台给的 7 天日序）。
+
+    出口走 douyin_proxy（登录态采集，2026-11-13 修正：此前 httpx 裸连不吃任何代理，
+    登录态请求从机房 IP 直出的口子与出口一致性设计相悖）。"""
+    from ..browser import httpx_proxy
+
     r = httpx.get(_OVERVIEW_URL, params={"period_days": 28},
                   headers={"User-Agent": _UA, "Cookie": cookie,
                            "Referer": "https://creator.douyin.com/creator-micro/home"},
-                  timeout=timeout)
+                  timeout=timeout, proxy=httpx_proxy(login=True))
     r.raise_for_status()
     body = r.json()
     if body.get("status_code") not in (0, None):

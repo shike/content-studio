@@ -98,7 +98,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
 
   useEffect(() => {
     loadDrafts()
-      .then((items) => {
+      .then(() => {
         // 有待审 → 直接进审阅队列（一次会话只自动进入一次，退出后不强制）
         // Q：去掉强制弹出——待审队列只手动进入，页面默认表格视图
         setBooted(true)
@@ -250,7 +250,8 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
 
   /* ================= 审阅队列视图 ================= */
   if (view === 'queue') {
-    const cur = current ? merged(current.id)! : null
+    // merged 可能返回 null（loadTable 失败 all 为空时）——回落到列表行数据，两处都空才算审完
+    const cur = current ? (merged(current.id) || current) : null
     return (
       <div className="mx-auto max-w-3xl">
         <QueueBar
@@ -586,7 +587,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
                                 {full.evidence.hooks.map((h: string, i: number) => (
                                   <li
                                     key={i}
-                                    onClick={() => { navigator.clipboard.writeText(h); setCopiedHook(h); setTimeout(() => setCopiedHook((c) => (c === h ? null : c)), 2000) }}
+                                    onClick={() => { navigator.clipboard.writeText(h).catch(() => {}); setCopiedHook(h); setTimeout(() => setCopiedHook((c) => (c === h ? null : c)), 2000) }}
                                     className="flex cursor-pointer items-start gap-2 rounded-lg border-l-2 border-sky-400 bg-sky-50/60 px-3 py-1.5 text-[13px] leading-relaxed text-slate-700 transition hover:bg-sky-100/70"
                                     title="点击复制"
                                   >
