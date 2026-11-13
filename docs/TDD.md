@@ -212,8 +212,10 @@ article:    pending（报题待写）──► generating ──► draft ──
   `Topic(title=判决句, source_type="trending", line="persona", evidence={hotspot=context,
   target:{sentence ≤16 字单句无逗号冒号问号顿号（程序化 `_CLAUSE_PUNCT` 闸物理废复合句）,
   context ≤30 字, heat 在榜排名/多榜同在, spice}, material})` draft 落库；sentence/context
-  必含 `_TECH_KW` 行业关键词 + `_JUDGE_KW` 判词词根（就是/迟早/注定/收割/智商税/认输/
-  没法用/套壳/高估/翻车…——纯新闻复述不算判决，程序化废掉）+ 劝告开头闸
+  必含 `_TECH_KW` 行业关键词 + `_JUDGE_KW` 判词词根（就是/收割/智商税/认输/
+  没法用/套壳/高估/翻车…——纯新闻复述不算判决，程序化废掉）+ 预言腔负向闸
+  （`_PREDICT_KW` 迟早/注定/必死/要凉，含即废——2026-11-13 用户不怼 4/4 全为此型，
+  铁律①控诉不是预言落到机械层）+ 劝告开头闸
   （^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)=行动指导非判决）；
   对标圈近 2 天标题做 SequenceMatcher≥0.42 贪心聚类，**≥3 家同行的刷屏主题=争论已被
   验证，注入菜单供锻自己的判决**（同行标题本身仍禁当靶子；对标变体拦截 v7 起只拦照抄
