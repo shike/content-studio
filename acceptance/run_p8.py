@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from runner import API_BASE as BASE, check, finish, request, section, server_down, skip
+from runner import check, finish, request, section, server_down, skip
 
 if server_down():
     sys.exit(finish("P8 功能补全"))
@@ -25,6 +25,7 @@ from app.jobs import schedules as _sched  # noqa: E402
 from app.benchmarks import service as _bms  # noqa: E402
 from app.articles.service import length_specs as _ls  # noqa: E402
 from app.jobs.runner import RETRY_LADDER, _ladder_delay, policy_of as _policy_of  # noqa: E402
+from app.jobs.runner import _EXECUTORS as _executors  # noqa: E402
 
 class _FakeRow:  # effective_hour 只读 key/hour
     key = "hl_search_daily"
@@ -219,6 +220,8 @@ check("self_story/hl_search 硬超时已配（2026-11-13 补，heavy 唯一 work
       and _policy_of("hl_search_matrix").task_timeout == 3600)
 check("深读线调度已下线（2026-11-13：TDD「停用中」口径落地，执行器保留回滚）",
       "article_deepread_daily" not in {s.key for s in _sched.REGISTRY})
+check("kb-topics 选题池执行器已退役（2026-11-13 用户裁决整池下线，不在执行器注册表）",
+      "article_kb_topics" not in _executors)
 
 section("P8 · 源文改编产线契约（2026-11-11 定版，补覆盖）")
 code, d = request("GET", "/api/articles/content-items")
@@ -231,8 +234,13 @@ check("产线当日账契约（items+anomaly 标记）",
       code == 200 and isinstance(d.get("items"), list)
       and all("anomaly" in it for it in d.get("items") or []),
       f"code={code}, keys={sorted(d) if isinstance(d, dict) else '?'}")
+# kb-topics 选题池已退役（2026-11-13 整池下线，路由移除）。8200 实测：GET 落到同前缀
+# GET /{article_id:int} 的路径参数校验（"kb-topics" 非数字 → 422，路由匹配先于类型校验），
+# POST 无同段路由 → 404；两条合起来证明旧路由确已不存在。
 code, d = request("GET", "/api/articles/kb-topics")
-check("知识库选题池契约（topics）", code == 200 and isinstance(d.get("topics"), list), f"code={code}, keys={sorted(d) if isinstance(d, dict) else '?'}")
+check("知识库选题池已退役（GET 被 /{article_id} int 校验拦下=422）", code == 422, f"code={code}")
+code, d = request("POST", "/api/articles/kb-topics")
+check("知识库选题池触发端点已退役 404", code == 404, f"code={code}")
 
 section("P8 · prompt 层契约（frontmatter 闸，2026-11-13）")
 _prompts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "app", "prompts")

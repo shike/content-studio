@@ -142,7 +142,6 @@ export default function App() {
           setMe({
             role: d.role, user_id: d.user_id, display_name: d.display_name,
             must_change_password: d.must_change_password,
-            tenant_id: d.tenant_id, tenant_name: d.tenant_name,
           })
         } else setAuthed(false)
       })
@@ -345,6 +344,4 @@ interface MeInfo {
   user_id: number
   display_name: string
   must_change_password?: boolean
-  tenant_id: number
-  tenant_name: string
 }

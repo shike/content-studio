@@ -166,7 +166,6 @@ def fetch_all_videos(cookie: str, max_pages: int = 60) -> tuple[Optional[list[di
                     break
                 batch = [x for x in (body.get("aweme_list") or body.get("items") or [])
                          if isinstance(x, dict)]
-                fresh = {e["id"] for e in map(_entry_of, batch) if e}
                 before = len({e["id"] for e in map(_entry_of, raw_items) if e})
                 raw_items.extend(batch)
                 after = len({e["id"] for e in map(_entry_of, raw_items) if e})

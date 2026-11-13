@@ -1,4 +1,4 @@
-"""全部表模型（docs/技术方案.md §5）。import 即注册到 metadata。"""
+"""全部表模型（架构契约见 docs/TDD.md）。import 即注册到 metadata。"""
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -234,33 +234,8 @@ class Article(TenantScoped, TimestampMixin, table=True):
     status: str = "draft"  # pending 待写 | generating | failed | draft | edited | rendered | published
 
 
-class KBDocument(TenantScoped, TimestampMixin, table=True):
-    """ima 知识库遍历清单（2026-11-09 知识库选题线）：选题线按目录轮询的文档台账。"""
-    __tablename__ = "kb_documents"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    kb_id: str = ""                       # ima 知识库 id
-    folder_id: str = Field(default="", index=True)
-    folder_name: str = ""
-    media_id: str = Field(default="", index=True)  # ima 文档 id（库内唯一）
-    title: str = ""
-    status: str = "new"                   # new 未用于选题 | mined 已读
-    last_mined_at: Optional[datetime] = None
-
-
-class KBTopic(TenantScoped, TimestampMixin, table=True):
-    """知识库选题池（2026-11-09 知识库选题线）：遍历产出的待选选题，人工选用后成文。"""
-    __tablename__ = "kb_topics"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str = ""                       # 选题标题（成品级）
-    judgment: str = ""                    # 一句话立场（文章要论证的判断）
-    audience: str = ""                    # 老板 | 转行者
-    why: str = ""                         # 为什么值得写
-    docs: list = Field(default_factory=list, sa_column=Column(JSON))  # 依据文档 [{media_id,title}]
-    folder_name: str = ""                 # 产出来源目录
-    status: str = "new"                   # new 待选 | selected 已选用 | dismissed 不做 | written 已成文
-    article_id: Optional[int] = Field(default=None, index=True)  # 选用后生成的草稿 id
+# kb_documents / kb_topics 两表（2026-11-09 知识库选题线）模型已随选题池整池退役删除
+# （2026-11-13 用户裁决）：模型删=新库不再建，生产库旧表不动，对齐 harvest_profiles 划线口径。
 
 
 class ContentItem(TenantScoped, TimestampMixin, table=True):

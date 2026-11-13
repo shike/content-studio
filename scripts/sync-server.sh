@@ -41,9 +41,6 @@ echo "→ rsync backend/app"
 rsync -az --delete -e "$RSH" backend/app/ "$HOST:$REMOTE_ROOT/backend/app/"
 echo "→ rsync frontend/dist"
 rsync -az --delete -e "$RSH" frontend/dist/ "$HOST:$REMOTE_ROOT/frontend/dist/"
-for f in backend/pyproject.toml backend/uv.lock; do
-  [ -f "$f" ] && rsync -az -e "$RSH" "$f" "$HOST:$REMOTE_ROOT/$f/"
-done
 # 验收套件与文档也同步：服务器上可能要跑 P1~P7 / 查口径，别让副本漂移
 for d in acceptance docs; do
   rsync -az --delete -e "$RSH" "$d/" "$HOST:$REMOTE_ROOT/$d/"

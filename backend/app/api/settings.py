@@ -1,7 +1,7 @@
 """设置接口：平台运行时配置的读取与修改（存数据库 `app_settings`，非 .env）。
 
-- `.env` 只留引导/部署项（host/port/data_dir、Cookie Secure、登录限流阈值、CS_* 环境变量）；
-- 运行时可改项（LLM 通道与密钥、检索通道、ASR 模型、数字人凭证、扫描计划）存数据库：
+- `.env` 只留引导/部署项（data_dir、Cookie Secure、登录限流阈值、CS_* 环境变量）；
+- 运行时可改项（LLM 通道与密钥、检索通道、采集出口、ASR 模型、扫描计划、拆解闸线）存数据库：
   随每日备份进快照，服务器上无需改文件；写入即生效（内存同步刷新）。
 - 密钥类只写不读：GET 只回报「是否已配置」。
 """
@@ -29,7 +29,6 @@ def _status() -> dict:
         "search_provider": settings.search_provider,
         "search_enabled": settings.search_enabled,
         "zhipu_search_base_url": settings.zhipu_search_base_url,
-        "zhipu_search_model": settings.zhipu_search_model,
         "asr_model": settings.asr_model,
         "douyin_proxy": settings.douyin_proxy,
         "scrape_proxy": settings.scrape_proxy,
@@ -54,7 +53,6 @@ class UpdateIn(BaseModel):
     zhipu_base_url: str | None = None
     search_provider: str | None = None
     search_enabled: bool | None = None
-    zhipu_search_model: str | None = None
     zhipu_search_base_url: str | None = None
     asr_model: str | None = None
     douyin_proxy: str | None = None
@@ -86,8 +84,6 @@ def update_settings(body: UpdateIn) -> dict:
         values["search_provider"] = body.search_provider
     if body.search_enabled is not None:
         values["search_enabled"] = body.search_enabled
-    if body.zhipu_search_model is not None:
-        values["zhipu_search_model"] = body.zhipu_search_model.strip()
     if body.zhipu_search_base_url is not None:
         v = body.zhipu_search_base_url.strip()
         if v and not v.startswith(("http://", "https://")):

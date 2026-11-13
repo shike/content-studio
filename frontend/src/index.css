@@ -39,7 +39,7 @@
   body {
     @apply bg-white text-[#171929] antialiased;
     font-family:
-      "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC",
+      -apple-system, BlinkMacSystemFont, "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC",
       sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -142,7 +142,7 @@
 
 /* 数字字体工具：衬线大数字（stat 主角） */
 .num-serif {
-  font-family: "Lora", "Noto Serif SC", "Songti SC", "SimSun", serif;
+  font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
   letter-spacing: 0.2px;
   font-variant-numeric: tabular-nums;
 }

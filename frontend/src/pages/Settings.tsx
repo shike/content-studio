@@ -12,8 +12,6 @@ interface AppSettings {
   zhipu_base_url: string
   coding_plan: boolean
   search_provider: string
-  search_enabled: boolean
-  asr_model: string
   watch_scan_enabled: boolean
   watch_scan_hour: number
 }

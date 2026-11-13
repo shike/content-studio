@@ -7,12 +7,10 @@ __pycache__/
 *.pyc
 .DS_Store
 acceptance/fixtures/*.mp4
-services/
 data-acceptance/
 .ms-playwright/
 
 # 开源脱敏：本地真实存档与部署目标不入库
-docs-local/
 scripts/.deploy.env
 
 # ZCode 本地工具产物

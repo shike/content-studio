@@ -6,7 +6,6 @@
 违禁词机检沿用 service 的正则与定向重写。当日账落 daily_ledger。"""
 from __future__ import annotations
 
-import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 

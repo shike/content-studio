@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import { api, waitJob } from '../api'
-import { Busy, ErrorLine, PageHeader } from '../components'
+import { ErrorLine, PageHeader } from '../components'
 
 /** 公众号风格画像（2026-11-07 产线树拆叶）：从已发长文提取的表达习惯，
 生成长文时自动注入。原为 Articles 页内卡片，随产线树拆出为独立叶子页。 */

@@ -23,12 +23,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 if sys.platform == "darwin":
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH",
                           str(Path(__file__).resolve().parent.parent / ".ms-playwright"))
-from runner import check, finish, request, section
+from runner import section
 
 BASE = os.environ.get("CS_API_BASE", "http://127.0.0.1:8200")
 UI = BASE  # 前端由后端同源托管
 ADMIN_PWD = os.environ.get("CS_BOOTSTRAP_PASSWORD", "accept-12345")
-MEMBER_PWD = "E2eMember#2026"
 
 PASS: list[str] = []
 FAIL: list[str] = []

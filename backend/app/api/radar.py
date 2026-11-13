@@ -33,8 +33,6 @@ def list_topics(user: User = Depends(require_user)) -> dict:
 @router.post("/topics/{topic_id}/check")
 async def check_topic_now(topic_id: int, user: User = Depends(require_user)) -> dict:
     """立即拉取该话题内容样本（免登录），样本中新出现的低粉高赞照旧自动拆解。"""
-    import asyncio
-
     from ..models import RadarTopic
     from ..radar.service import check_topic
 

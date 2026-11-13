@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CircleAlert, Fingerprint, Sparkles } from 'lucide-react'
 import { api } from '../api'
-import { Busy, EmptyState, ErrorLine, relTime, Pager, safeHref } from '../components'
+import { EmptyState, ErrorLine, relTime, Pager, safeHref } from '../components'
 
 import type { SectionKey } from '../App'
 

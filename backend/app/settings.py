@@ -1,4 +1,4 @@
-"""全局配置：从仓库根目录 .env 读取，字段定义见 docs/技术方案.md §4。"""
+"""全局配置：从仓库根目录 .env 读取，架构契约见 docs/TDD.md §4。"""
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,8 +11,6 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    host: str = "127.0.0.1"
-    port: int = 8000
     data_dir: Path = _REPO_ROOT / "data"  # 相对 DATA_DIR 也锚定仓库根，不随进程 CWD 漂移
 
     zhipu_api_key: str = ""
@@ -20,7 +18,6 @@ class Settings(BaseSettings):
 
     # 联网检索：auto=有智谱key用GLM web_search，否则DDG；可强制 glm|ddg
     search_provider: str = "auto"
-    zhipu_search_model: str = "glm-4-flash"  # 检索用的模型（flash 档免费，只付搜索费）
     zhipu_search_base_url: str = "https://open.bigmodel.cn/api/paas/v4"  # 搜索走按量端点（coding 端点无 web_search）
     # GLM 通用 PaaS 端点；若想用 Coding Plan 额度（仅限官方指定工具，见
     # docs.bigmodel.cn/cn/coding-plan/tool/others，自研应用属条款外场景），

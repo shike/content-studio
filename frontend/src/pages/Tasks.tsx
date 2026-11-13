@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Activity, ChevronLeft, ChevronRight, Clock, Eraser, PauseCircle, PlayCircle, RefreshCw, Trash2 } from 'lucide-react'
-import type { SectionKey } from '../App'
 import { api } from '../api'
 import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 
@@ -62,7 +61,7 @@ const TYPE_NAMES: Record<string, string> = {
   article_adapt: '源文改编',
   article_deepread: '知识库深读',
   article_kb_write: '知识库成文',
-  article_kb_topics: '知识库选题',
+  article_kb_topics: '知识库选题', // 已退役类型：历史行仍可能见到
   article_style_extract: '文风提取',
   creator_data_scan: '账号指标回流',
   video_weekly_report: '视频周报',

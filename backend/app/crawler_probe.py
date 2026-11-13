@@ -177,7 +177,6 @@ async def probe() -> dict:
     # 毒视频冷却：非 ok 的 URL 连续 COOLDOWN_FAILS 次 → 冷却 24h；ok 的清零
     state = read_state()
     cooldown = _cooldown_map(state)
-    now_iso = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
     for smp in (result.get("samples") or []):
         u, st = smp.get("url") or "", smp.get("status")
         if not u:

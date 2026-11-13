@@ -5,7 +5,7 @@ import asyncio
 import json
 import os
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from ..asr import transcribe
 from ..db import engine

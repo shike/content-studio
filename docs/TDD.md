@@ -16,11 +16,11 @@
 │                                                                      │
 │  浏览器 ──► Content Studio Web 站 (:8100，登录门禁)                   │
 │              │  FastAPI (backend/)     React 构建产物静态托管         │
-│              │    ├─ api/  REST 路由（认证 / 业务 / 管理后台）        │
+│              │    ├─ api/  REST 路由（认证 / 业务）                  │
 │              │    ├─ auth  会话（单管理员，ACTOR 作用域）             │
 │              │    ├─ jobs   进程内异步任务（下载/ASR/渲染/LLM长任务） │
 │              │    ├─ SQLite data/studio.db（单库一切）                │
-│              │    └─ data/  上传素材、配图、成片、备份              │
+│              │    └─ data/  上传素材、配图、媒体、备份              │
 │              │                                                       │
 │              ├──► GLM API（智谱：生成主通道 + 独立搜索端点）          │
 │              ├──► 本地引擎 faster-whisper（转写） │
@@ -43,7 +43,7 @@
 |---|---|---|
 | 后端 | Python 3.12+ / FastAPI / uvicorn | 绑定 0.0.0.0（局域网可访问，登录门禁必开） |
 | ORM | SQLModel + SQLite | WAL 模式 |
-| LLM | 智谱 GLM（默认 `LLM_MODEL=glm-5`，可改旗舰/Flash） | DeepSeek 仅作备选开关 |
+| LLM | 智谱 GLM 单通道（默认 `LLM_MODEL=glm-5.3-flash`，设置页可改 glm-5.3） | DeepSeek 备选路径已随 2026-10-29 单通道定版移除 |
 | ASR | faster-whisper（large-v3 起步 + VAD） | 中文场景可换 FunASR SenseVoice，接口不变 |
 | 视频 | FFmpeg（brew） | 工具箱角色 |
 | 前端 | React 18 + Vite 5 + TailwindCSS | 中文界面；构建产物由 FastAPI 托管 |
@@ -58,7 +58,7 @@ content-studio/
 │   ├── app/
 │   │   ├── main.py             # FastAPI 入口 + 静态托管 frontend/dist
 │   │   ├── settings.py         # pydantic-settings 读 .env
-│   │   ├── api/                # 路由：auth/health/topics/scripts/articles/jobs/llm/schedules/radar/watch/style/benchmarks/metrics/stats/settings/crawl
+│   │   ├── api/                # 路由：auth/health/topics/scripts/articles/jobs/llm/schedules/radar/watch/style/benchmarks/metrics/stats/settings/crawl/public_media/tenant_api
 │   │   ├── auth.py             # 口令哈希 / 会话 / 租户上下文（ACTOR）
 │   │   ├── db.py               # 引擎 + 迁移 + 作用域三件套（单用户退化）
 │   │   ├── models/             # SQLModel 表定义（§5）
@@ -73,7 +73,7 @@ content-studio/
 │   └── vendor/                 # doocs/md 渲染核心（WTFPL，摘录注明出处）
 ├── frontend/                   # React + Vite + Tailwind
 ├── acceptance/                 # 验收脚本（本文档 §13 的可执行形式）
-├── scripts/                    # 部署运维脚本（launchd.sh 动态生成 LaunchAgent；孤儿一次性脚本归档 scripts/archive/）
+├── scripts/                    # 部署运维脚本（launchd.sh 动态生成 LaunchAgent）
 ├── data/                       # studio.db + uploads/ artifacts/ backups/
 ├── docs/
 └── .env.example
@@ -87,26 +87,27 @@ content-studio/
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `HOST` / `PORT` | 127.0.0.1 / 8100 | 代码默认只绑回环；0.0.0.0 由 launchd.sh / start-absolute.sh 启动参数显式传入（Linux 生产绑 127.0.0.1 走 Nginx 反代；8000 被其他项目占用） |
+| 启动端口 | 由启动脚本直传 uvicorn | Settings 无 host/port 字段——`start-absolute.sh`/launchd 绑 `0.0.0.0:8100`，`dev.sh` 绑 127.0.0.1，Linux `deploy-linux.sh` 默认 127.0.0.1 走 Nginx 反代（8000 被其他项目占用） |
 | `DATA_DIR` | ./data | 一切落盘根目录 |
 | `ZHIPU_API_KEY` | — | 主 LLM 密钥 |
-| `LLM_MODEL` | glm-5 | 以控制台可用型号为准 |
+| `LLM_MODEL` | glm-5.3-flash | 设置页运行时可改（可选 glm-5.3-flash / glm-5.3） |
 | `ASR_MODEL` | large-v3 | faster-whisper 型号 |
 | `SEARCH_PROVIDER` | auto | 检索通道：auto=智谱搜索优先 DDG 兜底 / ddg / glm（按量余额可用；设置页运行时切换） |
 | `ZHIPU_BASE_URL` / `ZHIPU_SEARCH_BASE_URL` | 智谱 | 生成端点与独立搜索端点（`/web_search`）可分账 |
 | `CS_BOOTSTRAP_PASSWORD` | — | 首次启动引导管理员的确定性口令（验收实例必带；不设则随机生成仅日志打印） |
 | `CS_REAPER_SEC` | 1800 | reaper 巡逻间隔（验收隔离实例设 5 加速快巡） |
-| `CS_MAX_ACTIVE_PER_TENANT` | 30 | 每租户活跃任务上限（R11.7） |
+| `CS_MAX_ACTIVE_PER_TENANT` | 30 | 每租户活跃任务上限（提交配额，见 §7） |
 
 `.env` 不进版本库；`health` 接口回报各依赖配置状态（不回传密钥）。
 
-**数据库运行时配置（`app_settings`，设置页受管键写入即生效）**：
-`llm_model / zhipu_api_key / zhipu_base_url /
-search_provider / search_enabled / zhipu_search_model / zhipu_search_base_url /
-asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch_scan_hour / creator_data_enabled`。
+**数据库运行时配置（`app_settings`，受管键登记于 `settings_store.MANAGED`，启动载入即生效）**：
+`llm_model / zhipu_api_key / zhipu_base_url / search_provider / search_enabled / zhipu_search_base_url /
+asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch_scan_hour /
+creator_data_enabled / ima_kb_enabled / dissect_comment_min / dissect_digg_min`。
 载入时机=启动时（init_db 之后 `settings_store.load_overrides()`）；改 ASR 模型会清进程内模型缓存。
-另有**无设置页 UI 的手工配置键**（直接改 app_settings 表）：ima 知识库四键
-`ima_kb_enabled / ima_client_id / ima_api_key / ima_kb_ids` 与 `ima_topic_folders`、
+设置接口/页面只暴露其中一部分（模型/检索通道/扫描计划/拆解闸线/采集出口），其余键直接改表。
+另有**不在受管登记内的手工配置键**（直接改 app_settings 表，随用随读）：ima 凭证三键
+`ima_client_id / ima_api_key / ima_kb_ids` 与 `ima_topic_folders`、
 `article_style_note` 等——文档口径为「DB 手工配置」，接口与界面不提供编辑入口。
 
 ## 5. 数据模型（SQLite）
@@ -127,8 +128,8 @@ asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch
 | `scripts` | topic_id(FK), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
 | `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
 | `articles` | topic_id?(FK), script_id?(FK), title, note(报题备注/参考链接), title_alts(JSON), md, html, kb_sources(JSON ima 素材来源), kb_doc_ids(JSON 依据文档), status(pending/generating/failed/draft/edited/rendered/published) | 公众号文章（pending=报题待写，failed 可重试） |
-| `kb_documents` | kb_id, folder_id/name, media_id(库内唯一), title, status(new/mined), last_mined_at | ima 知识库遍历台账（断点续跑，R5.6） |
-| `kb_topics` | title, judgment, audience, why, docs(JSON), folder_name, status(new/selected/dismissed/written), article_id | 知识库选题池（选用后建 pending 草稿并链写成文，R5.6） |
+| ~~`kb_documents`~~ | — | ima 知识库遍历台账，已随知识库选题池整池退役（模型已删 2026-11-13，生产库旧表原地保留，不再建表） |
+| ~~`kb_topics`~~ | — | 知识库选题池（原 R5.6）已整池退役（2026-11-13 用户裁决：端点/执行器/表模型已删，生产库旧表原地保留；知识库报题走手动报题，自动线见 R5.6b 源文改编流） |
 | `content_items` | media_id(索引防重), kb_id/folder, title, source_author, quality_score, why_good, adapt_angle, best_quotes(JSON), category, priority, status(pending/running/done/published/dismissed/low), article_id | 内容清单=知识库挖出的高质量源文（挖掘器≥线入清单，改编器取项成文；低分落 low 防回卷重评）（R5.6b 源文改编流） |
 | `daily_ledger` | day(UTC), phase(mine/adapt), produced, reason, ok | 产线当日账（防「成功但空转」；anomaly=ok 但无产出无原因，按故障处理） |
 | ~~`harvest_profiles`~~ | — | 已退役死壳（模型已删 2026-11-10，生产库旧行原地保留，不再建表） |
@@ -139,7 +140,7 @@ asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch
 | `failure_patterns` | fp(唯一), kind, fail_class, label, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
 | `schedules` | key, label, enabled, hour 覆盖, last/next_run_at, last_status, run_count | 统一调度中心运行态 |
 | `app_settings` | key(主键), value(JSON) | 平台运行时配置（LLM/检索/ASR/采集出口；密钥只写不读） |
-| `watch_accounts` | tenant_id, platform, name, url, note, kind(competitor/self), creator_cookie(self 创作者中心登录态), enabled, last_scan_at | 对标/自有账号（R3.1/R9.1；评分口径见 MRD §2.1.1） |
+| `watch_accounts` | tenant_id, platform, name, url, note, kind(competitor/self), creator_cookie(self 创作者中心登录态), enabled, last_scan_at | 对标/自有账号（R3.1/R9.1；评分口径见 MRD §2.1 A） |
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded；parked 已退役→failed), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light 两道), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 
@@ -176,7 +177,7 @@ article:    pending（报题待写）──► generating ──► draft ──
 - `DELETE /api/jobs/{id}` → 归档任务记录（archived=1，不物理删；running 拒绝 400）
 - `POST /api/jobs/clear` `{status: failed|superseded|succeeded}` → `{archived:n}`（批量归档终态记录）
 - `GET /api/jobs/{id}` → job 终态或进行态（含 `history` 阶段轨迹）；不存在 → 404 JSON
-- `GET /api/stats/todos` → 待办统计（服务端真值口径：两线待审选题/待定稿脚本/待写长文/待拍板知识库选题等，侧栏徽章与今天页同源）
+- `GET /api/stats/todos` → 待办统计（服务端真值口径：今日靶子/两线待审选题/待定稿脚本/内容工场待决策稿/两线候选待定夺，侧栏徽章与今天页同源）
 
 ### 设置（/api/settings，仅平台管理员）
 - `GET /api/settings` → LLM 通道/检索通道/扫描计划/各配置态（不回传密钥）
@@ -185,18 +186,24 @@ article:    pending（报题待写）──► generating ──► draft ──
 ### 选题中心
 - `POST /api/topics/ideas` `{text}` → 202 `{topic_id, job_id}`（深研任务）
 - `POST /api/topics/quick` `{title, audience?}` → 201（快速记选题，不触发 LLM；R1.1b）
-- 调度 `self_story_daily`（每日 06:00）→ executor `self_story_targets`（**一线交付靶子**，
-  2026-11-12 方向1）：素材=SelfVideo.transcript 非空的转写（播放 Top12，各截 600 字），
+- 调度 `self_story_daily`（每日 06:00）→ executor `self_story_targets`（**一线交付靶子·franchise 线**，
+  2026-11-13 第三版重建——用户抓出「转写挖矿=结构性冷饭」后推倒：转写只当脚本线风格标尺，
+  不进本执行器）：素材=**已发视频清单本身**（SelfVideo.published_at 非空，最近 60 条，
+  每条一行「日期｜标题｜播放」），
   `complete_json(purpose="self_story_target", max_tokens=8000, prompt=self_story_target.md)`
-  → 从真实交付故事锻半句话靶子（禁编造=细节必须在转写原文有出处）；半句话闸+劝告开头
-  闸（判词词根闸/行业闸不适用——故事靶形态是反差不是攻击）；14 天判决句撞车+批内梗概去重
-  （由头/梗概层禁撞已废，同故事多侧面合法），上限 3 条；批次替代只让位同源；落库 source_type="self_story",
-  heat="一线交付"；**挖不出=诚实空过**；prompt 占位符 PERSONA/AUDIENCE_NOTE/TODAY/
-  TRANSCRIPTS/BAN_LIST（render 强制校验）。
+  → 盘三类靶：①**断更系列续集**（同一主题拍过多集、最新一集距今已久）②**时间线续集**
+  （实训营/活动天然时间线：Day1 拍了 Day2 没拍/结营回访没拍/社群第 N 周没拍）③**空白带**
+  （受众最关心但清单零覆盖的问题）；半句话闸（≤14 字单句无逗号冒号问号顿号）+劝告开头闸
+  （判词词根/行业闸不适用——franchise 靶形态是续集与反差）；**冷饭闸=视频清单判据（不问人）**：
+  判词与任何已发视频标题 SequenceMatcher≥0.75 或互含物理废（续集合法但判词必须带新信息）；
+  context 只准引用清单事实（禁编造）；14 天判决句撞车+批内 context 去重，上限 3 条宁缺毋滥；
+  批次替代只让位同源（当日旧 self_story draft 无下游才让位）；落库 source_type="self_story",
+  line="persona", heat="一线交付"；**盘不出=诚实空过**；prompt 占位符 PERSONA/AUDIENCE_NOTE/
+  TODAY/VIDEOLIST（render 强制校验：模板没有的占位符传入即抛错）。
 - `POST /api/topics/trending` → 202 `{job_id}`（**热点靶子·饭碗判决**，2026-11-12 三方向
   定版后第九版 prompt：公司事件只当由头，**判决主语=受众角色/现象**（中层/老板/岗位），
   骂公司的行业判决方向已废；受众闸（判词主语必须是受众角色）+争吵自检（谁会来评论区
-  反对？答不出=废靶）+半句话/劝告开头/判词词根三程序闸）。executor `trending_topics` 五路原料（生产服务器
+  反对？答不出=废靶）+半句话/劝告开头/判词词根三程序闸）。executor `trending_topics` 六路原料（生产服务器
   逐一实测免登录）：百度热搜前 50（hotlist.fetch_baidu_hot，内嵌 s-data）· 抖音热点榜 50
   （fetch_douyin_hot，www 域+Referer，带 hot_value，他发布平台自己的榜=第一优先）·
   知乎热榜 30（fetch_zhihu_hot，api.zhihu.com；微博 hotSearch 匿名 403、36kr RSS 空=
@@ -257,7 +264,7 @@ article:    pending（报题待写）──► generating ──► draft ──
 
 ### 同行监测（对标账号管理与扫描）
 - `GET /api/watch/digest` → 同行监测周报（近 7 天实时摘要，不落库：新视频/待定夺按作者分布+高分选题 Top3 带切角一句话）
-- `GET /api/watch/accounts` → `{items:[{platform, name, url, note, enabled, last_scan_at, video_total, video_recent_7d, scores}]}`；`scores` 为 `{relevance, quality, overall}` 或 null（从备注评分文本解析，口径见 MRD §2.1.1）
+- `GET /api/watch/accounts` → `{items:[{platform, name, url, note, enabled, last_scan_at, video_total, video_recent_7d, scores}]}`；`scores` 为 `{relevance, quality, overall}` 或 null（从备注评分文本解析，口径见 MRD §2.1 A）
 - `POST /api/watch/accounts` `{platform(douyin|channels), name, url, note?}` → 201；抖音必须带链接（缺 400）
 - `PUT /api/watch/accounts/{id}` `{name?, url?, note?, enabled?}` → 200（部分更新）；不存在 404、空名 400
 - `DELETE /api/watch/accounts/{id}` → `{deleted:id}`
@@ -331,13 +338,12 @@ article:    pending（报题待写）──► generating ──► draft ──
   注入 material 作唯一事实来源；**零命中任务失败**（error=知识库缺料，确定性失败不重试），
   全接口失败=TransientError 走退避。素材清单落 `articles.kb_sources`（JSON）随 GET 返回。
   开关关/未配置=旧行为（无 ima 依赖）。
-- `POST /api/articles/kb-topics` → 202 `{job_id}`（知识库选题线，R5.6）：遍历 ima 核心目录
-  （ima_topic_folders；轮换游标存 app_settings.ima_topic_cursor）→
-  文档台账 `kb_documents`（media_id 唯一，new/mined 状态机，断点续跑）→ 每轮取
-  12 篇标题+3 篇全文摘录 → LLM 产 ≤2 个「判断+绑定依据文档」选题（判断禁止复述依据文档
-  自身论点；依据对不上文档的丢弃，近期标题近义排除）→ 入 `kb_topics` 选题池（new 待选）。
-  无合格选题=任务成功返回 topics:0（不硬凑）。原凌晨 3 点调度已退役（cb76a56），现仅手动
-  `POST /api/articles/kb-topics` 触发。
+- 知识库选题池线已**整池退役**（2026-11-13 用户裁决，原 R5.6）：`GET /api/articles/kb-topics`、
+  `POST /api/articles/kb-topics`、`POST /api/articles/kb-topics/{id}/select`、
+  `POST /api/articles/kb-topics/{id}/dismiss` 四端点与 `article_kb_topics` 执行器全部移除；
+  `kb_topics`/`kb_documents` 两表模型已删（生产库旧表原地保留）。负向契约（P8 实测口径）：
+  GET 落到同前缀 `/{article_id:int}` 的路径参数校验 → 422，POST → 404，执行器不在注册表（白盒断言）。
+  知识库报题保留手动线（`POST /api/articles/draft` → `article_kb_write`）；自动线见源文改编产线（R5.6b）。
 - 深读产线（2026-11-11 用户拆锁定版后当日被「源文改编流」取代）：`article_deepread_daily`
   调度已于 2026-11-13 摘除注册（此前一直与挖掘器同挂 ima 门同为 4 点双跑）；`article_deepread`
   执行器与 prompt 保留未删（回滚窗口，恢复注册一行即复活）。
@@ -400,7 +406,7 @@ article:    pending（报题待写）──► generating ──► draft ──
 - **闭环判定（失败→恢复的因果链可见）**：`_coverage()` 对每个 failed 任务检测"同 type + 同 dedup_key/同实体 id 且 id 更大的 succeeded 任务"→ 附 `covered_by`。三态语义：**待处置**（未闭环、无排期）/ **重试中**（有 next_retry_at）/ **已闭环**（covered_by 存在，绿标"由 #N 成功重跑"，自动移出待处置）。重试血缘：`jobs.retry_of` 记录由哪个失败任务重试而来（手动重试/批量重试/按指纹复活三条路径都写入），详情页显示链路。
 - **统一调度中心**（`jobs/schedules.py`，Q"任务调度管理中心"）：所有周期任务一处注册（`REGISTRY`：key/label/执行体/节奏 daily_hour 或 interval_hours/设置开关字段）、`schedules` 表存运行态（enabled/hour 覆盖/last_run_at/next_run_at/last_status/run_count）、`_schedule_loop`（runner 内受监督循环，每 60s 巡检）到点执行。REGISTRY 共 13 项（2026-11-13 核对代码，deepread 已下线、kb_miner/adapt/self_story 已上线）：`article_hotspots_daily`（0 点，站外热点报题）· `watch_scan`（1 点，`watch_scan_hour` 可配 + `watch_scan_enabled` 门控）· `self_scan`（1 点，同上门控）· `hl_search_daily`（2 点，同城组局号搜索挖掘）· `daily_backup`（3 点，业务库每日备份，调度器内联执行不进任务队列）· `article_kb_miner_daily`（4 点，`ima_kb_enabled` 门控，源文评估入清单）· `creator_data_daily`（4 点，`creator_data_enabled` 门控）· `article_adapt_daily`（5 点，`ima_kb_enabled` 门控，清单取项改编成文）· `video_weekly_report`（5 点，按周幂等自愈）· `trending_daily`（6 点，热点靶子提炼）· `self_story_daily`（6 点，一线交付靶子，已发视频清单盘 franchise 三类靶）· `media_cleanup`（每日 6 点，拆解+自有媒体清扫，内联执行）· `crawl_probe`（每 2h，采集探针，内联执行）。API：`GET /api/schedules`、`POST /{key}/toggle`、`PUT /{key}/hour`、`POST /{key}/run`（立即执行并记运行态）；任务页「调度中心」卡片可视化。旧 main.py 硬编码调度循环已删除。
 - **同行发现**（`watch_discover`，无独立日调度，经 `POST /api/watch/discover` 触发，关键词按天轮换）：优先级=设置页配置 > 12 词静态池走 DDG→视频链接→反查作者→粉丝 Top8 入候选表（status=open 待人工定夺；已在清单/已忽略的不重复）；候选粉丝 ≥1 万（_DISCOVER_QUALITY_FANS）计入工作台周报卡「清单外高赞同行」。
-- **同城组局号搜索挖掘**（`hl_search_matrix`，调度 `hl_search_daily` 每日 2 点）：城市×关键词搜索矩阵分晚轮跑 → 作者池取证 → 四要素筛 → LLM 分级 → 判 A/B 入候选表待人工定夺；解析到的号一律落 `harvest_profiles` 全量存档（判定可重跑、存量可按预算回捞补档）。
+- **同城组局号搜索挖掘**（`hl_search_matrix`，调度 `hl_search_daily` 每日 2 点）：城市×关键词搜索矩阵分晚轮跑 → 作者池取证 → 四要素筛 → LLM 分级 → 判 A/B 入候选表待人工定夺；解析到的号落 `watch_candidates` 候选表，已撞过的 sec_uid 记入 app_settings `harvest_seen_secs` 去重池（封顶 3000，防重复撞主页限速；`harvest_hl_search`/`harvest_hl_verify` 键可临时调大预算）。
 - **抖音采集探针**（`crawler_probe.py`，调度 key=`crawl_probe`，每 2 小时）：先 TCP 探出口隧道
   （断=`proxy_down` 不浪费浏览器）；**多样本表决（2026-10-12 四修）**：连测 3 条轮换样本
   （拆解库最近 20 条已定夺视频、避开上次用的），≥1 条通即判可用、detail 带过 N/M 比例——
@@ -423,7 +429,7 @@ article:    pending（报题待写）──► generating ──► draft ──
   - 自动重试放行（`_reenqueue`）与人工重试同样先做实体复活，failed 状态不跨重试周期。
   - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate）已全部迁移，执行器体内不再自带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
-- **执行器注册表**（24 类，2026-11-13 核对）：`article_generate / article_kb_write / article_hotspots（站外热点报题）/ article_style_extract / article_kb_topics / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；靶子产线 2026-11-11：topic.evidence.target 存在时注入 target_event/target_why/target_evidences，稿贴事件写、论据只用带源事实）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / trending_topics / idea_research / hl_search_matrix / watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸） / article_deepread（深读写，调度 2026-11-13 下线，保留回滚）/ self_story_targets（一线交付靶子，冷饭闸≥0.75） / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）`。注：`article_kb_auto` 已删除（2026-11-13：注册后从未有任何提交方，回滚窗口已过）。
+- **执行器注册表**（23 类，2026-11-13 核对）：`article_generate / article_kb_write / article_hotspots（站外热点报题）/ article_style_extract / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；靶子产线 2026-11-11：topic.evidence.target 存在时注入 target_event/target_why/target_evidences，稿贴事件写、论据只用带源事实）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / trending_topics / idea_research / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）/ watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸） / article_deepread（深读写，调度 2026-11-13 下线，保留回滚）/ self_story_targets（一线交付靶子，冷饭闸≥0.75）`。注：`article_kb_topics` 已随选题池整池退役删除（2026-11-13 用户裁决）、`article_kb_auto` 已删除（2026-11-13：注册后从未有任何提交方，回滚窗口已过）。
 - **热点雷达（话题查看域）**：`radar_topics` 表（ch_id 全局唯一/seen_ids 防重/recent 最近新视频）。每日 6 点随 `trending_daily` 巡检话题新视频，低粉高赞同口径自动进拆解（R3.7）；`/api/radar` 仅保留查看域 4 端点（契约见 §6 雷达节）。独立话题雷达面与 topic_radar 任务已并入每日热点（2026-11-10 审计定版）。
 - **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，与 acceptance/quality.py 同表）；均只在命中时多花一次 LLM 调用。
 - **媒体即用即弃**：`benchmark_analyze` 成功即删视频文件（转写/拆解已入库；重拆解自动重新下载，本地拆解的原文件删后需重新上传）；reaper 巡检兜底清扫已完成/已忽略条目的遗留媒体，进行中任务的媒体不动。
@@ -463,7 +469,7 @@ article:    pending（报题待写）──► generating ──► draft ──
 | Content Studio（Linux 服务器） | 127.0.0.1:8100 | systemd 常驻（`scripts/deploy-linux.sh` install/uninstall/status）+ 看门狗 timer；Nginx 反代 + HTTPS（`deploy/nginx-content-studio.conf.example`） |
 | ASR 模型 | faster-whisper large-v3 | hf-mirror 下载至 data/asr-models/faster-whisper-large-v3/，`.env ASR_MODEL=large-v3` |
 | 进程守护 | macOS launchd | 由 `scripts/launchd.sh install` 动态生成 LaunchAgent 开机自启 |
-| 版本管理 | git | 仓库根 `git init`；.env/data/services venv 不入库（.gitignore 已就绪） |
+| 版本管理 | git | 仓库根 `git init`；.env/data/venv/浏览器缓存不入库（.gitignore 已就绪） |
 
 启动顺序：容器 → 应用。`/api/health.services` 逐个回报，缺谁降级谁，不阻塞主流程。
 
@@ -522,7 +528,7 @@ article:    pending（报题待写）──► generating ──► draft ──
 | P2 拆解流水线 | `run_p2.py` | 本地视频拆解全链（转写非空+拆解 schema+选题候选）；模板库 CRUD；在线拆解 | 本地链全 PASS；在线拆解未配 `DOUYIN_TEST_URL` 时 SKIP |
 | P6 任务体系 | `run_p6.py` | 去重幂等/失败分类/到期放行/欠任务补队/失败中台（指纹聚类·按指纹复活·实体孤儿） | 全 PASS |
 | P7 认证与单管理员 | `run_p7.py` | 未登录 401/登录会话/首登强制改密/改密全端重登/已拆除面负向断言（admin/*、credits、llm/calls、avatar/* 全 404） | 全 PASS |
-| P8 功能补全 | `run_p8.py` | 采集探针/调度中心/租户品牌九字段/今日热点提炼；雷达端点退役 404 断言、海报端点无（负向契约） | 全 PASS |
+| P8 功能补全 | `run_p8.py` | 采集探针/调度中心/租户品牌九字段/今日热点提炼；退役面负向契约（独立雷达端点 404；知识库选题池 GET 422/POST 404+执行器注册表白盒） | 全 PASS |
 | E2E 端到端 | `e2e_run.py` | Playwright 驱动真实 UI 按现行侧栏页单逐页零报错 | 全 PASS |
 
 fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中文语音) 生成口播形态测试视频；`--check` 检查依赖。P2 依赖语音轨（系统需有中文 TTS 声音）。
@@ -555,7 +561,7 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
   连续失败才回落常规节奏（此前零重试零告警当天丢失）；
   ③**时区显式化**——systemd unit 加 `Environment=TZ=Asia/Shanghai`（daily_hour 语义=
   服务器本地钟点，此前依赖隐式行为）；④runner `_backup_day` 死遗迹清理。
-  已收编统一调度的周期任务见 §7 REGISTRY（现行 13 项，2026-11-13 对齐代码；article_kb_topics_daily 已退役、
+  已收编统一调度的周期任务见 §7 REGISTRY（现行 13 项，2026-11-13 对齐代码；article_kb_topics_daily 已随选题池整池退役、
   article_deepread_daily 已下线，kb_miner/adapt/self_story 已上线）；reaper 内嵌的
   owed 补队/归档/磁盘告警属基础设施双轨（非业务定时），保留。边界：进程崩在"记账后执行前"
   该次丢失（罕见，dedup+次日兜底）。
@@ -598,5 +604,5 @@ fixture 说明：`acceptance/fixtures/make_video.py` 用 ffmpeg(+macOS `say` 中
   出口不可达时任务失败信息显式标注所用代理（降级可见）。
 - **媒体边界**：生成配图按 `article_images/{tenant_id}/` 分目录，服务端点只读本租户目录
   （平台管理员全局可读；存量平铺文件迁移归首租户）。
-- **金额与品牌隐藏（R11.6）**：后端为权威口径——非平台管理员的响应剔除 cost/yuan 字段、
+- **金额与品牌隐藏（拆除面兜底）**：后端为权威口径——非平台管理员的响应剔除 cost/yuan 字段、
   不含引擎品牌文字；前端按角色条件渲染。

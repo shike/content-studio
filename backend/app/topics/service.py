@@ -77,7 +77,7 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
             topic.score = max(0.0, min(10.0, float(data.get("score") or 0)))
         except (TypeError, ValueError):
             topic.score = 0.0
-        # 自动拒（PRD R1.2b）：低于 7.0 直接 rejected，不进待审队列
+        # 自动拒：低于 7.0 直接 rejected，不进待审队列
         if topic.score < 7.0 and topic.status == "draft":
             topic.status = "rejected"
         topic.score_breakdown = data.get("score_breakdown") or {}
@@ -503,7 +503,7 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
     context 只准引用清单事实（禁编造）。半句话闸+劝告开头闸照走；批次替代只让位同源；
     盘不出=诚实空过。转写全文不进本执行器（只作脚本线风格标尺）。"""
     import re as _re
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     from ..models import SelfVideo as _SV, Article as _A, Script as _S
     from ..tenant_brand import audience_note_of, brand_of

@@ -131,19 +131,6 @@ export interface ContentItem {
   created_at?: string
 }
 
-export interface KBTopic {
-  id: number
-  title: string
-  judgment: string
-  audience: string
-  why: string
-  docs: { media_id: string; title: string }[]
-  folder_name?: string
-  status: string
-  article_id?: number | null
-  created_at?: string
-}
-
 export const SOURCE_LABELS: Record<string, string> = {
   idea: 'idea深研',
   benchmark: '同行拆解',

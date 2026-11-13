@@ -10,7 +10,6 @@ from sqlmodel import func, or_, Session, select
 
 from ..articles.images import sign_image, valid_image_name
 from ..articles.service import find_pending_article
-from ..models import KBTopic
 from ..articles.renderer import render_wechat_html, sanitize_html
 from ..auth import require_user
 from ..db import engine
@@ -52,66 +51,6 @@ def create_draft(body: DraftIn, user: User = Depends(require_user)) -> dict:
         s.commit()
         s.refresh(row)
         return row.model_dump()
-
-
-@router.post("/kb-topics", status_code=202)
-async def kb_topics(user: User = Depends(require_user)) -> dict:
-    """知识库选题线（手动触发）：遍历 ima 核心目录 → 提炼选题入池（待人工选用）。"""
-    job = await runner.submit("article_kb_topics", {})
-    return {"job_id": job.id}
-
-
-@router.get("/kb-topics")
-def list_kb_topics(status: str = "new", user: User = Depends(require_user)) -> dict:
-    """选题池列表（status=new 待选 | selected 已选用 | dismissed 不做 | written 已成文）。"""
-    with Session(engine) as s:
-        rows = s.exec(select(KBTopic).where(
-            KBTopic.status == status).order_by(KBTopic.id.desc())).all()  # type: ignore[attr-defined]
-    return {"topics": [r.model_dump() for r in rows]}
-
-
-@router.post("/kb-topics/{topic_id}/select", status_code=202)
-async def select_kb_topic(topic_id: int, user: User = Depends(require_user)) -> dict:
-    """选用选题 → 建 pending 草稿（绑定依据文档）→ 自动链写成文（article_kb_write）。"""
-    with Session(engine) as s:
-        topic = s.get(KBTopic, topic_id)
-        if topic is None:
-            raise HTTPException(status_code=404, detail="topic not found")
-        if topic.status != "new":
-            raise HTTPException(status_code=409, detail="该选题已处理")
-        if not topic.docs:
-            raise HTTPException(status_code=409, detail="该选题缺少依据文档，无法成文")
-        art = Article(title=topic.title, status="pending",
-                      note=f"判断：{topic.judgment[:80]}｜读者：{topic.audience[:12]}｜依据：{topic.why[:80]}")
-        art.kb_doc_ids = topic.docs
-        s.add(art)
-        s.commit()
-        s.refresh(art)
-        aid, docs = art.id, list(art.kb_doc_ids or [])
-        topic.status = "selected"
-        topic.article_id = aid
-        s.add(topic)
-        s.commit()
-    job = await runner.submit("article_kb_write", {"article_id": aid, "kb_doc_ids": docs})
-    with Session(engine) as s:
-        art = s.get(Article, aid)
-        if art is not None:
-            art.status = "generating"
-            s.add(art)
-            s.commit()
-    return {"article_id": aid, "job_id": job.id}
-
-
-@router.post("/kb-topics/{topic_id}/dismiss")
-async def dismiss_kb_topic(topic_id: int, user: User = Depends(require_user)) -> dict:
-    with Session(engine) as s:
-        topic = s.get(KBTopic, topic_id)
-        if topic is None:
-            raise HTTPException(status_code=404, detail="topic not found")
-        topic.status = "dismissed"
-        s.add(topic)
-        s.commit()
-    return {"ok": True}
 
 
 # ── 内容清单（源文改编产线，2026-11-11）──

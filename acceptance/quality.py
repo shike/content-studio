@@ -27,9 +27,6 @@ with open(os.path.join(_REPO, "backend", "app", "articles", "banned_words.json")
     _BANNED_TABLE = json.load(_banned_table_file)
 BANNED_PATTERNS = _BANNED_TABLE["banned_patterns"]
 
-# 刻意 CTA 话术（自然收尾约束的程序化辅助信号，最终由评审员判定）
-CTA_PATTERNS = _BANNED_TABLE["cta_patterns"]
-
 _ARTICLE_RUBRIC = """你是苛刻的公众号深度长文内容评审。这类文章的定位=专业书面深度分析
 （不是口播稿，不要用"口语化/3秒钩子"的短视频标准量它）。按六项评分（每项 0-10 分）：
 
@@ -42,26 +39,6 @@ _ARTICLE_RUBRIC = """你是苛刻的公众号深度长文内容评审。这类�
 
 只输出 JSON（不要解释、不要代码块标记）：
 {"scores": {"opener": n, "depth": n, "proof": n, "ending": n, "compliance": n, "language": n},
- "overall": n, "worst_problem": "一句话"}
-
-overall = 六项平均。内容："""
-
-_FEED_ARTICLE_RUBRIC = """你是苛刻的公众号推荐流内容评审。这类文章的定位=中小企业老板/业务负责人
-在手机上扫读的公众号文章（1200~1800 字，完读率优先；不是学术长文，也不要用 3 秒短视频钩子的标准量它）。
-按六项评分（每项 0-10 分）：
-
-1. opener：开头即答案——前 3 段内给出全文最重的结论或最反直觉的数字；铺垫式开场
-   （"随着…/近年来…/在…的大背景下"）直接 0~2 分
-2. proof：数字与证据密度——有具体数字/金额/案例/出处，不空谈；全文干货密度对得起 2 分钟阅读时长
-3. scannable：可扫读性——小节标题是判断句/利益句（不是「XX 的机制拆解」式名词标题）、
-   段落短有锚点，手机上一路扫得下去
-4. judgment：判断直给——结论明确、可执行，不和稀泥、不堆免责声明
-5. compliance：合规——无绝对化承诺与夸大（"最好/第一/保证收益/百分百"等直接 0 分）；
-   无刻意转化话术（"评论区打X/私信领/关注我"等直接扣 4 分起）
-6. voice：语言人味——像资深行业编辑写给老板的话，无机翻腔、无 AI 套话、无论文腔
-
-只输出 JSON（不要解释、不要代码块标记）：
-{"scores": {"opener": n, "proof": n, "scannable": n, "judgment": n, "compliance": n, "voice": n},
  "overall": n, "worst_problem": "一句话"}
 
 overall = 六项平均。内容："""
@@ -116,17 +93,13 @@ def banned_words(text: str) -> list[str]:
     return hits
 
 
-def cta_hits(text: str) -> list[str]:
-    return [m.group(0) for p in CTA_PATTERNS for m in [re.search(p, text)] if m]
-
-
 def judge(text: str, *, min_per_item: int = 6, min_overall: float = 7.0,
           timeout: int = 300, kind: str = "script") -> tuple[bool, str]:
     """LLM 评审。返回 (通过, 说明)。违禁词命中直接 FAIL 不调模型。
 
     kind="script" 用口播尺（hook/口语化/结尾…）；kind="article" 用深度长文尺
-    （铺垫/深度/收束/语言…）；kind="feed" 用公众号推荐流尺（开头即答案/可扫读/人味…，
-    2026-10-02 双档位默认档）。长文超 6000 字时喂开头+结尾采样——只喂前 6000 字会让
+    （铺垫/深度/收束/语言…；feed 尺已随推荐流档退役，服务端现只产 deep/article）。
+    长文超 6000 字时喂开头+结尾采样——只喂前 6000 字会让
     评审员看到被拦腰砍断的文本，误报"句中截断无收尾"（2026-09-28 实测踩到）。
     """
     if len(text.strip()) < 50:
@@ -134,8 +107,8 @@ def judge(text: str, *, min_per_item: int = 6, min_overall: float = 7.0,
     hits = banned_words(text)
     if hits:
         return False, f"违禁词命中：{hits}"
-    rubric = {"article": _ARTICLE_RUBRIC, "feed": _FEED_ARTICLE_RUBRIC}.get(kind, _RUBRIC)
-    if kind in ("article", "feed") and len(text) > 6000:
+    rubric = {"article": _ARTICLE_RUBRIC}.get(kind, _RUBRIC)
+    if kind == "article" and len(text) > 6000:
         # 只喂前 6000 字会让评审员看到被拦腰砍断的文本，误报"句中截断无收尾"——喂开头+结尾
         text = text[:4200] + "\n\n……（中略）……\n\n" + text[-1800:]
     else:
@@ -178,9 +151,8 @@ def judge(text: str, *, min_per_item: int = 6, min_overall: float = 7.0,
                 continue
             scores = json.loads(m.group(0))
             sc = scores.get("scores") or {}
-            # 六项键名随尺子走：口播尺 vs 深度长文尺 vs 推荐流尺（写死一套键名会把另一套全部判 0）
-            expected = ({"article": ("opener", "depth", "proof", "ending", "compliance", "language"),
-                         "feed": ("opener", "proof", "scannable", "judgment", "compliance", "voice")}
+            # 六项键名随尺子走：口播尺 vs 深度长文尺（写死一套键名会把另一套全部判 0）
+            expected = ({"article": ("opener", "depth", "proof", "ending", "compliance", "language")}
                         .get(kind, ("hook", "colloquial", "proof", "ending", "compliance", "persona")))
             items = {k: float(sc.get(k, 0)) for k in expected}
             bad = [f"{k}={v}" for k, v in items.items() if v < min_per_item]

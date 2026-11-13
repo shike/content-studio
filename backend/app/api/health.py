@@ -1,7 +1,6 @@
 """GET /api/health：服务、数据库、LLM、本地依赖与外部容器健康。"""
 import shutil
 
-import httpx
 from fastapi import APIRouter
 from sqlmodel import Session, text
 
@@ -10,15 +9,6 @@ from ..llm import gateway
 from ..version import APP_VERSION
 
 router = APIRouter()
-
-
-def _probe(url: str):
-    """任意 HTTP 响应（含 404）即视为服务在线。"""
-    try:
-        httpx.get(url, timeout=1.5)
-        return "ok"
-    except Exception:  # noqa: BLE001
-        return None
 
 
 @router.get("/api/health")

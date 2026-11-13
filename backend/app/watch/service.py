@@ -22,7 +22,7 @@ from ..browser import launch, ua
 from ..db import engine
 from ..llm import gateway
 from ..jobs.errors import TransientError
-from ..jobs.runner import register_concurrent, register_executor, runner
+from ..jobs.runner import register_concurrent, register_executor
 from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
 
 _LIST_LIMIT = 20          # 每账号最多看最近 N 条
@@ -767,7 +767,6 @@ async def watch_discover(ctx, payload: dict) -> dict:
             m = re.search(r"share/user/([A-Za-z0-9_-]{20,})", a.url or "")
             if m:
                 watched_secs.add(m.group(1))
-        secs = [d["sec_uid"] for d in ranked]
         existing = {}
         for row in s.exec(select(WatchCandidate)).all():  # 表小，全量拉回按 sec 索引
             existing.setdefault(row.sec_uid, []).append(row)
@@ -823,7 +822,7 @@ _HARVEST_SEEN_CAP = 3000
 
 
 def _harvest_budget(key: str, default: int) -> int:
-    """战役模式预算覆盖：app_settings.harvest_videos / harvest_profiles 可临时调大
+    """战役模式预算覆盖：app_settings.harvest_hl_search / harvest_hl_verify 可临时调大
     （挖号冲刺期用），不设或非法回落默认小预算（夜间常态挖不动太快会撞限速）。"""
     from ..models import AppSetting
     k = f"harvest_{key}"
@@ -1079,7 +1078,6 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
     n_search = int(_harvest_budget("hl_search", _HL_SEARCH_BUDGET))
     n_verify = min(_harvest_budget("hl_verify", _HL_VERIFY_BUDGET), 60)
 
-    seen = _load_harvest_seen()  # 复用同一份已扫池（两类管线互斥物种，seen 合并无害）
     with Session(engine) as s:
         known = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
                  if c.sec_uid}

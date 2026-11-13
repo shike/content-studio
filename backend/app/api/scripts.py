@@ -49,7 +49,6 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
             raise HTTPException(status_code=409,
                                 detail=f"该选题正在生成脚本（脚本 #{dup.id}），请等完成或删除后再试")
         script = Script(topic_id=body.topic_id, status="generating")
-        use_style = body.use_style
         s.add(script)
         s.commit()
         s.refresh(script)

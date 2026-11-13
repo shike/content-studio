@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import re
 from pathlib import Path
-from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
@@ -14,7 +12,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, Article, KBDocument, KBTopic, Script, Topic
+from ..models import AppSetting, Article, Script, Topic
 from ..prompts import load, render
 
 # 长文风格库（R10）：key → 结构骨架。生成时单选，auto 交给模型按素材挑。
@@ -272,10 +270,8 @@ async def _attach_cover(md_text: str, title: str, tenant_id: int, log_prefix: st
 
 
 def _finalize_article(article_id: int, *, title: str, title_alts: list[str],
-                      kb_sources: list, md_text: str,
-                      kb_topic_flow: bool = False) -> None:
-    """成文落库收尾（两条成文执行器共用）：写回标题/素材来源/正文并置 draft。
-    kb_topic_flow=True（知识库选题线）时同步把关联 KBTopic selected→written。"""
+                      kb_sources: list, md_text: str) -> None:
+    """成文落库收尾（两条成文执行器共用）：写回标题/素材来源/正文并置 draft。"""
     with Session(engine) as s:
         article = s.get(Article, article_id)
         if article is None:
@@ -286,11 +282,6 @@ def _finalize_article(article_id: int, *, title: str, title_alts: list[str],
         article.md = md_text
         article.status = "draft"
         s.add(article)
-        if kb_topic_flow:
-            topic = s.exec(select(KBTopic).where(KBTopic.article_id == article_id)).first()  # type: ignore[attr-defined]
-            if topic is not None and topic.status == "selected":
-                topic.status = "written"
-                s.add(topic)
         s.commit()
 
 
@@ -625,9 +616,7 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
         article_title0 = article.title or ""
         article_note = article.note or ""
         docs = [d for d in (article.kb_doc_ids or []) if isinstance(d, dict) and d.get("media_id")]
-        topic = s.exec(select(KBTopic).where(KBTopic.article_id == article_id)).first()  # type: ignore[attr-defined]
-        judgment = (f"论点：{topic.judgment}\n读者：{topic.audience}\n为什么值得写：{topic.why}"
-                    if topic is not None else (article_note or article_title0))
+        judgment = article_note or article_title0  # 选题池线退役（2026-11-13）：判词只取报题备注/标题
         from ..tenant_brand import audience_note_of, brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
@@ -731,7 +720,7 @@ async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
     score = await _quality_gate(ctx, md_text)
 
     _finalize_article(article_id, title=title, title_alts=title_alts,
-                      kb_sources=docs, md_text=md_text, kb_topic_flow=True)
+                      kb_sources=docs, md_text=md_text)
 
     # 自动排版成「待发」终态：用户只做最终决策（公众号后台点发表 / 一键复制），不再手动渲染
     from .renderer import render_wechat_html
@@ -929,180 +918,15 @@ async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
     return {"note": note[:120]}
 
 
-# ---- 知识库选题线（2026-11-09）：体系化遍历 ima 目录 → 带判断选题 → 报题即草稿链写 ----
-
-_KB_TOPIC_FULLTEXT = 3     # 每轮取全文摘录的篇数
-
-
-@register_executor("article_kb_topics")
-async def article_kb_topics(ctx: JobContext, payload: dict) -> dict:
-    """体系化全量遍历 ima 核心目录 → 按批提炼选题 → 全部入选题池（KBTopic，待选）。
-
-    与抽卡式不同：按目录顺序全库遍历，单次运行带时间预算（可断点续跑——kb_documents
-    的 mined 标记记住进度，下次运行从断点继续），跑完全库后选题池即全量选题目录。
-    素材纪律：选题必须绑定具体库内文档；文档不足以支撑合格选题时跳过，不产泛主题；
-    与已有选题/文章近义去重；用户「不做」过的题不复活。"""
-    from ..articles.ima_kb import fetch_full_doc, kb_config, list_folder_docs, topic_folders, topic_kb_id
-    from ..models import KBDocument, KBTopic
-
-    budget_sec = int(payload.get("budget_sec") or 480)
-    batch_size = int(payload.get("batch_size") or 12)
-
-    with Session(engine) as s:
-        cfg = kb_config(s)
-        if cfg is None:
-            raise RuntimeError("知识库选题线未启用：缺少 ima_kb_enabled / 凭证配置")
-        client_id, api_key = cfg["client_id"], cfg["api_key"]
-        kb_id = topic_kb_id(s)
-        folders = topic_folders(s)
-        recent = [r.title for r in s.exec(select(Article).where(
-            Article.status.in_(ACTIVE_ARTICLE_STATUSES))  # type: ignore[attr-defined]
-            .order_by(Article.id.desc()).limit(30)).all()  # type: ignore[attr-defined]
-            if r.title]
-    if not folders:
-        raise RuntimeError("选题遍历目录为空：请配置 ima_topic_folders")
-
-    def _norm(t: str) -> str:
-        return re.sub(r"[\s_\-——（）()\[\]「」《》,，。.·！!?？：:]", "", (t or "")).lower()
-
-    def _match_doc(dt: str, docs: list[dict]) -> dict | None:
-        nq = _norm(dt)
-        if len(nq) < 6:
-            return None
-        for d in docs:
-            nd = _norm(d["title"])
-            if nq == nd or (len(nq) >= 8 and (nq in nd or nd in nq)):
-                return d
-        return None
-
-    started = time.monotonic()
-    added_total = 0
-    processed_docs = 0
-    batch_no = 0
-    exhausted = False
-
-    for fid, fname in folders:
-        if time.monotonic() - started > budget_sec:
-            break
-        try:
-            docs = await list_folder_docs(client_id, api_key, kb_id, fid)
-        except Exception as e:  # noqa: BLE001
-            print(f"[kb-topics] 目录列举失败（{fname}）: {type(e).__name__}: {str(e)[:80]}")
-            continue
-        with Session(engine) as s:
-            new_cnt = 0
-            for d in docs:
-                mid = d.get("media_id") or ""
-                if not mid:
-                    continue
-                exists = s.exec(select(KBDocument).where(
-                    KBDocument.media_id == mid)).first()  # type: ignore[attr-defined]
-                if exists is None:
-                    s.add(KBDocument(kb_id=kb_id, folder_id=fid, folder_name=fname,
-                                     media_id=mid, title=d.get("title") or "", status="new"))
-                    new_cnt += 1
-            s.commit()
-            fresh = s.exec(select(KBDocument).where(
-                KBDocument.folder_id == fid,  # type: ignore[attr-defined]
-                KBDocument.status == "new")).all()  # type: ignore[attr-defined]
-            fresh = [{"title": x.title, "media_id": x.media_id, "id": x.id} for x in fresh]
-        processed_docs += len(fresh)
-        if not fresh:
-            await asyncio.sleep(0.5)
-            continue
-
-        # 本目录按批提炼
-        for i in range(0, len(fresh), batch_size):
-            if time.monotonic() - started > budget_sec:
-                break
-            chunk = fresh[i:i + batch_size]
-            batch_no += 1
-            excerpts = []
-            for d in chunk[:_KB_TOPIC_FULLTEXT]:
-                txt = await fetch_full_doc(client_id, api_key, d["media_id"], cap=3000)
-                if txt:
-                    excerpts.append(f"【{d['title']}】\n{txt}")
-                await asyncio.sleep(0.6)
-            titles_block = "\n".join(f"- {d['title']}" for d in chunk)
-            excerpts_block = "\n\n".join(excerpts) or "（本轮无全文摘录，仅按标题判断）"
-            recent_block = "\n".join(f"- {t[:40]}" for t in recent) or "（无）"
-            try:
-                pick = await gateway.complete_json(
-                    [{"role": "user", "content": render("article_kb_topic", MAX_TOPICS="2")
-                      + f"\n\n目录：{fname}\n\n文档标题清单：\n{titles_block}"
-                      + f"\n\n部分正文摘录：\n{excerpts_block}"
-                      + f"\n\n近期已报题标题（避免意思相近）：\n{recent_block}"}],
-                    purpose="article_kb_topic", max_tokens=4000, thinking="disabled")
-            except Exception as e:  # noqa: BLE001 单批 LLM 失败跳过该批
-                print(f"[kb-topics] 批 {batch_no} 提炼失败跳过: {type(e).__name__}: {str(e)[:80]}")
-                pick = {}
-            topics = [t for t in (pick.get("topics") or [])
-                      if isinstance(t, dict) and (t.get("title") or "").strip()][:2]
-
-            title_to_doc = {d["title"]: d for d in chunk}
-            added = 0
-            dropped: list[str] = []
-            with Session(engine) as s:
-                for t in topics:
-                    title = str(t.get("title") or "").strip()[:60]
-                    if not title:
-                        continue
-                    ntitle = _norm(title)
-                    dup_topic = any(_norm(x.title) == ntitle for x in s.exec(select(KBTopic)).all())  # type: ignore[attr-defined]
-                    dup_article = any(_norm(a.title) == ntitle for a in s.exec(select(Article).where(
-                        Article.status.in_(ACTIVE_ARTICLE_STATUSES))).all())  # type: ignore[attr-defined]
-                    if dup_topic or dup_article:
-                        dropped.append(f"近义重复：{title[:24]}")
-                        continue
-                    doc_ids = []
-                    for dt in [str(x) for x in (t.get("docs") or [])]:
-                        hit = _match_doc(dt, chunk)
-                        if hit:
-                            doc_ids.append({"media_id": hit["media_id"], "title": hit["title"]})
-                    if not doc_ids:
-                        # 2026-11-13 修复：原引 dt[:24]，LLM 输出缺 docs/为空数组时 dt 未绑定 →
-                        # NameError 炸整轮任务；改用必有值的 title，且 dropped 进进度消息可见
-                        dropped.append(f"依据对不上：{title[:24]}")
-                        continue
-                    s.add(KBTopic(title=title,
-                                  judgment=str(t.get("judgment") or "")[:200],
-                                  audience=str(t.get("audience") or "")[:12],
-                                  why=str(t.get("why") or "")[:120],
-                                  docs=doc_ids,
-                                  folder_name=fname,
-                                  status="new"))
-                    added += 1
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-                for row_ in s.exec(select(KBDocument).where(
-                        KBDocument.id.in_([d["id"] for d in chunk]))).all():  # type: ignore[attr-defined]
-                    row_.status = "mined"
-                    row_.last_mined_at = now
-                    s.add(row_)
-                s.commit()
-            added_total += added
-            recent = ([f"{t.get('title', '')}"] if topics else []) + recent[:20]
-            _drop_note = f"｜弃 {len(dropped)}（{'；'.join(dropped[:2])}）" if dropped else ""
-            ctx.set_progress(min(95, 10 + batch_no * 3),
-                             f"批 {batch_no}（{fname}）：读 {len(chunk)} 篇 → 新选题 {added}{_drop_note}｜累计入池 {added_total}")
-            await asyncio.sleep(0.6)
-        await asyncio.sleep(0.8)
-
-    if batch_no == 0 and processed_docs == 0:
-        exhausted = True
-
-    # 池内待选计数
-    with Session(engine) as s:
-        pool_new = len(s.exec(select(KBTopic).where(
-            KBTopic.status == "new")).all())  # type: ignore[attr-defined]
-
-    msg = (f"全量遍历{'完成' if exhausted else '进行中'}：本轮读 {processed_docs} 篇 / {batch_no} 批，"
-           f"新选题 {added_total} 个入池；池内待选 {pool_new}")
-    ctx.set_progress(100, msg[:90])
-    return {"processed_docs": processed_docs, "batches": batch_no, "added": added_total,
-            "pool_new": pool_new, "exhausted": exhausted, "message": msg}
+# article_kb_topics（知识库选题线，2026-11-09 定版）于 2026-11-13 用户裁决整池退役：
+# 原入口=POST /api/articles/kb-topics 手动触发（遍历 ima 目录→提炼选题入 KBTopic 池），
+# /select 选用建草稿链写 article_kb_write、/dismiss 不做。kb_auto 删除后已无任何提交方，
+# 前端 UI 2026-11-10 已撤、全仓 0 调用 select/dismiss，回滚窗口已过。prompt
+# article_kb_topic.md 与 kb_topics/kb_documents 两张表同日移除（生产库旧表不动，
+# 对齐 harvest_profiles 划线退役口径）。手动报题 draft→article_kb_write 保留；
+# 知识库成文现行线=挖掘器→清单→改编器（自动）+手动报题。
 
 
 # article_kb_auto（全自动圈题成文，2026-11-10 定版）于 2026-11-13 删除：注册后从未有
 # 调度/API/链发提交方（同日被 article_deepread_daily 取代，深读调度又于同日下线），
-# 回滚窗口已过。知识库成文现行三线=挖掘器→清单→改编器（自动）、kb-topics 选用→
-# kb_write（手动）、热点直出→article_generate（自动）。
+# 回滚窗口已过。热点直出→article_generate（自动）。
