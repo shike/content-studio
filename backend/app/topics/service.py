@@ -383,6 +383,22 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         print(f"[trending] 行业闸+半句话闸：{len(items)} 条进 → {len(gated)} 条出")
     items = gated
 
+    # 成色终审（2026-11-13）：软规则模型不执行（连续三批实证），独立法官照 61 条已发标题标尺
+    # 逐条判 keep/drop——品味只能正样本校准，法官 prompt 就是正样本的机械化
+    if items:
+        judge = await gateway.complete_json(
+            [{"role": "system", "content": render(
+                "trending_target_judge",
+                CANDIDATES=json.dumps(
+                    [{"sentence": x["sentence"], "context": str(x.get("context") or "")}
+                     for x in items], ensure_ascii=False))}],
+            purpose="trending_target", max_tokens=2000, thinking="disabled")
+        keep = {str(v.get("sentence") or "").strip()
+                for v in (judge.get("verdicts") or []) if v.get("keep") is True}
+        before = len(items)
+        items = [x for x in items if x["sentence"].strip() in keep]
+        print(f"[trending] 成色终审：{before} 条进 → {len(items)} 条出")
+
     # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
     watch_norms = [_norm(x["title"]) for x in watch_items if len(_norm(x["title"])) >= 10]
     batch: list[dict] = []
