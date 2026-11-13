@@ -150,7 +150,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
     def _norm(t: str) -> str:
         return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-]+", "", str(t)).lower()
 
-    ctx.set_progress(8, "收集站内原料（对标圈近 2 天议题）")
+    ctx.set_progress(8, "收集站内原料（对标圈近 2 天议题 + 已发视频清单=冷饭判据）")
     cutoff = datetime.now() - timedelta(days=2)
     with Session(engine) as s:
         rows = s.exec(select(BenchmarkVideo).where(
@@ -162,11 +162,19 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             for b in rows if b.title
         ][:40]
 
+    # 冷饭判据（2026-11-13 用户定版：判冷饭不用问人，视频清单就是判据）——已发视频标题全量
+    from ..models import SelfVideo as _SVB
+    with Session(engine) as s:
+        _pub_titles = [v.title for v in s.exec(
+            select(_SVB).where(_SVB.published_at != "")).all() if v.title]  # type: ignore[attr-defined]
+    video_title_norms = [_norm(t) for t in _pub_titles]
+
     # 防撞车（2026-11-13 实现修正，用户指认锁错对象）：唯一冷饭闸=判决句层 14 天去重——
     # 由头层 7 天禁撞废除（按字面比对拦续集放复述，正好反了；新鲜度由 48h 新鲜菜单保证，
     # 同一事件的新进展=合法续集，判词必须换新）
     ctx.set_progress(16, "整理防撞车清单（14 天已出靶子的判决句）")
     ban_lines = [f"- （已出过靶子）{t}" for t in recent_topic_titles(14, line="persona")]
+    ban_lines += [f"- （已拍过视频）{t[:40]}" for t in _pub_titles[:60]]
 
     ctx.set_progress(24, "抓国内热点榜与科技资讯（三榜+六源科技媒体+GitHub 新库）")
     hot_items, hot_meta = await asyncio.to_thread(fetch_baidu_hot, 50)
@@ -378,6 +386,10 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
             continue
         if is_similar_title(str(x.get("sentence") or ""), line="persona"):  # 标题撞车兜底（提炼走人设线）
             continue
+        sn = _norm(str(x.get("sentence") or ""))
+        if any(SequenceMatcher(None, sn, tn).ratio() >= 0.55 or (len(tn) >= 8 and (tn in sn or sn in tn))
+               for tn in video_title_norms):
+            continue  # 冷饭闸：与已发视频近似（判据=视频清单，不问人）
         hn = _norm(hotspot)
         if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
             continue
@@ -453,11 +465,12 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
 @register_executor("self_story_targets")
 async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
-    """一线交付靶子（2026-11-12 方向1=123都要定版）：从创作者自己的口播转写里挖真实
-    交付故事，锻半句话靶子。素材=SelfVideo.transcript（自有素材别人抄不走）；禁编造=
-    铁律（细节必须在转写原文有出处，prompt 硬规则）。半句话闸+劝告开头闸照走；判词
-    词根闸与行业关键词闸不适用——故事靶子的形态是反差不是攻击。批次替代只让位同源
-    旧批次（不踢 trending）；挖不出=诚实空过。"""
+    """一线交付靶子·franchise 线（2026-11-13 第三版，用户抓出转写挖矿=结构性冷饭后重建）：
+    素材=已发视频清单本身（标题/播放/日期）——盘断更系列、实训营/活动时间线续集、
+    受众关心但零覆盖的空白带，锻半句话靶子。**冷饭闸=视频清单判据**（判冷饭不用问人）：
+    判词与任何已发视频标题近似 ≥0.75 物理废（续集题允许同系列不同进展，判词必须带新信息）；
+    context 只准引用清单事实（禁编造）。半句话闸+劝告开头闸照走；批次替代只让位同源；
+    盘不出=诚实空过。转写全文不进本执行器（只作脚本线风格标尺）。"""
     import re as _re
     from datetime import datetime, timedelta
 
@@ -472,33 +485,29 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
     def _norm(t: str) -> str:
         return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-]+", "", str(t)).lower()
 
-    ctx.set_progress(10, "收集自有素材（口播转写，播放高的优先）")
+    ctx.set_progress(10, "收集视频清单（franchise 地图：标题/播放/日期）")
     with Session(engine) as s:
-        vids = s.exec(select(_SV).where(_SV.transcript != "")).all()  # type: ignore[attr-defined]
-        ranked = sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0), reverse=True)[:12]
-    if not ranked:
-        ctx.set_progress(100, "自有素材为空（无口播转写），诚实空过")
-        return {"topic_ids": [], "targets": 0, "material": {"transcripts": 0}}
+        vids = s.exec(select(_SV).where(_SV.published_at != "")).all()  # type: ignore[attr-defined]
+        ordered = sorted(vids, key=lambda v: v.published_at or "")[-60:]
+    if not ordered:
+        ctx.set_progress(100, "视频清单为空，诚实空过")
+        return {"topic_ids": [], "targets": 0, "material": {"videos": 0}}
     lines = []
-    for v in ranked:
-        tr = _re.sub(r"\s+", " ", (v.transcript or ""))[:600]
+    for v in ordered:
         play = int((v.stats or {}).get("play") or 0)
-        lines.append(f"【{(v.title or '无标题')[:30]}｜播放 {play}】{tr}")
-    transcripts = "\n\n".join(lines)
+        lines.append(f"- {(v.published_at or '')[:10]}｜{(v.title or '无标题')[:36]}｜播放 {play}")
+    videolist = "\n".join(lines)
+    video_title_norms = [_norm(v.title) for v in ordered if v.title]
 
-    # 防撞车清单=已出过靶子的判决句（由头/梗概层禁撞废除，2026-11-13 同 trending 修正）
-    ban_lines = [f"- （已出过靶子）{t}" for t in recent_topic_titles(14, line="persona")]
-
-    ctx.set_progress(45, "从交付故事锻半句话靶子")
+    ctx.set_progress(45, "盘断更系列/时间线续集/空白带，锻靶子")
     data = await gateway.complete_json(
         [{"role": "system", "content": render(
             "self_story_target", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
-            TODAY=datetime.now().strftime("%Y-%m-%d"), TRANSCRIPTS=transcripts,
-            BAN_LIST="\n".join(ban_lines) or "（近 14 天无出题记录）")}],
+            TODAY=datetime.now().strftime("%Y-%m-%d"), VIDEOLIST=videolist)}],
         purpose="self_story_target", max_tokens=8000, thinking="disabled")
     items = [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("sentence")]
 
-    # 半句话闸 + 劝告开头闸（判词词根闸/行业闸不适用于故事靶）
+    # 闸1：半句话 + 劝告开头（判词词根/行业闸不适用——franchise 靶形态是续集与反差）
     _CLAUSE_PUNCT = _re.compile(r"[，,。？?：:；;、]")
     _ADVICE_OPENER = _re.compile(r"^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)")
     gated: list[dict] = []
@@ -512,17 +521,23 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
         gated.append(x)
     if len(items) != len(gated):
         print(f"[self_story] 半句话闸：{len(items)} 条进 → {len(gated)} 条出")
-    items = gated
 
-    # 硬校验：14 天判决句撞车 → 批内梗概去重（由头层禁撞已废，同故事多侧面合法）；上限 3 条宁缺毋滥
+    # 闸2：冷饭闸（判据=视频清单）+ 14 天判决句撞车 + 批内去重；上限 3 条宁缺毋滥
     batch: list[dict] = []
     seen_norms: list[str] = []
-    for x in items:
+    for x in gated:
+        sentence = x["sentence"]
         context = str(x.get("context") or "").strip()
-        if not context or "对标圈" in context:
+        if not context:
             continue
-        if is_similar_title(str(x.get("sentence") or ""), line="persona"):
-            continue
+        sn = _norm(sentence)
+        if any(ratio >= 0.75 for ratio in
+               (SequenceMatcher(None, sn, tn).ratio() for tn in video_title_norms)):
+            continue  # 冷饭闸：近似复述已发视频
+        if any((len(tn) >= 8 and (tn in sn or sn in tn)) for tn in video_title_norms):
+            continue  # 冷饭闸：标题互含
+        if is_similar_title(sentence, line="persona"):
+            continue  # 14 天判决句撞车
         hn = _norm(context)
         if any(SequenceMatcher(None, hn, b).ratio() >= 0.55 for b in seen_norms):
             continue
@@ -531,9 +546,8 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
         if len(batch) >= 3:
             break
     if not batch:
-        ctx.set_progress(100, "今日无可挖的交付故事（或全部未过校验），诚实空过")
-        return {"topic_ids": [], "targets": 0,
-                "material": {"transcripts": len(ranked)}}
+        ctx.set_progress(100, "今日无可续的系列/空白带（或全部未过冷饭校验），诚实空过")
+        return {"topic_ids": [], "targets": 0, "material": {"videos": len(ordered)}}
 
     ctx.set_progress(85, f"一线交付靶子落库（{len(batch)} 条，选题库 draft）")
     created: list[int] = []
@@ -567,7 +581,7 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
                                "context": str(x.get("context") or "")[:60],
                                "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
                                "heat": "一线交付"},
-                    "material": {"transcripts": len(ranked)},
+                    "material": {"videos": len(ordered)},
                 },
                 status="draft",
             )
@@ -578,7 +592,7 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(100, f"完成：{len(created)} 条一线交付靶子入选题库（替代 {len(superseded)} 条当日旧批次）")
     return {"topic_ids": created, "targets": len(created), "superseded": superseded,
-            "material": {"transcripts": len(ranked)}}
+            "material": {"videos": len(ordered)}}
 
 
 def recent_topic_titles(days: int = 14, limit: int = 24, line: str = "") -> list[str]:
