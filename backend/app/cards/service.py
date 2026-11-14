@@ -48,7 +48,7 @@ _DOMAIN_KW = ("AI", "人工智能", "大模型", "模型", "智能体", "agent",
               "宇树", "unitree", "manus", "suno", "cursor", "notion", "figma", "vscode",
               "qwen", "grok", "xai", "deepmind", "saas", "办公", "ios", "android", "app", "github", "仓库")
 
-_ADVICE_OPENER = re.compile(r"^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)")
+_ADVICE_OPENER = re.compile(r"^(先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)")
 _PREDICT_KW = ("迟早", "注定", "必死", "要凉")
 _CLAUSE_PUNCT = re.compile(r"[，,。？?：:；;、]")
 _PUNCT_STRIP = re.compile(r"[\s，,。.！!？?：:；;、「」『』《》\"'（）()·|…—\-+#]")
