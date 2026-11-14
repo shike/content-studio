@@ -50,14 +50,6 @@ _DOMAIN_KW = ("AI", "人工智能", "大模型", "模型", "智能体", "agent",
 
 _ADVICE_OPENER = re.compile(r"^(别|先|快|应|该|要|记得|建议|试试|赶紧|需要|必须|最好|千万|不妨)")
 _PREDICT_KW = ("迟早", "注定", "必死", "要凉")
-_JUDGE_KW = ("就是", "全是", "纯", "垃圾", "收割", "智商税", "骗局", "割韭菜", "倒闭",
-             "没法用", "没人用", "认输", "吹爆", "吹上", "吹过", "神话", "泡沫",
-             "凉了", "烂", "难用", "复杂", "别碰", "高估", "低估", "幻觉", "伪需求",
-             "套壳", "翻车", "接盘", "过时", "淘汰", "取代", "终结", "杀死", "白干", "白嫖",
-             "白送", "硬刚", "落后", "耍猴", "当猴耍", "镰刀", "韭菜",
-             "干掉", "吃掉", "抢走", "饭碗", "消失", "出局", "上位", "没出路", "上岸",
-             "白花钱", "砸", "坑", "骗", "糊弄", "白买", "白忙", "一场空", "冤",
-             "水分", "猫腻", "白交", "交学费", "买大祸", "打脸", "露馅", "不靠谱", "白费力", "白学")
 _CLAUSE_PUNCT = re.compile(r"[，,。？?：:；;、]")
 _PUNCT_STRIP = re.compile(r"[\s，,。.！!？?：:；;、「」『』《》\"'（）()·|…—\-+#]")
 _NORM_RE = re.compile(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]")
@@ -219,12 +211,9 @@ def _spine_static_fail(spine: str, source: str) -> Optional[str]:
         return "复合句"
     if any(k in spine for k in _PREDICT_KW):
         return "预言腔"
-    if source not in ("self_story", "manual"):
-        # 判词=立场句式（是/只会/早该…）或罪名词根，二占一即过；
-        # 新闻复述（某厂发布了X）两者皆无，照样拦。品味层由总法官兜底。
-        stance = re.search(r"(是|就是|只会|早该|无非|本质|等于|不过是)", spine)
-        if not any(k in spine for k in _JUDGE_KW) and not stance:
-            return "无判词词根（新闻复述不算判决）"
+    # 罪名与立场的品味判断归总法官（judge_cards：无罪名无立场的正确废话 ≤3 分）——
+    # 程序层不再做词表追杀（实测证明词表永远追不上锋利新表述，误杀率 100%）
+    pass
     return None
 
 
@@ -312,7 +301,7 @@ async def _llm_judge(items: list[dict]) -> dict[int, dict]:
 
 def _spine_gate(spine: str, role: str, source: str, gates: list,
                 seen_spine_norms: list[str], video_norms: list[str]) -> bool:
-    """主线闸（程序）：字数线/劝告开头/复合句/预言腔/判词词根（热源系）/覆盖面/撞车/批内。"""
+    """主线闸（程序）：字数线/劝告开头/复合句/预言腔/覆盖面/撞车/批内（罪名与立场的品味归总法官）。"""
     spine = spine.strip()
     n = _pron_len(spine)
     if not _gate(gates, "主线字数线", 0 < n <= _max_chars(), f"{spine[:24]}（{n} 字，线 {_max_chars()}）"):
@@ -323,9 +312,6 @@ def _spine_gate(spine: str, role: str, source: str, gates: list,
         return False
     if not _gate(gates, "预言腔负向", not any(k in spine for k in _PREDICT_KW), spine[:24]):
         return False
-    if source not in ("self_story", "manual"):  # 交付/投喂线的靶形态是续集与反差，判词词根不适用
-        if not _gate(gates, "判词词根", any(k in spine for k in _JUDGE_KW), spine[:24]):
-            return False
     cov = _coverage_of(role)
     floor = _COVER_RANK.get(str(settings.coverage_min or "job_wide"), 1)
     if not _gate(gates, "覆盖面闸", _COVER_RANK.get(cov, 0) >= max(floor, 1),
