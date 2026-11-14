@@ -42,34 +42,29 @@ _FALLBACK_HTML = """<!doctype html>
 
 
 def _bootstrap_admin() -> None:
-    """首次启动引导：无任何用户时创建租户「示例工作室」+ 管理员账号。
+    """首次启动引导：无任何用户时创建工作室档案 + 单管理员 admin。
     初始密码随机生成并打印到日志一次，首登强制改密；
     验收隔离实例可用 CS_BOOTSTRAP_PASSWORD 指定确定性口令。"""
     from .auth import hash_password
     from .models import Tenant, User
 
-    # 安装参数（SaaS 产品化）：租户名/管理员可经 env 覆盖，默认给中性示例值
-    bt_tenant = os.environ.get("CS_BOOTSTRAP_TENANT") or "示例工作室"
-    bt_admin = os.environ.get("CS_BOOTSTRAP_ADMIN") or "admin"
-    bt_credits = int(os.environ.get("CS_BOOTSTRAP_CREDITS") or 100000)
-
     with Session(engine) as s:
         if s.exec(select(User)).first() is not None:
             return
-        tenant = Tenant(name=bt_tenant, credits=bt_credits)
+        tenant = Tenant(name="示例工作室")
         s.add(tenant)
         s.commit()
         s.refresh(tenant)
         password = os.environ.get("CS_BOOTSTRAP_PASSWORD") or secrets.token_urlsafe(8)
-        u = User(tenant_id=tenant.id, username=bt_admin,
+        u = User(tenant_id=tenant.id, username="admin",
                  password_hash=hash_password(password), role="platform_admin",
-                 display_name=bt_tenant, status="active", must_change_password=False)
+                 display_name="示例工作室", status="active", must_change_password=False)
         s.add(u)
         s.commit()
         if os.environ.get("CS_BOOTSTRAP_PASSWORD"):
-            print(f"[bootstrap] 管理员已创建：用户名 {bt_admin} / 密码取 CS_BOOTSTRAP_PASSWORD（验收模式）")
+            print("[bootstrap] 管理员已创建：用户名 admin / 密码取 CS_BOOTSTRAP_PASSWORD（验收模式）")
         else:
-            print(f"[bootstrap] 管理员已创建：用户名 {bt_admin} / 初始密码 {password}（首次登录请修改）")
+            print(f"[bootstrap] 管理员已创建：用户名 admin / 初始密码 {password}（首次登录请修改）")
 
 
 @asynccontextmanager

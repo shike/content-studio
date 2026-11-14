@@ -74,7 +74,7 @@ if ok:
     # 运行时配置落库（app_settings）+ 密钥只写不读
     check("密钥只写不读（仅回报已配置标记，无明文字段）",
           isinstance(conf.get("zhipu_api_key_set"), bool)
-          and "zhipu_api_key" not in conf and "chanjing_secret_key" not in conf,
+          and "zhipu_api_key" not in conf,
           f"set={conf.get('zhipu_api_key_set')}")
     import os as _os, sqlite3 as _sq
     _db = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),

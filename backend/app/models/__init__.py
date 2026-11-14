@@ -133,11 +133,11 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
 
 
 class Tenant(TimestampMixin, table=True):
-    """租户（单用户版退化为「工作室档案」）：承载名称与品牌九字段。credits 字段保留兼容历史数据，产品已无积分概念（2026-10-27）。"""
+    """租户（单用户版退化为「工作室档案」）：承载名称与品牌九字段。
+    credits 列已废（积分概念拆除）：模型不再声明，生产库旧列原地保留，新库不再建列。"""
     __tablename__ = "tenants"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = ""
-    credits: int = Field(default=0)  # 共享积分池（1 积分 = ¥0.01 成本锚点）
     status: str = Field(default="active", index=True)  # active | disabled
     brand: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 租户品牌/人设：栏目名、署名、人设描述（SaaS 产品化，2026-09-30）
 

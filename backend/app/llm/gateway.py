@@ -33,7 +33,7 @@ def is_configured() -> bool:
     return bool(active()["key"])
 
 
-# 全局 LLM 并发闸（2026-10-07）：直调端点（知识图解/海报/物料包标签/ping）不入任务队列，
+# 全局 LLM 并发闸：直调端点（ping/generate-image 等）不入任务队列，
 # 也没有任何并发限制——信号量统一收编全部 LLM 调用（队列任务同样过闸，heavy 本就串行无感）
 _LLM_SEM: Optional[asyncio.Semaphore] = None
 _LLM_CONCURRENCY = 2
