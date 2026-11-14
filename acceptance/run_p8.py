@@ -139,6 +139,43 @@ if llm_ready:
                   code == 200 and sc.get("account_type") == "persona" and len(vs) == 1
                   and bool((vs[0] or {}).get("hook")), f"code={code}, versions={len(vs)}")
 
+section("P8 · 实测打假（R1.4③）")
+check("falsify_hunt 执行器已注册", "falsify_hunt" in _executors)
+code, d = request("POST", "/api/falsify",
+                  body={"claim": f"P8 实测主张 {os.urandom(2).hex()}", "target": "某 AI 课",
+                        "evidence_note": "P8 线索：朋友圈刷屏"})
+check("手动添加清单 201（pending）", code == 201 and d.get("id") and d.get("status") == "pending",
+      f"code={code}, {str(d)[:80]}")
+fid = d.get("id")
+code, d = request("POST", f"/api/falsify/{fid}/compose")
+check("未实测不可成稿 409（没有实测事实=编造）", code == 409, f"code={code}")
+code, d = request("PUT", f"/api/falsify/{fid}", body={"status": "scripted"})
+check("scripted 不可手写 400（由成稿动作写入）", code == 400, f"code={code}")
+code, d = request("PUT", f"/api/falsify/{fid}", body={"status": "testing"})
+check("状态推进 实测中", code == 200 and d.get("status") == "testing", f"code={code}")
+_note = ("P8 实测结论：报名后为录播合集，号称一对一答疑不存在；7 天接单 0 单，"
+         "可用流程 2 个均为公开教程内容")
+code, d = request("PUT", f"/api/falsify/{fid}", body={"status": "tested", "result_note": _note})
+check("结论回填+已实测", code == 200 and d.get("status") == "tested"
+      and "一对一答疑不存在" in (d.get("result_note") or ""), f"code={code}")
+if llm_ready:
+    from runner import poll_job as _pjF
+    code, d = request("POST", f"/api/falsify/{fid}/compose")
+    check("实测稿成稿受理 202（独立模板）", code == 202 and d.get("script_id") and d.get("job_id"),
+          f"code={code}, {str(d)[:80]}")
+    if d.get("job_id"):
+        _done = _pjF(d["job_id"], timeout=900)
+        check("实测稿生成完成", (_done or {}).get("status") == "succeeded",
+              f"status={(_done or {}).get('status')}, err={str((_done or {}).get('error'))[:80]}")
+        code, sc = request("GET", f"/api/scripts/{d.get('script_id')}")
+        _vs = sc.get("versions") or []
+        check("实测稿契约（persona/一版/钩子非空）",
+              code == 200 and sc.get("account_type") == "persona" and len(_vs) == 1
+              and bool((_vs[0] or {}).get("hook")), f"code={code}, versions={len(_vs)}")
+else:
+    code, d = request("POST", f"/api/falsify/{fid}/compose")
+    check("实测稿成稿受理 202（无 key 只验契约）", code == 202, f"code={code}")
+
 section("P8 · 热点雷达整合（2026-10-30：话题雷达并入 trending，独立雷达面退役）")
 code, d = request("GET", "/api/radar")
 check("独立雷达端点已退役 404（功能并入热点雷达）", code == 404, f"code={code}")

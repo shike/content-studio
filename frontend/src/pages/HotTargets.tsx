@@ -32,6 +32,25 @@ interface CardJudge {
 
 interface CardGate { gate: string; pass: boolean; detail: string }
 
+interface FalsifyItem {
+  id: number
+  claim: string
+  target: string
+  evidence_note: string
+  result_note: string
+  status: string // pending | testing | tested | scripted | dismissed
+  auto_source: boolean
+  script_id?: number | null
+  created_at: string
+}
+
+const FSTATUS: Record<string, { label: string; cls: string }> = {
+  pending: { label: '待实测', cls: 'bg-slate-100 text-slate-600' },
+  testing: { label: '实测中', cls: 'bg-amber-100 text-amber-800' },
+  tested: { label: '已实测', cls: 'bg-emerald-100 text-emerald-700' },
+  scripted: { label: '已成稿', cls: 'bg-sky-100 text-sky-700' },
+}
+
 interface TopicCard {
   id: number
   batch_date: string
@@ -82,12 +101,17 @@ function sourceTag(c: TopicCard) {
 export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => void }) {
   const [cards, setCards] = useState<TopicCard[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
-  const [chip, setChip] = useState<'draft' | 'approved' | 'jail'>('draft')
+  const [fitems, setFitems] = useState<FalsifyItem[]>([])
+  const [chip, setChip] = useState<'draft' | 'approved' | 'jail' | 'falsify'>('draft')
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [fExpanded, setFExpanded] = useState<number | null>(null)
+  const [fForm, setFForm] = useState({ evidence_note: '', result_note: '' })
   const [form, setForm] = useState({ hook: '', spine: '', angle: ANGLES[0] })
   const [seedOpen, setSeedOpen] = useState(false)
   const [seedText, setSeedText] = useState('')
   const [seedUrl, setSeedUrl] = useState('')
+  const [fAddOpen, setFAddOpen] = useState(false)
+  const [fNew, setFNew] = useState({ claim: '', target: '', evidence_note: '' })
   const [msg, setMsg] = useState('')
   const [booted, setBooted] = useState(false)
   const [factoryBusy, setFactoryBusy] = useState(false)
@@ -98,9 +122,13 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
 
   const load = useCallback(async () => {
     try {
-      const d = await api<{ items: TopicCard[]; counts: Record<string, number> }>('/cards?limit=200')
+      const [d, f] = await Promise.all([
+        api<{ items: TopicCard[]; counts: Record<string, number> }>('/cards?limit=200'),
+        api<{ items: FalsifyItem[] }>('/falsify?limit=200'),
+      ])
       setCards(d.items || [])
       setCounts(d.counts || {})
+      setFitems(f.items || [])
       setError('')
     } catch (e) {
       setError(apiErrText(e))
@@ -184,12 +212,52 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const revive = (c: TopicCard) =>
     guard(async () => { await api(`/cards/${c.id}/revive`, { method: 'POST' }); await load() })
 
-  const list = cards.filter((c) => c.status === chip)
+  /** 实测打假：添加 / 状态推进+结论回填 / 成稿 / 不做 */
+  const addF = () =>
+    guard(async () => {
+      await api('/falsify', {
+        method: 'POST',
+        body: JSON.stringify({ claim: fNew.claim.trim(), target: fNew.target.trim(), evidence_note: fNew.evidence_note.trim() }),
+      })
+      setFAddOpen(false)
+      setFNew({ claim: '', target: '', evidence_note: '' })
+      setMsg('已进待实测清单 ✓')
+      await load()
+    })
+
+  const updateF = (f: FalsifyItem, patch: { status?: string; result_note?: string; evidence_note?: string }) =>
+    guard(async () => {
+      await api(`/falsify/${f.id}`, { method: 'PUT', body: JSON.stringify(patch) })
+      setMsg(patch.status === 'tested' ? '已实测 ✓ 可成稿' : '')
+      await load()
+    })
+
+  const composeF = (f: FalsifyItem) =>
+    guard(async () => {
+      const d = await api<{ job_id: number; script_id: number }>(`/falsify/${f.id}/compose`, { method: 'POST' })
+      setExpanded(null)
+      setMsg(`实测稿已受理（脚本 #${d.script_id}，任务 #${d.job_id}）——进内容看板待定稿`)
+      await load()
+    })
+
+  const dismissF = (f: FalsifyItem) =>
+    guard(async () => { await api(`/falsify/${f.id}/dismiss`, { method: 'POST' }); await load() })
+
+  const openF = (f: FalsifyItem) => {
+    const next = fExpanded === f.id ? null : f.id
+    setFExpanded(next)
+    setFForm({ evidence_note: f.evidence_note || '', result_note: f.result_note || '' })
+  }
+
+  const activeF = fitems.filter((f) => f.status !== 'dismissed')
+  const fList = activeF
+  const cList = cards.filter((c) => c.status === chip)
   const draftN = counts.draft || cards.filter((c) => c.status === 'draft').length
   const chips: [typeof chip, string, number][] = [
     ['draft', '待备稿', counts.draft || 0],
     ['approved', '已备稿', counts.approved || 0],
     ['jail', `已拦·可捞`, counts.jail || 0],
+    ['falsify', '实测打假', activeF.length],
   ]
 
   if (!booted) return <div className="text-sm text-slate-400">载入靶子卡…</div>
@@ -239,7 +307,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
         {chips.map(([k, label, n]) => (
           <button key={k}
             className={`rounded-full px-3 py-1 font-medium ${chip === k ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-            onClick={() => { setChip(k); setExpanded(null) }}>
+            onClick={() => { setChip(k); setExpanded(null); setFExpanded(null) }}>
             {label} <span className="num-serif">{n}</span>
           </button>
         ))}
@@ -247,7 +315,111 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
 
-      {list.length === 0 ? (
+      {chip === 'falsify' && (
+        <div className="mt-3">
+          <button className="btn-ghost btn-sm" disabled={!!busy} onClick={() => setFAddOpen(!fAddOpen)}>
+            + 添加可疑主张
+          </button>
+          {fAddOpen && (
+            <div className="mt-2 rounded-2xl border border-violet-200 bg-violet-50/50 p-4 space-y-2">
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-[13px] outline-none focus:border-violet-400"
+                value={fNew.claim} maxLength={60}
+                placeholder="要打的主张（例：某课号称 7 天学会接单）"
+                onChange={(e) => setFNew((v) => ({ ...v, claim: e.target.value }))} />
+              <div className="flex items-center gap-2">
+                <input className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-1.5 text-[12.5px] outline-none focus:border-violet-400"
+                  value={fNew.target} maxLength={40} placeholder="实测对象（例：某 AI 课）"
+                  onChange={(e) => setFNew((v) => ({ ...v, target: e.target.value }))} />
+                <button className="btn-accent btn-sm shrink-0" disabled={!fNew.claim.trim() || !!busy} onClick={addF}>进清单</button>
+                <button className="btn-ghost btn-sm shrink-0" onClick={() => setFAddOpen(false)}>取消</button>
+              </div>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-[12.5px] outline-none focus:border-violet-400"
+                value={fNew.evidence_note} placeholder="线索/链接（可选）"
+                onChange={(e) => setFNew((v) => ({ ...v, evidence_note: e.target.value }))} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {chip === 'falsify' ? (
+        fList.length === 0 ? (
+          <div className="mt-8">
+            <EmptyState icon={Crosshair} title="实测清单是空的"
+              desc="把你想打假的对象一句话投进来；工场每天也会自动猎取候选（只猎一人可实测验证的：买得起、用得上、跑得完）。" />
+          </div>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {fList.map((f) => {
+              const st = FSTATUS[f.status] || { label: f.status, cls: 'bg-slate-100 text-slate-500' }
+              const exp = fExpanded === f.id
+              return (
+                <div key={f.id} className={`rounded-2xl border bg-white transition ${exp ? 'border-emerald-300 shadow-sm' : 'border-[#E8ECF0]'}`}>
+                  <div className="cursor-pointer px-4 py-3" onClick={() => openF(f)}>
+                    <div className="flex items-center gap-2">
+                      {exp ? <ChevronDown size={15} className="shrink-0 text-slate-400" />
+                        : <ChevronRight size={15} className="shrink-0 text-slate-400" />}
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${st.cls}`}>{st.label}</span>
+                      {f.auto_source && (
+                        <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700" title="工场自动猎取">工场猎取</span>
+                      )}
+                      <span className="hidden shrink-0 text-xs text-slate-400 sm:inline">{relTime(f.created_at || '')}</span>
+                    </div>
+                    <div className="mt-1 pl-6">
+                      <div className="truncate text-[14.5px] font-bold leading-snug text-slate-900">{f.claim}</div>
+                      {f.target && <div className="truncate text-[12.5px] text-slate-500">实测对象：{f.target}</div>}
+                    </div>
+                  </div>
+                  {exp && (
+                    <div className="border-t border-[#E8ECF0] px-4 py-4 space-y-3">
+                      <div>
+                        <div className="text-[11px] tracking-wide text-slate-400">线索/链接（可补记）</div>
+                        <textarea className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-[12.5px] outline-none focus:border-emerald-400"
+                          rows={2} value={fForm.evidence_note}
+                          onChange={(e) => setFForm((v) => ({ ...v, evidence_note: e.target.value }))} />
+                      </div>
+                      <div>
+                        <div className="text-[11px] tracking-wide text-slate-400">实测结论（过程+关键数字=成稿论据；没实测别填）</div>
+                        <textarea className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-[12.5px] outline-none focus:border-emerald-400"
+                          rows={3} value={fForm.result_note}
+                          onChange={(e) => setFForm((v) => ({ ...v, result_note: e.target.value }))} />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {f.status === 'pending' && (
+                          <button className="btn-ghost btn-sm" disabled={!!busy}
+                            onClick={(e) => { e.stopPropagation(); updateF(f, { status: 'testing' }) }}>开始实测</button>
+                        )}
+                        {(f.status === 'pending' || f.status === 'testing') && (
+                          <button className="btn-accent btn-sm" disabled={!!busy || !fForm.result_note.trim()}
+                            onClick={(e) => { e.stopPropagation(); updateF(f, { status: 'tested', result_note: fForm.result_note, evidence_note: fForm.evidence_note }) }}>
+                            记完结论（已实测）
+                          </button>
+                        )}
+                        {f.status === 'tested' && (
+                          <>
+                            <button className="btn-accent btn-sm" disabled={!!busy}
+                              onClick={(e) => { e.stopPropagation(); composeF(f) }}>成稿（实测稿模板）</button>
+                            <button className="btn-ghost btn-sm" disabled={!!busy}
+                              onClick={(e) => { e.stopPropagation(); updateF(f, { result_note: fForm.result_note }) }}>保存结论</button>
+                          </>
+                        )}
+                        {f.status === 'scripted' ? (
+                          <button className="btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); onNavigate('p_content') }}>去内容看板 →</button>
+                        ) : (
+                          <button className="btn-ghost btn-sm flex items-center gap-1 text-slate-500" disabled={!!busy}
+                            onClick={(e) => { e.stopPropagation(); dismissF(f) }}><X size={13} /> 不做</button>
+                        )}
+                        {f.status === 'tested' && !f.result_note.trim() && (
+                          <span className="text-[11px] text-orange-600">结论为空不可成稿（没有实测事实=编造）</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      ) : cList.length === 0 ? (
         <div className="mt-8">
           {chip === 'jail' ? (
             <EmptyState icon={Crosshair} title="弃卡池是空的" desc="法官判废的卡会落在这里 7 天——你可以翻案捞回，你的判断盖过法官。" />
@@ -260,7 +432,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
         </div>
       ) : (
         <div className="mt-4 space-y-2">
-          {list.map((c) => {
+          {cList.map((c) => {
             const exp = expanded === c.id
             const src = sourceTag(c)
             const spice = SPICE[c.spice] || null

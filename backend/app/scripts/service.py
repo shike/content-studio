@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Script, ScriptTemplate, Topic, TopicCard
+from ..models import FalsifyItem, Script, ScriptTemplate, Topic, TopicCard
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
@@ -79,7 +79,24 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         card = s.get(TopicCard, int(payload["card_id"])) if payload.get("card_id") else None
         if payload.get("card_id") and card is None:
             raise RuntimeError(f"card {payload['card_id']} 不存在")
-        if card is not None:
+        falsify = (s.get(FalsifyItem, int(payload["falsify_item_id"]))
+                   if payload.get("falsify_item_id") else None)
+        if payload.get("falsify_item_id") and falsify is None:
+            raise RuntimeError(f"falsify item {payload['falsify_item_id']} 不存在")
+        if falsify is not None:
+            # 实测打假稿（R1.4③）：result_note=唯一事实来源，没实测的环节一个字不许编
+            topic_info = {
+                "title": falsify.claim[:60],
+                "angle": "",
+                "audience": "both",
+                "pain_points": [],
+                "hooks": [],
+                "claim": falsify.claim,
+                "target": falsify.target,
+                "evidence": (falsify.result_note or "")[:1500],
+                "spice": "high",
+            }
+        elif card is not None:
             # 靶子卡备稿（选题工场 R1.4）：钩子/主线由卡带（备稿时可被用户改写），spice 辣度入通道
             topic_info = {
                 "title": str(payload.get("hook") or card.hook)[:60],
@@ -137,25 +154,41 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                     if account_type == "leadgen"
                     else "。本条面向【人设号】：结尾判断之外允许带一句自然的关注/合集引导（软引导 2026-11-02 放开），"
                          "仍禁评论区扣字/私信领取/卖课导流")
-    if card is not None:
-        # 三段纪律（PRD R2.1 选题工场口径）：开场逐字用钩子/中段单判断论证主线且主线不出口/收尾不复述
-        discipline_mode = "靶子卡备稿·三段纪律（硬规则）"
+    if falsify is not None:
+        # 实测打假稿三段纪律（PRD R1.4③）：钩子=实测结果数字/中段=复盘只准用实测事实/判词落证据
+        discipline_mode = "实测打假稿·三段纪律（硬规则）"
         card_discipline = (
-            f"- 开场（前 3 秒）：**逐字使用钩子**「{payload.get('hook') or card.hook}」——最多 2 个字的口语化微调，"
-            "禁换成话题引入/悬念式开场；钩子里的观点必须完整说出\n"
-            f"- 中段：只论证主线「{payload.get('spine') or card.spine}」，单判断推进，一切案例与数字为它服务；"
-            "**主线这句话本身禁止出现在正文里**（不进台词、不进字幕、不进收尾点题——它是写作纪律，不是台词）\n"
-            "- 结尾：自然收束停在最有力的判断上；**禁止复述主线、禁止「总结一下」式收尾**"
+            "- 开场（前 3 秒）：**钩子直接报实测结果数字/结论**——从「实测信息」里挑最狠的一个数字或事实"
+            "一句话砸出来；观点说清+抓人，禁悬念、禁铺垫、禁背景介绍\n"
+            "- 中段：**实测过程复盘**——时间线+「宣称 vs 实际」数字对比；只准使用「实测信息」里的真实事实，"
+            "没实测过的环节一个字不许编\n"
+            "- 判词落在实测证据上：结论必须被你的数据撑住；结尾自然收束，禁引导话术"
         )
+        prompt = render("falsify_script", LENGTH=length_spec,
+                        MY_STYLE=build_my_style(use_style),
+                        PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
+                        DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline,
+                        EVIDENCE=json.dumps(topic_info, ensure_ascii=False))
     else:
-        discipline_mode = "常规备稿"
-        card_discipline = "- 开场按上方「口播结构」硬规则（前 3 秒直接甩判断或喊话受众）；主切角以 angle 字段为准"
-    prompt = render("script_generate", LENGTH=length_spec,
-                    MY_STYLE=build_my_style(use_style),
-                    ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
-                    PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
-                    ACCOUNT_MODE=account_mode,
-                    DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline)
+        if card is not None:
+            # 三段纪律（PRD R2.1 选题工场口径）：开场逐字用钩子/中段单判断论证主线且主线不出口/收尾不复述
+            discipline_mode = "靶子卡备稿·三段纪律（硬规则）"
+            card_discipline = (
+                f"- 开场（前 3 秒）：**逐字使用钩子**「{payload.get('hook') or card.hook}」——最多 2 个字的口语化微调，"
+                "禁换成话题引入/悬念式开场；钩子里的观点必须完整说出\n"
+                f"- 中段：只论证主线「{payload.get('spine') or card.spine}」，单判断推进，一切案例与数字为它服务；"
+                "**主线这句话本身禁止出现在正文里**（不进台词、不进字幕、不进收尾点题——它是写作纪律，不是台词）\n"
+                "- 结尾：自然收束停在最有力的判断上；**禁止复述主线、禁止「总结一下」式收尾**"
+            )
+        else:
+            discipline_mode = "常规备稿"
+            card_discipline = "- 开场按上方「口播结构」硬规则（前 3 秒直接甩判断或喊话受众）；主切角以 angle 字段为准"
+        prompt = render("script_generate", LENGTH=length_spec,
+                        MY_STYLE=build_my_style(use_style),
+                        ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
+                        PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
+                        ACCOUNT_MODE=account_mode,
+                        DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline)
     # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
     ctx.set_progress(20, "生成精品脚本（单版全预算）")
     data = await gateway.complete_json(

@@ -64,6 +64,9 @@ const TYPE_NAMES: Record<string, string> = {
   article_style_extract: '文风提取',
   creator_data_scan: '账号指标回流',
   video_weekly_report: '视频周报',
+  card_daily: '选题工场',
+  card_seed: '手动投喂成卡',
+  falsify_hunt: '实测候选猎取',
 }
 
 // 用户可见三态（2026-10-12 引擎统一）：failed+next_retry_at=退避中（属"进行中"）

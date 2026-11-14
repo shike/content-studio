@@ -107,6 +107,16 @@ def _gate(gates: list, gate: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+async def _hunt_safe(ctx: JobContext, tenant_id: int, meta: dict) -> None:
+    """尾段实测候选猎取（失败不拦落卡——猎取是增益不是产线）。"""
+    try:
+        from ..falsify import service as _ff
+        r = await _ff.hunt_candidates(ctx, tenant_id)
+        meta["hunted"] = r.get("hunted", 0)
+    except Exception as e:  # noqa: BLE001
+        meta["hunt_error"] = f"{type(e).__name__}: {str(e)[:80]}"
+
+
 def _kw_hit(text: str) -> bool:
     low = text.lower()
     return any(k.lower() in low for k in _DOMAIN_KW)
@@ -459,7 +469,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
             secondary=True, external={"src": "外站五路", "title": str(x.get("title") or "")[:60]})})
         meta["external"] += 1
     if not pools:
-        ctx.set_progress(100, "今日池子空（四层进料全空或全被闸），诚实空过")
+        await _hunt_safe(ctx, tenant_id, meta)
+        ctx.set_progress(100, f"今日池子空，诚实空过（实测候选 +{meta.get('hunted', 0)}）")
         return {"cards": 0, "jail": 0, "pools": 0, "meta": meta, "radar_notes": radar_notes}
 
     # ── 车间二：主线锻造 + 主线闸 ──
@@ -485,7 +496,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     print(f"[cards] 车间二：{len(pools)} 池 → {len(survivors)} 过主线闸")
 
     if not survivors:
-        ctx.set_progress(100, "今日无卡（全部未过主线闸），诚实空过")
+        await _hunt_safe(ctx, tenant_id, meta)
+        ctx.set_progress(100, f"今日无卡（全部未过主线闸），诚实空过（实测候选 +{meta.get('hunted', 0)}）")
         return {"cards": 0, "jail": 0, "pools": len(pools), "meta": meta,
                 "radar_notes": radar_notes}
 
@@ -523,7 +535,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     meta["hook_gate_fails"] = hook_fails[:10]
     print(f"[cards] 车间三：{len(survivors)} 主线 → {len(hooked)} 过三秒闸")
     if not hooked:
-        ctx.set_progress(100, "今日无卡（全部未过三秒闸），诚实空过")
+        await _hunt_safe(ctx, tenant_id, meta)
+        ctx.set_progress(100, f"今日无卡（全部未过三秒闸），诚实空过（实测候选 +{meta.get('hunted', 0)}）")
         return {"cards": 0, "jail": 0, "pools": len(pools), "meta": meta,
                 "radar_notes": radar_notes}
 
@@ -597,7 +610,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
                 s.add(c)
                 n_superseded += 1
         s.commit()
-    ctx.set_progress(100, f"完成：{len(draft_ids)} 张靶子卡进箱（jail {n_jail}，替代 {n_superseded} 张旧卡）")
+    await _hunt_safe(ctx, tenant_id, meta)
+    ctx.set_progress(100, f"完成：{len(draft_ids)} 张靶子卡进箱（jail {n_jail}，替代 {n_superseded} 张旧卡，实测候选 +{meta.get('hunted', 0)}）")
     return {"cards": len(draft_ids), "jail": n_jail, "superseded": n_superseded,
             "pools": len(pools), "meta": meta, "radar_notes": radar_notes}
 

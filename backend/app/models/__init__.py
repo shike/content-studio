@@ -123,6 +123,23 @@ class TopicCard(TenantScoped, TimestampMixin, table=True):
     script_id: Optional[int] = None  # 备稿后回填（与 scripts.card_id 双向锚）
 
 
+class FalsifyItem(TenantScoped, TimestampMixin, table=True):
+    """实测打假清单（PRD R1.4③，2026-11-14 定版）：实测是物理动作，系统只管清单与成稿。
+
+    result_note=实测结论自由文本（过程+关键数字），是成稿的唯一事实来源——
+    没回填结论不可成稿（没有实测事实的打假稿=编造）。"""
+    __tablename__ = "falsify_items"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    claim: str = ""       # 要打的主张一句话（≤60）
+    target: str = ""      # 实测对象（≤40：某课/某工具/某说法）
+    evidence_note: str = ""  # 线索/链接（自由文本）
+    result_note: str = ""    # 实测结论（自由文本）
+    status: str = Field(default="pending", index=True)  # pending|testing|tested|scripted|dismissed
+    auto_source: bool = Field(default=False)  # hunt 自动猎取 vs 手动添加
+    script_id: Optional[int] = None  # 成稿后回填（与 scripts.falsify_item_id 双向锚）
+
+
 class ResearchReport(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "research_reports"
     tenant_id: int = Field(default=0, index=True)
@@ -206,6 +223,7 @@ class Script(TenantScoped, TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     topic_id: Optional[int] = Field(default=None, foreign_key="topics.id", index=True)
     card_id: Optional[int] = Field(default=None, foreign_key="topic_cards.id", index=True)  # 靶子卡备稿（选题工场 R1.4）
+    falsify_item_id: Optional[int] = Field(default=None, foreign_key="falsify_items.id", index=True)  # 实测稿备稿（R1.4③）
     versions: list = Field(default_factory=list, sa_column=Column(JSON))
     final_text: str = ""
     teleprompter_text: str = ""
