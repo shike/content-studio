@@ -36,6 +36,14 @@ def _status() -> dict:
         "watch_scan_hour": settings.watch_scan_hour,
         "dissect_comment_min": settings.dissect_comment_min,
         "dissect_digg_min": settings.dissect_digg_min,
+        "pool_peer_min_comments": settings.pool_peer_min_comments,
+        "hook_speed_cps": settings.hook_speed_cps,
+        "hook_ban_prefixes": settings.hook_ban_prefixes,
+        "coverage_min": settings.coverage_min,
+        "judge_pass_line": settings.judge_pass_line,
+        "daily_card_limit": settings.daily_card_limit,
+        "jail_window_days": settings.jail_window_days,
+        "pool_pick_max": settings.pool_pick_max,
         "managed_keys": sorted(MANAGED),  # 可在本页修改的键（前端按需展示）
     }
     st.update(stored_secret_state())  # *_set 状态（密钥明文绝不回传）
@@ -61,6 +69,15 @@ class UpdateIn(BaseModel):
     watch_scan_hour: int | None = None
     dissect_comment_min: int | None = None  # 拆解闸：评论≥N 自动拆（2026-11-11）
     dissect_digg_min: int | None = None     # 拆解闸：赞≥N 自动拆
+    # 选题工场参数（R1.4，2026-11-14）
+    pool_peer_min_comments: int | None = None  # 一手池子线：监控号评论≥N
+    hook_speed_cps: int | None = None          # 三秒口径语速（字/秒），字数线=3×此值
+    hook_ban_prefixes: str | None = None       # 钩子/主线开头词根黑名单（逗号分隔）
+    coverage_min: str | None = None            # 覆盖面最低档 boss/middle/job_wide
+    judge_pass_line: int | None = None         # 法官三维过线值（1-10）
+    daily_card_limit: int | None = None        # 每日进靶子箱上限
+    jail_window_days: int | None = None        # 弃卡池可捞窗口（天）
+    pool_pick_max: int | None = None           # 二手外站精选上限
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
 
@@ -115,6 +132,19 @@ def update_settings(body: UpdateIn) -> dict:
             if not 0 <= v <= 100000:
                 raise HTTPException(400, detail=f"拆解闸{label}必须是 0~100000 的整数")
             values[key] = v
+    for key in ("pool_peer_min_comments", "hook_speed_cps", "judge_pass_line",
+                "daily_card_limit", "jail_window_days", "pool_pick_max"):
+        v = getattr(body, key)
+        if v is not None:
+            if not 1 <= v <= 100000:
+                raise HTTPException(400, detail=f"{key} 必须是 1~100000 的整数")
+            values[key] = v
+    if body.coverage_min is not None:
+        if body.coverage_min not in ("boss", "middle", "job_wide"):
+            raise HTTPException(400, detail="coverage_min 可选：boss/middle/job_wide（job_narrow 恒拦）")
+        values["coverage_min"] = body.coverage_min
+    if body.hook_ban_prefixes is not None:
+        values["hook_ban_prefixes"] = body.hook_ban_prefixes.strip()
     # 密钥项：空串=清除
     for key in ("zhipu_api_key",):
         v = getattr(body, key)
