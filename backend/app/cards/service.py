@@ -181,11 +181,18 @@ async def _llm_pick(menu_text: str, persona: str, audience_note: str) -> list[di
     return [x for x in (data.get("picks") or []) if isinstance(x, dict) and x.get("title")]
 
 
-async def _llm_forge(pools: list[dict], persona: str, audience_note: str) -> dict[int, dict]:
-    pool_inputs = [{"i": i, "source": p["source"],
-                    "由头": (p["pool"].get("heat_evidence") or "")[:60],
-                    "域内证据": (p["pool"].get("domain_evidence") or "")[:60]}
-                   for i, p in enumerate(pools, 1)]
+async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
+                     spines_hint: Optional[dict[int, dict]] = None) -> dict[int, dict]:
+    pool_inputs = []
+    for i, p in enumerate(pools, 1):
+        row = {"i": i, "source": p["source"],
+               "由头": (p["pool"].get("heat_evidence") or "")[:60],
+               "域内证据": (p["pool"].get("domain_evidence") or "")[:60]}
+        h = (spines_hint or {}).get(i)
+        if h:  # 修复循环：上一版原句 + 死因，逼模型砍到位
+            row["上一版"] = h.get("spine") or ""
+            row["上次被拒原因"] = h.get("last_fail") or ""
+        pool_inputs.append(row)
     data = await gateway.complete_json(
         [{"role": "system", "content": render(
             "spine_forge", PERSONA=persona, AUDIENCE_NOTE=audience_note,
@@ -196,10 +203,40 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str) -> dic
             and str(x.get("spine") or "").strip()} if isinstance(data, dict) else {}
 
 
+async def _forge_with_retry(pools: list[dict], persona: str, audience_note: str,
+                            meta: Optional[dict] = None) -> dict[int, dict]:
+    """锻主线 + 修复循环 ×1：字数线是最高频死因（模型半句话天然 16~18 字），
+    超线的带原句与死因重锻一次——法律不放宽，逼模型砍虚词。"""
+    forged = await _llm_forge(pools, persona, audience_note)
+    redo_hint: dict[int, dict] = {}
+    for i, p in enumerate(pools, 1):
+        f = forged.get(i)
+        if not f:
+            continue
+        sp = str(f.get("spine") or "").strip()
+        n = _pron_len(sp)
+        if n > _max_chars():
+            redo_hint[i] = {"spine": sp,
+                            "last_fail": f"{n} 字超线（线 {_max_chars()}），必须砍到 {_max_chars()} 字以内"}
+    if redo_hint:
+        print(f"[cards] 车间二修复循环：{len(redo_hint)} 条超线重锻")
+        forged2 = await _llm_forge(pools, persona, audience_note, spines_hint=redo_hint)
+        for k, v in forged2.items():
+            if k in redo_hint:
+                forged[k] = v
+        if meta is not None:
+            meta["forge_retry"] = len(redo_hint)
+    return forged
+
+
 async def _llm_cast(items: list[dict], persona: str, audience_note: str) -> dict[int, dict]:
-    spine_inputs = [{"i": it["i"], "spine": it.get("spine") or "", "role": it.get("role") or "",
-                     "由头": (it["pool"].get("heat_evidence") or "")[:50]}
-                    for it in items]
+    spine_inputs = []
+    for it in items:
+        row = {"i": it["i"], "spine": it.get("spine") or "", "role": it.get("role") or "",
+               "由头": (it["pool"].get("heat_evidence") or "")[:50]}
+        if it.get("last_fail"):  # 修复循环：带上一次死因，模型针对性改写
+            row["上次被拒原因"] = it["last_fail"][:80]
+        spine_inputs.append(row)
     data = await gateway.complete_json(
         [{"role": "system", "content": render(
             "hook_cast", PERSONA=persona, AUDIENCE_NOTE=audience_note,
@@ -322,8 +359,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     from datetime import timedelta as _td
 
     from ..tenant_brand import audience_note_of, brand_of
-    from .hotlist import (fetch_aihot_hot, fetch_baidu_hot, fetch_douyin_hot,
-                          fetch_github_hot, fetch_tech_news, fetch_zhihu_hot)
+    from ..topics.hotlist import (fetch_aihot_hot, fetch_baidu_hot, fetch_douyin_hot,
+                                  fetch_github_hot, fetch_tech_news, fetch_zhihu_hot)
 
     tenant_id = payload.get("tenant_id") or 1
     persona = brand_of(tenant_id)["persona"]
@@ -427,10 +464,11 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
 
     # ── 车间二：主线锻造 + 主线闸 ──
     ctx.set_progress(48, f"车间二：主线锻造（{len(pools)} 个池子）")
-    forged = await _llm_forge(pools, persona, audience_note)
+    forged = await _forge_with_retry(pools, persona, audience_note, meta)
     video_norms = [_norm(t) for t in _published_titles() if t]
     seen_spine_norms: list[str] = []
     survivors: list[dict] = []
+    spine_fails: list[str] = []
     for i, p in enumerate(pools, 1):
         f = forged.get(i)
         if not f:
@@ -441,6 +479,9 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
             survivors.append({"i": i, "source": p["source"], "pool": p["pool"],
                               "spine": str(f.get("spine") or "").strip(),
                               "forged": f, "gates": gates})
+        else:
+            spine_fails.append(next((g["detail"] for g in gates if not g["pass"]), "?"))
+    meta["spine_gate_fails"] = spine_fails[:10]
     print(f"[cards] 车间二：{len(pools)} 池 → {len(survivors)} 过主线闸")
 
     if not survivors:
@@ -448,17 +489,38 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         return {"cards": 0, "jail": 0, "pools": len(pools), "meta": meta,
                 "radar_notes": radar_notes}
 
-    # ── 车间三：钩子铸造 + 三秒闸 ──
+    # ── 车间三：钩子铸造 + 三秒闸（失败带死因修复重铸一次，只在失败时多花一次调用）──
     ctx.set_progress(70, f"车间三：钩子铸造（{len(survivors)} 条主线，few-shot=拆解库高分句式）")
     cast = await _llm_cast(survivors, persona, audience_note)
     hooked: list[dict] = []
+    hook_fails: list[str] = []
+    retry_items: list[dict] = []
     for it in survivors:
         h = cast.get(it["i"])
         if not h:
+            hook_fails.append(f"#{it['i']} 钩子空回卷")
             continue
+        pre = len(it["gates"])
         if _hook_gate(str(h.get("hook") or ""), it["gates"], it.get("spine") or ""):
             it["hook"] = str(h["hook"]).strip()
             hooked.append(it)
+        else:
+            fail = next((g["detail"] for g in it["gates"][pre:] if not g["pass"]), "?")
+            hook_fails.append(f"#{it['i']} {fail}")
+            retry_items.append({**it, "last_fail": fail})
+    if retry_items:
+        print(f"[cards] 车间三修复循环：{len(retry_items)} 条带死因重铸")
+        cast2 = await _llm_cast(retry_items, persona, audience_note)
+        for it in retry_items:
+            h = cast2.get(it["i"])
+            if not h:
+                continue
+            if _hook_gate(str(h.get("hook") or ""), it["gates"], it.get("spine") or ""):
+                it["hook"] = str(h["hook"]).strip()
+                hooked.append(it)
+            else:
+                hook_fails.append(f"#{it['i']} 重铸仍拒")
+    meta["hook_gate_fails"] = hook_fails[:10]
     print(f"[cards] 车间三：{len(survivors)} 主线 → {len(hooked)} 过三秒闸")
     if not hooked:
         ctx.set_progress(100, "今日无卡（全部未过三秒闸），诚实空过")
@@ -555,7 +617,7 @@ async def card_seed(ctx: JobContext, payload: dict) -> dict:
         domain="", heat=f"手动投喂｜{text[:100]}", level="待法官判定",
         external={"src": "手动投喂", "title": text[:60]})}
     ctx.set_progress(20, "锻主线")
-    forged = await _llm_forge([pool_entry], persona, audience_note)
+    forged = await _forge_with_retry([pool_entry], persona, audience_note)
     f = forged.get(1)
     gates: list = []
     if not f:
