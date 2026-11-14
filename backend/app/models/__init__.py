@@ -116,6 +116,7 @@ class TopicCard(TenantScoped, TimestampMixin, table=True):
     spine: str = ""  # 主线半句话（单判断；台词里禁止出现）
     hook: str = ""   # 三秒钩子（≤3秒×语速口径字数线，观点说清+抓人）
     spice: str = ""  # low | mid | high（辣度不设限，如实标注，传生成端）
+    takeaways: list = Field(default_factory=list, sa_column=Column(JSON))  # 评论要点（主线原料留痕：从高赞评论提炼的大众关注点，可检验）
     judge: dict = Field(default_factory=dict, sa_column=Column(JSON))
     gates: list = Field(default_factory=list, sa_column=Column(JSON))
     status: str = Field(default="draft", index=True)
@@ -159,6 +160,7 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
     stats: dict = Field(default_factory=dict, sa_column=Column(JSON))
     transcript: str = ""
     analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    top_comments: list = Field(default_factory=list, sa_column=Column(JSON))  # 高赞评论原文 [{t,d}]（拆解时抓取存档——评论区=观点的矿脉，R1.4 进料）
     media_path: str = ""
     quality_score: float = 0.0  # 内容热度分 0~10（评论/2+赞/60 封顶 10，_heat_score 2026-11-11 定版）
     account_type: str = Field(default="persona")  # persona(人设) | leadgen(获客)——拆解 prompt 分叉依据

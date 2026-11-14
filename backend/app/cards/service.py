@@ -217,13 +217,31 @@ def _spine_static_fail(spine: str, source: str) -> Optional[str]:
     return None
 
 
+def _norm_takeaways(x) -> list[str]:
+    """评论要点留痕清洗（程序只清形不判品味）：≤3 条、每条 ≤40 字。"""
+    if not isinstance(x, list):
+        return []
+    out = [str(t or "").strip()[:40] for t in x]
+    return [t for t in out if t][:3]
+
+
 async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
                      spines_hint: Optional[dict[int, dict]] = None) -> dict[int, dict]:
     pool_inputs = []
     for i, p in enumerate(pools, 1):
+        dy = p["pool"].get("douyin_evidence") or {}
         row = {"i": i, "source": p["source"],
                "由头": (p["pool"].get("heat_evidence") or "")[:60],
                "域内证据": (p["pool"].get("domain_evidence") or "")[:60]}
+        if dy.get("digest"):
+            row["拆解要点"] = str(dy["digest"])[:80]
+        top = [c for c in (dy.get("top") or []) if isinstance(c, dict)
+               and str(c.get("t") or "").strip()]
+        if top:  # 高赞评论原文=观点的矿脉（R1.4 进料）：先抽评论要点，主线从要点里长出来
+            row["高赞评论"] = [f"「{str(c.get('t') or '').strip()[:60]}」（赞{max(0, int(c.get('d') or 0))}）"
+                               for c in top]
+        if p["source"] == "manual":
+            row["备注"] = "手动投喂：用户已拍板的题，必须锻出主线，不许跳过"
         h = (spines_hint or {}).get(i)
         if h:  # 修复循环：上一版原句 + 死因，逼模型砍到位
             row["上一版"] = h.get("spine") or ""
@@ -234,10 +252,14 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
             "spine_forge", PERSONA=persona, AUDIENCE_NOTE=audience_note,
             MAX_CHARS=str(_max_chars()), SPINE_SHOTS=_spine_shots(),
             POOLS=json.dumps(pool_inputs, ensure_ascii=False))}],
-        max_tokens=2000, thinking="disabled")
-    return {int(x["i"]): x for x in (data.get("cards") or [])
-            if isinstance(x, dict) and str(x.get("i") or "").isdigit()
-            and str(x.get("spine") or "").strip()} if isinstance(data, dict) else {}
+        max_tokens=4000, thinking="disabled")  # 4000：takeaways 并入输出预留头位（台账规则：初值待实测×2 校准）
+    out: dict[int, dict] = {}
+    if isinstance(data, dict):
+        for x in (data.get("cards") or []):
+            if (isinstance(x, dict) and str(x.get("i") or "").isdigit()
+                    and str(x.get("spine") or "").strip()):
+                out[int(x["i"])] = {**x, "takeaways": _norm_takeaways(x.get("takeaways"))}
+    return out
 
 
 async def _forge_with_retry(pools: list[dict], persona: str, audience_note: str,
@@ -360,7 +382,9 @@ def _merge_card(i: int, pool_entry: dict, forged: dict, hook: str,
     pool["coverage"] = _coverage_of(role)
     return TopicCard(batch_date=_local_day(), source=pool_entry["source"],
                      pool=pool, spine=str(forged.get("spine") or "").strip(),
-                     hook=hook.strip(), spice=spice, gates=gates, status="draft")
+                     hook=hook.strip(), spice=spice,
+                     takeaways=list(forged.get("takeaways") or [])[:3],
+                     gates=gates, status="draft")
 
 
 # ── 车间零：雷达巡检（收编自旧 trending 内联驱动；低粉高赞自动拆解口径不变）──
@@ -426,7 +450,10 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
             domain=f"监控对标号 {b.author or '?'}（AI 落地赛道，用户精选清单）",
             heat=f"{b.author or '?'}《{b.title[:36]}》评论 {comment}（抖音实数）",
             level="高", douyin={"kind": "peer_video", "ref": b.url,
-                                "comments": comment, "diggs": int(stats.get("digg") or 0)},
+                                "comments": comment, "diggs": int(stats.get("digg") or 0),
+                                "top": [c for c in (b.top_comments or [])
+                                        if isinstance(c, dict) and str(c.get("t") or "").strip()][:12],
+                                "digest": str((b.analysis or {}).get("summary") or "")[:80]},
             peer_covered=True)})
         meta["peer"] += 1
         seen_refs.add(b.url)

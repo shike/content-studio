@@ -1,9 +1,10 @@
-"""同行拆解流水线：下载（在线）→ ASR 转写 → LLM 拆解 → 选题候选沉淀。"""
+"""同行拆解流水线：下载（在线）→ 高赞评论存档 → ASR 转写 → LLM 拆解 → 选题候选沉淀。"""
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import re
 
 from sqlmodel import Session
 
@@ -270,6 +271,63 @@ def owed_benchmarks() -> list[tuple[dict, str]]:
 register_owed("benchmark_analyze", owed_benchmarks)
 
 
+def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
+    """拆解时抓高赞评论原文（R1.4 进料 2026-11-14：评论区=观点的矿脉——大众用赞
+    投票选出的最真实反应，是主线观点的原料）。拦 comment/list XHR 免登录，
+    首屏即热序；去重后按赞数排序取前 cap 条 [{t,d}]。失败抛 RuntimeError（调用方不挡拆解）。"""
+    from playwright.sync_api import sync_playwright
+
+    from ..browser import launch, ua
+
+    m = re.search(r"video/(\d+)", video_url)
+    if not m:
+        raise RuntimeError("无法从链接解析视频 id")
+    rid = m.group(1)
+    comments: list[dict] = []
+    seen: set[str] = set()
+    with sync_playwright() as p:
+        browser = launch(p)
+        try:
+            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
+                                      viewport={"width": 1280, "height": 900})
+            page = ctx.new_page()
+
+            def on_response(resp):
+                try:
+                    if "aweme/v1/web/comment/list/" in resp.url and len(comments) < 80:
+                        d = resp.json()
+                        for c in (d.get("comments") or []):
+                            t = (c.get("text") or "").strip()
+                            if t and t not in seen:
+                                seen.add(t)
+                                comments.append({"t": t[:60], "d": int(c.get("digg_count") or 0)})
+                except Exception:  # noqa: BLE001
+                    pass
+
+            page.on("response", on_response)
+            page.goto(f"https://www.douyin.com/video/{rid}",
+                      timeout=45000, wait_until="domcontentloaded")
+            # 评论面板不保证随页面自动加载（2026-11-02 服务器实测：需一次滚动才触发
+            # comment/list），等不到就滚动唤醒，60s 截止轮询。
+            deadline = _time.monotonic() + 60
+            while not comments and _time.monotonic() < deadline:
+                page.wait_for_timeout(3000)
+                if not comments and _time.monotonic() < deadline:
+                    try:
+                        page.mouse.wheel(0, 600)
+                        page.wait_for_timeout(1500)
+                        page.mouse.wheel(0, -600)
+                    except Exception:  # noqa: BLE001
+                        break  # 页面已跳转/关闭，别空转
+            ctx.close()
+        finally:
+            browser.close()
+    if not comments:
+        raise RuntimeError("未拦到评论（评论区可能已关闭或接口未触发）")
+    comments.sort(key=lambda c: c["d"], reverse=True)
+    return comments[:cap]
+
+
 @register_executor("benchmark_analyze")
 async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     benchmark_id = payload["benchmark_id"]
@@ -309,6 +367,20 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             b.media_path = media_path
             s.add(b)
             s.commit()
+
+    # 高赞评论存档（观点的矿脉，R1.4 进料 2026-11-14）：抓取失败不挡拆解（增益不是产线）
+    if source == "douyin" and url:
+        try:
+            ctx.set_progress(30, "抓高赞评论原文（评论区=观点的矿脉）")
+            top_comments = await asyncio.to_thread(_fetch_top_comments, url)
+            with Session(engine) as s:
+                b = s.get(BenchmarkVideo, benchmark_id)
+                if b is not None:
+                    b.top_comments = top_comments
+                    s.add(b)
+                    s.commit()
+        except Exception as e:  # noqa: BLE001
+            ctx.set_progress(30, f"高赞评论抓取失败（不挡拆解）：{type(e).__name__}: {str(e)[:60]}")
 
     ctx.set_progress(45, f"ASR 转写中（{settings.asr_model}，首次运行含模型下载）")
     try:  # 内存防线：available 低于水位时显式告警（3.6G 机器 large-v3 转写曾把系统拖入 swap 颠簸）

@@ -19,7 +19,7 @@
 
 ## LLM 硬规矩（GLM Coding Plan，思考型）
 
-- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish/falsify_script｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_polish/deepread_write/adapt_reduce/adapt_revise；8000=script_finalize｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge/pool_pick/judge_cards/falsify_hunt｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract/spine_forge/hook_cast｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/ping。
+- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish/falsify_script｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_polish/deepread_write/adapt_reduce/adapt_revise；8000=script_finalize｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge/pool_pick/judge_cards/falsify_hunt/spine_forge（takeaways 并入输出 2026-11-14 实测×2 上调）｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract/hook_cast｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/ping。
 - httpx 超时 600s；验收轮询 ≥600s、脚本生成 ≥900s。空正文必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定（按量余额不足报 1113）；密钥/模型/检索走设置页运行时改（存 app_settings，.env 只留引导项）。系统不记录成本，花销看服务商控制台。
 

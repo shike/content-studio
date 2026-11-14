@@ -219,6 +219,12 @@ def _migrate(engine) -> None:
         if bmvcols and "account_type" not in bmvcols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE benchmark_videos ADD COLUMN account_type VARCHAR NOT NULL DEFAULT 'persona'"))
+        if bmvcols and "top_comments" not in bmvcols:  # 高赞评论原文存档（R1.4 进料：观点的矿脉，2026-11-14）
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE benchmark_videos ADD COLUMN top_comments JSON DEFAULT '[]'"))
+        tccols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(topic_cards)"))]
+        if tccols and "takeaways" not in tccols:  # 评论要点留痕（主线原料，2026-11-14）
+            conn.execute(sqlalchemy.text("ALTER TABLE topic_cards ADD COLUMN takeaways JSON DEFAULT '[]'"))
         wacols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_accounts)"))]
         if wacols and "account_type" not in wacols:
             conn.execute(sqlalchemy.text(

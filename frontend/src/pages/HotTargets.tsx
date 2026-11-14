@@ -59,6 +59,7 @@ interface TopicCard {
   spine: string
   hook: string
   spice: string
+  takeaways?: string[]
   judge: CardJudge
   gates: CardGate[]
   status: string // draft | approved | discarded | jail
@@ -453,12 +454,19 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
                     )}
                     <span className="hidden shrink-0 text-xs text-slate-400 sm:inline">{relTime(c.created_at || '')}</span>
                   </div>
-                  <div className="mt-1 min-w-0 pl-6">
-                    <div className="truncate text-[14.5px] font-bold leading-snug text-slate-900">
-                      {chip === 'jail' ? c.hook || '（钩子未铸）' : c.hook}
+                    <div className="mt-1 min-w-0 pl-6">
+                      <div className="truncate text-[14.5px] font-bold leading-snug text-slate-900">
+                        {chip === 'jail' ? c.hook || '（钩子未铸）' : c.hook}
+                      </div>
+                      <div className="truncate text-[12.5px] text-slate-500">主线：{c.spine}</div>
                     </div>
-                    <div className="truncate text-[12.5px] text-slate-500">主线：{c.spine}</div>
-                  </div>
+                    {(c.takeaways?.length ?? 0) > 0 && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-6" title="评论要点：主线从这些高赞评论的大众反应里长出来（可检验的原料留痕）">
+                        {c.takeaways!.map((t, ix) => (
+                          <span key={ix} className="max-w-full truncate rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">评·{t}</span>
+                        ))}
+                      </div>
+                    )}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-6">
                     {cov && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{cov}</span>}
                     {spice && <span className={`rounded-full px-2 py-0.5 text-[11px] ${spice.cls}`}>{spice.label}</span>}

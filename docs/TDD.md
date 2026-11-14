@@ -121,14 +121,14 @@ daily_card_limit / jail_window_days / pool_pick_max`（选题工场参数，2026
 | `topics` | title, angle, line(persona/leadgen 两线硬隔离), audience(boss/fde/both), source_type(idea/benchmark/manual/trending/self_story), source_ref, evidence(JSON), score, score_breakdown(JSON 仅内容评分维度), status(draft/approved/rejected/produced) | 选题库（idea/快速/拆解候选/获客线）；评分不含发布数据回流（R1.6 不做）；人设号靶子
   2026-11-14 起走 topic_cards（选题工场） |
 | `topic_cards` | batch_date, source(douyin_peer/radar/douyin_hot/external/self_story/manual),
-  pool(JSON 四证), spine, hook, spice, judge(JSON 三维+verdict+reason), gates(JSON 程序闸记录),
+  pool(JSON 四证), spine, hook, spice, takeaways(JSON 评论要点≤3条=主线原料留痕), judge(JSON 三维+verdict+reason), gates(JSON 程序闸记录),
   status(draft/approved/discarded/jail), superseded_by, script_id | 人设号靶子卡（选题工场，R1.4；
   jail=法官弃卡 7 天可捞） |
 | `falsify_items` | claim(主张≤60), target(对象≤40), evidence_note(线索自由文本),
   result_note(实测结论自由文本=成稿论据来源), status(pending/testing/tested/scripted/dismissed),
   script_id | 实测打假清单（R1.4③；实测=物理动作，系统管清单与成稿） |
 | `research_reports` | topic_id(FK), content(MD), model | idea 深研产物 |
-| `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), media_path, source(douyin/local) | 同行拆解样本 |
+| `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), top_comments(JSON 高赞评论原文[{t,d}]≤20条), media_path, source(douyin/local) | 同行拆解样本 |
 | `self_videos` | url, aweme_id, title, transcript, style_analysis(JSON), analyzed_at, published_at, duration, stats(JSON) | 我的账号视频 + 逐条风格标注（R9.2） |
 | `account_metrics_daily` | tenant_id, date, fans/new_fans/cancel_fans, profile_views, play, digg, comment, share, account_search, post_search | 自有账号日级运营指标（创作者中心 overview 回流，按日列合并不整行覆盖；每日 4 点轻活，kill switch=creator_data_enabled）（R9.7） |
 | `video_weekly_reports` | tenant_id, week_start, report(JSON) | 视频表现周报（质量分=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3；LLM 解读按周缓存）（R9.8） |
@@ -217,6 +217,10 @@ article:    pending（直出链建稿）──► generating ──► draft ─
 - 流程：待定夺行评论缺失时先 `downloader.probe_video_stats` 补探（每条一次页开，60s 截止）→ 闸判定 → 过线 approved 并排队 `benchmark_analyze`；不过线标 **ignored 保留行**（notes 记判定理由，页面上可见，手动 approve 可强制拆）；探测失败按赞线单判并如实注「评论?」。
 - 覆盖三条自动路径：watch_scan 新增行、watch_scan 存量 pending 清扫、话题雷达自动拆解（同一 `auto_dissect_rows` 入口，无旁路）。
 - `quality_score` 热度分 = `评论/2 + 赞/60` 封顶 10，公式与闸线同源透明；闸判定时回写。
+- **高赞评论存档**（2026-11-14）：`benchmark_analyze` 下载后拦 `aweme/v1/web/comment/list/`
+  XHR（免登录；评论面板需一次滚动唤醒，60s 截止轮询——2026-11-02 服务器实测）抓首屏热序
+  评论，去重按赞排序取 top20（`[{t≤60字, d=赞数}]`）落 `benchmark_videos.top_comments`；
+  抓取失败不挡拆解（评论是增益不是产线）。此存档是选题工场主线观点的唯一矿脉（见 §6）。
 
 ### 选题工场（人设号靶子卡，R1.4——2026-11-14 三原则定版）
 
@@ -234,9 +238,13 @@ article:    pending（直出链建稿）──► generating ──► draft ─
   （spike 速度）；抖音榜→池子卡。二手精选（pool_pick 1 次 LLM ≤`pool_pick_max`(8) 条，
   产 domain_evidence）。**池子闸（程序）**：域内证据非空（词根表兜底）/coverage≠job_narrow/
   一手免检热度、二手挂 secondary。对标圈素材禁当靶子（纪律不变）。
-- **车间二·主线锻造**（spine_forge 1 次 LLM）：每池子卡产 {spine, role, spice}，纪律=单判断/
-  主语=受众角色（公司事件只当论据）/可争议。**主线闸（程序）**：15 字线+14 天撞车
-  （归一化 vs 近两周已产卡+已发脚本标题）+批内去重。
+- **车间二·主线锻造**（spine_forge 1 次 LLM，max_tokens 4000）：输入=由头/域内证据＋
+  **拆解要点＋高赞评论原文**（douyin_evidence.top ≤12 条带赞数；无评论的池子只有 60 字截断
+  →素材薄可跳过，manual 投喂必须锻出）。每池子卡产 {spine, takeaways, role, spice}：
+  先从评论原文抽**评论要点**（大众最强烈的关注点/痛感，≤3 条留痕卡上可检验，提炼不是编造）→
+  主线从要点长出来（**共鸣**=替大众说狠 / **错位**=顶大众读法说；检验=必须是评论区里没人
+  说出来的那句话，复述评论原文=废）。纪律=单判断/主语=受众角色（公司事件只当论据）/可争议。
+  **主线闸（程序）**：15 字线+14 天撞车（归一化 vs 近两周已产卡+已发脚本标题）+批内去重。
 - **车间三·钩子铸造**（hook_cast 1 次 LLM）：每主线产 1 钩子，prompt 附拆解库近 30 天高分
   钩子样本作 few-shot（向被抖音验证过的句式靠）。**三秒闸（程序）**：15 字线+劝告/悬念/引入
   词根表（`hook_ban_prefixes` 可编辑）。
@@ -262,7 +270,8 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 维度；spice 辣度随卡传入生成端（辣度不设限落生成通道）。
 
 **prompt 四件**（替代旧三件）：pool_pick / spine_forge / hook_cast / judge_cards
-（max_tokens 初值 4000/2000/2000/4000，按实测×2 校准；占位符 render 强制校验）。
+（max_tokens 初值 4000/4000/2000/4000——spine_forge 因 takeaways 并入输出按实测×2 上调；
+按实测×2 校准；占位符 render 强制校验）。
 
 ### 实测打假（R1.4③，2026-11-14 定版 v1）
 
