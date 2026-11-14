@@ -33,16 +33,6 @@ def _validate_line(line: str) -> str:
     return line
 
 
-
-async def trending_topics(user: User = Depends(require_user)) -> dict:
-    """今日热点提炼（R1.4）：站外热点 × 画像 → 0~6 个半句话判决靶子落选题库（空过合法）。
-
-    走队列（多次 LLM+六路抓取+成色终审），产出 source_type=trending 的 draft 选题，前端轮询展示。"""
-    job = await runner.submit("trending_topics", {"tenant_id": user.tenant_id},
-                              dedup_key=f"{user.tenant_id}:trending_topics:daily")
-    return {"job_id": job.id}
-
-
 @router.post("/quick", status_code=201)
 def quick_topic(body: QuickIn) -> dict:
     """快速记选题（R1.1b）：不触发 LLM，直接入库待审。默认进人设库，可指定获客库。"""
