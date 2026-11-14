@@ -125,6 +125,8 @@ function WeeklyReportCard() {
   useEffect(load, [load])
   const videos = (rep?.videos as { title: string; play: number; score: number }[] | undefined) || []
   const top = videos.slice(0, 3)
+  const cards = (rep?.cards as { hook: string; video: string; play: number; comment: number; score: number }[] | undefined) || []
+  const cardsUnmatched = Number(rep?.cards_unmatched ?? 0)
   return (
     <div className="card mt-4 p-4">
       <div className="flex items-center justify-between">
@@ -143,6 +145,24 @@ function WeeklyReportCard() {
               <span className="num-serif shrink-0 text-slate-500">播 {v.play} · 分 {v.score}</span>
             </div>
           ))}
+        </div>
+      )}
+      {cards.length > 0 && (
+        <div className="mt-3 border-t border-zinc-100 pt-3">
+          <div className="text-xs font-medium text-zinc-500">靶子卡 → 视频表现（校准回路：哪类钩子真的成立，看这里）</div>
+          <div className="mt-1.5 space-y-1.5">
+            {cards.map((x, i) => (
+              <div key={i} className="text-[12.5px] leading-snug">
+                <span className="font-medium text-zinc-800">{x.hook}</span>
+                <span className="text-slate-300"> → </span>
+                <span className="text-zinc-600">{x.video}</span>
+                <span className="num-serif ml-1 text-slate-500">播 {x.play} · 评 {x.comment}</span>
+              </div>
+            ))}
+            {cardsUnmatched > 0 && (
+              <div className="text-[11px] text-slate-400">另有 {cardsUnmatched} 张备稿卡未匹配到已发视频（标题对不上或还没拍）</div>
+            )}
+          </div>
         </div>
       )}
       {Boolean(rep?.summary) && <SummaryText text={String(rep?.summary ?? "")} />}

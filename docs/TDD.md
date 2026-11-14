@@ -297,7 +297,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - `POST /api/style/videos/{id}/resolve` `{action}` → 风格视频人工定夺（批准拆解/忽略）
 - `POST /api/topics/cleanup-rejected` `{days=30}` → 清理 N 天前已否决选题（级联删报告/解绑脚本文章）
 - `GET /api/metrics/account?days=30` → 自有账号日级指标序列（升序，1~120 天封顶）+ 最新摘要（粉丝/净增/取关/主页访问/播放/互动/搜索）；数据源创作者中心 overview/all httpx 直连回流，每日 4 点轻活（kill switch=creator_data_enabled）（R9.7）
-- `GET /api/metrics/weekly` → 视频表现周报（按周聚合视频质量分榜=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3 + 账号日级归因「发布日 vs 停更日」；LLM 解读按周缓存；任务 video_weekly_report 每日 5 点自愈、按周幂等）（R9.8）
+- `GET /api/metrics/weekly` → 视频表现周报（按周聚合视频质量分榜=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3 + 账号日级归因「发布日 vs 停更日」；LLM 解读按周缓存；任务 video_weekly_report 每日 5 点自愈、按周幂等）（R9.8）。**校准回路（R1.4 M3，2026-11-14）**：report.cards=备稿卡↔已发视频模糊匹配对照（发布日∈[卡创建日,+14天] 且标题归一化相似 ≥0.40 或互含 ≥8 字；一卡取最高分一条）+cards_unmatched 未匹配计数——只出对照表，不回写评分（R1.6 边界内）
 
 ### 脚本工场
 - `POST /api/scripts/generate` `{topic_id | card_id, hook?, spine?, angle?}` → 202 `{script_id, job_id}`（一版精品直出，含自动打磨一轮；card_id=靶子卡备稿，三段纪律见选题工场节）

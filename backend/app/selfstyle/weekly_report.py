@@ -32,6 +32,68 @@ def video_score(play: int, digg: int, comment: int, share: int, collect: int) ->
                  + min(play / 300, 3), 1)
 
 
+def _card_matches(tenant_id: int) -> tuple[list[dict], int]:
+    """M3 校准回路（PRD R1.4）：备稿卡 ↔ 已发视频 模糊匹配 → 「靶子卡→视频表现」对照。
+
+    规则：视频发布日 ∈ [卡创建日, +14 天] 且 归一化标题 SequenceMatcher ≥0.40
+    或互相包含（≥8 字）；一卡取质量分最高的一条。R1.6 边界内：只出对照表，
+    不回写任何评分——校准由用户看表人肉判断。"""
+    import re as _re
+    from difflib import SequenceMatcher
+
+    from ..models import TopicCard
+
+    def _norm(t: str) -> str:
+        return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]", "", str(t)).lower()
+
+    with Session(engine) as s:
+        cards = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
+            TopicCard.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            TopicCard.status == "approved")).all()  # type: ignore[attr-defined]
+        vids = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
+            SelfVideo.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]
+    pubs = []
+    for v in vids:
+        st = v.stats or {}
+        play = int(st.get("play") or 0)
+        pubs.append({"title": v.title or "", "published": (v.published_at or "")[:10],
+                     "play": play, "digg": int(st.get("digg") or 0),
+                     "comment": int(st.get("comment") or 0),
+                     "share": int(st.get("share") or 0), "collect": int(st.get("collect") or 0)})
+    for v in pubs:
+        v["score"] = video_score(v["play"], v["digg"], v["comment"], v["share"], v["collect"])
+    out: list[dict] = []
+    unmatched = 0
+    for c in cards:
+        if not c.hook:
+            continue
+        cd = c.created_at.date() if c.created_at else None
+        best: dict | None = None
+        for v in pubs:
+            try:
+                vd = date.fromisoformat(v["published"])
+            except ValueError:
+                continue
+            if cd is None or not (cd <= vd <= cd + timedelta(days=14)):
+                continue
+            n1, n2 = _norm(c.hook), _norm(v["title"])
+            contain = len(n1) >= 8 and (n1 in n2 or n2 in n1)
+            if SequenceMatcher(None, n1, n2).ratio() < 0.40 and not contain:
+                continue
+            if best is None or v["score"] > best["score"]:
+                best = v
+        if best is None:
+            unmatched += 1
+            continue
+        out.append({"hook": c.hook[:30], "spine": c.spine[:30],
+                    "coverage": (c.pool or {}).get("coverage") or "",
+                    "published": best["published"], "video": best["title"][:30],
+                    "play": best["play"], "comment": best["comment"], "score": best["score"]})
+    out.sort(key=lambda x: -x["score"])
+    return out, unmatched
+
+
 def _collect(tenant_id: int, week_start: date, week_end: date) -> dict:
     week_s = week_start.isoformat()
     week_e = week_end.isoformat() + "~"  # 字符串比较含当日（发布时间到分钟）
@@ -106,6 +168,7 @@ async def build_weekly_report(tenant_id: int, force: bool = False,
         if row is not None and not force:
             return {"week": row.week_start, **(row.report or {})}
     facts = _collect(tenant_id, ws, we)
+    facts["cards"], facts["cards_unmatched"] = _card_matches(tenant_id)
     facts["summary"] = await _interpret(facts)
     with Session(engine) as s:
         row = s.exec(select(WeeklyReport).where(
