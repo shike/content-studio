@@ -11,37 +11,31 @@ import ArticleStyle from './ArticleStyle'
 import AccountTrends from './AccountTrends'
 
 /**
- * 三段式阶段页容器（2026-11-14 用户定版：监控→选题→内容，菜单即流水线）。
- * 页内 tab 承载目的地（2026-11-14 用户批准破「目的地不藏页内 tab」旧规）；
- * 带线的 tab 页头右侧渲染 人设|获客 线切换——号型是视图属性，不是菜单结构。
- * tab id 编码：`段内名` 或 `段内名:persona|leadgen`（带线 tab 的初始线）。
+ * 侧重版导航（2026-11-14 用户定版）：菜单按业务线组织，主线靠前——
+ * 人设号（主线，选题/视频稿/经营全闭环一页）→ 获客（获客矿+建稿/视频稿）→ 公众号（工场/清单/画像）
+ * → 监控（进料管理，低频垫底）。tab id 编码：`段内名` 或 `段内名:persona|leadgen`（监控页带线 tab）。
  */
 type Line = 'persona' | 'leadgen'
 
 interface TabDef {
   id: string
   label: string
-  line?: boolean  // 带线切换（人设|获客）
-  subs?: { id: string; label: string }[]  // 组内子切换（如 公众号：工场|清单|画像）
+  line?: boolean  // 带线切换（监控页两线共用）
 }
 
-function parseTab(tab: string, tabs: TabDef[]): { id: string; line: Line; sub: string } {
-  const [rawId, rest] = tab.split(':')
+function parseTab(tab: string, tabs: TabDef[]): { id: string; line: Line } {
+  const [rawId, rawLine] = tab.split(':')
   const def = tabs.find((t) => t.id === rawId) ?? tabs[0]
-  return {
-    id: def.id,
-    line: rest === 'leadgen' ? 'leadgen' : 'persona',
-    sub: def.subs ? (rest && def.subs.some((x) => x.id === rest) ? rest : def.subs[0].id) : '',
-  }
+  return { id: def.id, line: rawLine === 'leadgen' ? 'leadgen' : 'persona' }
 }
 
 function StageShell(props: {
   tabs: TabDef[]
   tab: string
   onTab: (t: string) => void
-  children: (c: { id: string; line: Line; sub: string }) => React.ReactNode
+  children: (c: { id: string; line: Line }) => React.ReactNode
 }) {
-  const { id, line, sub } = parseTab(props.tab, props.tabs)
+  const { id, line } = parseTab(props.tab, props.tabs)
   const active = props.tabs.find((t) => t.id === id) ?? props.tabs[0]
   return (
     <div>
@@ -49,7 +43,7 @@ function StageShell(props: {
         <div className="flex flex-1 flex-wrap items-center gap-1.5">
           {props.tabs.map((t) => (
             <button key={t.id}
-              onClick={() => props.onTab(t.line ? `${t.id}:${line}` : t.subs ? `${t.id}:${t.subs[0].id}` : t.id)}
+              onClick={() => props.onTab(t.line ? `${t.id}:${line}` : t.id)}
               className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${
                 id === t.id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
               }`}>
@@ -70,26 +64,68 @@ function StageShell(props: {
             ))}
           </div>
         )}
-        {(active.subs || []).length > 0 && (
-          <div className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 p-0.5">
-            {active.subs!.map((x) => (
-              <button key={x.id}
-                onClick={() => props.onTab(`${id}:${x.id}`)}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-medium transition ${
-                  sub === x.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                }`}>
-                {x.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
-      {props.children({ id, line, sub })}
+      {props.children({ id, line })}
     </div>
   )
 }
 
-/** 监控（一批人 + 一批话题）：监控号 / 话题雷达 / 拆解库 / 账号候选 */
+/** 人设号（主线）：选题 / 视频稿 / 经营——全闭环一页 */
+export function PersonaStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
+  return (
+    <StageShell tab={props.tab} onTab={props.onTab} tabs={[
+      { id: 'topics', label: '选题' },
+      { id: 'scripts', label: '视频稿' },
+      { id: 'own', label: '经营' },
+    ]}>
+      {({ id }) => (
+        <>
+          {id === 'topics' && <HotTargets onNavigate={props.onNavigate} />}
+          {id === 'scripts' && <Scripts onNavigate={props.onNavigate} accountType="persona" />}
+          {id === 'own' && <AccountTrends onNavigate={props.onNavigate} />}
+        </>
+      )}
+    </StageShell>
+  )
+}
+
+/** 获客（副线）：获客选题（获客矿+建稿） / 视频稿 */
+export function LeadgenStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
+  return (
+    <StageShell tab={props.tab} onTab={props.onTab} tabs={[
+      { id: 'topics', label: '获客选题' },
+      { id: 'scripts', label: '视频稿' },
+    ]}>
+      {({ id }) => (
+        <>
+          {id === 'topics' && <LeadgenOre onNavigate={props.onNavigate} />}
+          {id === 'scripts' && <Scripts onNavigate={props.onNavigate} accountType="leadgen" />}
+        </>
+      )}
+    </StageShell>
+  )
+}
+
+/** 公众号（副线）：工场 / 清单 / 画像 */
+export function ArticleStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
+  return (
+    <StageShell tab={props.tab} onTab={props.onTab} tabs={[
+      { id: 'workshop', label: '工场' },
+      { id: 'items', label: '清单' },
+      { id: 'style', label: '画像' },
+    ]}>
+      {({ id }) => (
+        <>
+          {id === 'workshop' && <Workshop />}
+          {id === 'items' && <ContentItems onNavigate={props.onNavigate} />}
+          {id === 'style' && <ArticleStyle />}
+        </>
+      )}
+    </StageShell>
+  )
+}
+
+/** 监控（进料管理，两线共用）：监控号 / 话题雷达 / 拆解库 / 账号候选 */
 export function MonitorStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
@@ -104,48 +140,6 @@ export function MonitorStage(props: { tab: string; onTab: (t: string) => void; o
           {id === 'radar' && <TopicInsights />}
           {id === 'bench' && <Benchmarks onNavigate={props.onNavigate} accountType={line} />}
           {id === 'cand' && <DiscoveredAccounts accountType={line} />}
-        </>
-      )}
-    </StageShell>
-  )
-}
-
-/** 选题（拍什么的唯一决策地）：人设靶子 / 获客选题（=获客矿素材流，分型路由的消费面） */
-export function TopicStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
-  return (
-    <StageShell tab={props.tab} onTab={props.onTab} tabs={[
-      { id: 'persona', label: '人设靶子' },
-      { id: 'leadgen', label: '获客选题' },
-    ]}>
-      {({ id }) => (
-        <>
-          {id === 'persona' && <HotTargets onNavigate={props.onNavigate} />}
-          {id === 'leadgen' && <LeadgenOre onNavigate={props.onNavigate} />}
-        </>
-      )}
-    </StageShell>
-  )
-}
-
-/** 内容（怎么拍+发+数据回流）：视频稿 / 公众号（工场|清单|画像）/ 经营（获客拆解=监控·拆解库获客线） */
-export function ContentStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
-  return (
-    <StageShell tab={props.tab} onTab={props.onTab} tabs={[
-      { id: 'scripts', label: '视频稿', line: true },
-      { id: 'article', label: '公众号', subs: [
-        { id: 'workshop', label: '工场' },
-        { id: 'items', label: '清单' },
-        { id: 'style', label: '画像' },
-      ] },
-      { id: 'own', label: '经营' },
-    ]}>
-      {({ id, line, sub }) => (
-        <>
-          {id === 'scripts' && <Scripts onNavigate={props.onNavigate} accountType={line} />}
-          {id === 'article' && sub === 'workshop' && <Workshop />}
-          {id === 'article' && sub === 'items' && <ContentItems onNavigate={props.onNavigate} />}
-          {id === 'article' && sub === 'style' && <ArticleStyle />}
-          {id === 'own' && <AccountTrends onNavigate={props.onNavigate} />}
         </>
       )}
     </StageShell>

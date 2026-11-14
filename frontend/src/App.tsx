@@ -1,28 +1,29 @@
 import { useEffect, useState } from 'react'
 import {
   Activity,
-  Clapperboard,
-  Crosshair,
+  Fingerprint,
   LayoutDashboard,
+  Magnet,
+  Newspaper,
   Radar,
   Settings,
 } from 'lucide-react'
 import Today from './pages/Today'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
-import { MonitorStage, TopicStage, ContentStage } from './pages/Stages'
+import { PersonaStage, LeadgenStage, ArticleStage, MonitorStage } from './pages/Stages'
 import { fetchMenuStats, menuBadges } from './counts'
 import Login from './pages/Login'
 import ForceChangePassword from './pages/ForceChangePassword'
 import Mobile from './Mobile'
 
 /**
- * 三段式导航（2026-11-14 用户定版：监控→选题→内容，菜单即流水线）：
- * 顶层 6 项=今天/监控/选题/内容/任务/设置，目的地由页内 tab 承载
- * （2026-11-14 用户批准破「目的地不藏页内 tab」旧规）。
- * 旧产线树 16 叶 + 更早 4 键经 NAVMAP 全量兼容路由（内嵌页 onNavigate 不断链）。
+ * 侧重版导航（2026-11-14 用户定版：菜单按业务线组织，主线靠前）：
+ * 顶层 7 项=今天/人设号（主线）/获客/公众号/监控/任务/设置，目的地由页内 tab 承载
+ * （用户批准破「目的地不藏页内 tab」旧规）。
+ * 旧产线树 16 叶 + 三段式 3 键 + 更早 4 键经 NAVMAP 全量兼容路由（内嵌页 onNavigate 不断链）。
  */
-export type SectionKey = 'today' | 'monitor' | 'topics' | 'content' | 'tasks' | 'settings'
+export type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'monitor' | 'tasks' | 'settings'
 
 interface NavTarget {
   key: SectionKey
@@ -31,32 +32,33 @@ interface NavTarget {
 
 /** 旧键 → 新页+页内 tab（全量兼容：产线树 16 叶 + 更早 4 键）。 */
 const NAVMAP: Record<string, NavTarget> = {
-  p_topics: { key: 'topics', tab: 'persona' },
-  l_topics: { key: 'topics', tab: 'leadgen' },
-  p_content: { key: 'content', tab: 'scripts:persona' },
-  l_scripts: { key: 'content', tab: 'scripts:leadgen' },
-  p_own: { key: 'content', tab: 'own' },
+  p_topics: { key: 'persona', tab: 'topics' },
+  l_topics: { key: 'leadgen', tab: 'topics' },
+  p_content: { key: 'persona', tab: 'scripts' },
+  l_scripts: { key: 'leadgen', tab: 'scripts' },
+  p_own: { key: 'persona', tab: 'own' },
   p_bench: { key: 'monitor', tab: 'bench:persona' },
   l_bench: { key: 'monitor', tab: 'bench:leadgen' },
   p_cand: { key: 'monitor', tab: 'cand:persona' },
   l_cand: { key: 'monitor', tab: 'cand:leadgen' },
   p_watch: { key: 'monitor', tab: 'watch:persona' },
   l_watch: { key: 'monitor', tab: 'watch:leadgen' },
-  c_items: { key: 'content', tab: 'article:items' },
-  article: { key: 'content', tab: 'article:workshop' },
-  a_style: { key: 'content', tab: 'article:style' },
+  c_items: { key: 'article', tab: 'items' },
+  article: { key: 'article', tab: 'workshop' },
+  a_style: { key: 'article', tab: 'style' },
   benchmarks: { key: 'monitor', tab: 'bench:persona' },
-  scripts: { key: 'content', tab: 'scripts:persona' },
-  articles: { key: 'content', tab: 'article:workshop' },
-  topics: { key: 'topics', tab: 'persona' },
+  scripts: { key: 'persona', tab: 'scripts' },
+  articles: { key: 'article', tab: 'workshop' },
+  topics: { key: 'persona', tab: 'topics' },
 }
 
-const BADGED = new Set<string>(['today', 'monitor', 'topics', 'content', 'tasks'])
+const BADGED = new Set<string>(['today', 'persona', 'leadgen', 'article', 'monitor', 'tasks'])
 
 const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
+  persona: 'topics',
+  leadgen: 'topics',
+  article: 'workshop',
   monitor: 'watch:persona',
-  topics: 'persona',
-  content: 'scripts:persona',
 }
 
 export default function App() {
@@ -109,7 +111,7 @@ export default function App() {
       if (t.tab) setStageTab((m) => ({ ...m, [t.key]: t.tab! }))
       return
     }
-    setActive((k as SectionKey) in DEFAULT_TAB || ['today', 'tasks', 'settings'].includes(k)
+    setActive(['today', 'persona', 'leadgen', 'article', 'monitor', 'tasks', 'settings'].includes(k)
       ? (k as SectionKey) : 'today')
   }
 
@@ -178,16 +180,18 @@ export default function App() {
             <div className="truncate text-sm font-semibold tracking-tight text-[#f0e9d5]">
               跃迁内容工作室
             </div>
-            <div className="text-[10px] text-[#9dbba9]/70">监控 · 选题 · 内容</div>
+            <div className="text-[10px] text-[#9dbba9]/70">人设号 · 获客 · 公众号</div>
           </div>
         </div>
 
         <nav className="nav-scroll flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
           {renderItem({ key: 'today', label: '今天', icon: LayoutDashboard })}
           <div className="pt-3" />
+          {renderItem({ key: 'persona', label: '人设号', icon: Fingerprint })}
+          {renderItem({ key: 'leadgen', label: '获客', icon: Magnet })}
+          {renderItem({ key: 'article', label: '公众号', icon: Newspaper })}
+          <div className="pt-3" />
           {renderItem({ key: 'monitor', label: '监控', icon: Radar })}
-          {renderItem({ key: 'topics', label: '选题', icon: Crosshair })}
-          {renderItem({ key: 'content', label: '内容', icon: Clapperboard })}
         </nav>
 
         <div className="border-t border-[rgba(240,233,213,0.1)] px-3 py-3">
@@ -200,17 +204,21 @@ export default function App() {
       <main className="h-full flex-1 overflow-y-auto">
         <div key={active} className="fade-in mx-auto max-w-7xl px-8 py-8">
           {active === 'today' && <Today onNavigate={navTo} />}
+          {active === 'persona' && (
+            <PersonaStage tab={stageTab.persona ?? DEFAULT_TAB.persona!}
+              onTab={(t) => setStageTab((m) => ({ ...m, persona: t }))} onNavigate={navTo} />
+          )}
+          {active === 'leadgen' && (
+            <LeadgenStage tab={stageTab.leadgen ?? DEFAULT_TAB.leadgen!}
+              onTab={(t) => setStageTab((m) => ({ ...m, leadgen: t }))} onNavigate={navTo} />
+          )}
+          {active === 'article' && (
+            <ArticleStage tab={stageTab.article ?? DEFAULT_TAB.article!}
+              onTab={(t) => setStageTab((m) => ({ ...m, article: t }))} onNavigate={navTo} />
+          )}
           {active === 'monitor' && (
             <MonitorStage tab={stageTab.monitor ?? DEFAULT_TAB.monitor!}
               onTab={(t) => setStageTab((m) => ({ ...m, monitor: t }))} onNavigate={navTo} />
-          )}
-          {active === 'topics' && (
-            <TopicStage tab={stageTab.topics ?? DEFAULT_TAB.topics!}
-              onTab={(t) => setStageTab((m) => ({ ...m, topics: t }))} onNavigate={navTo} />
-          )}
-          {active === 'content' && (
-            <ContentStage tab={stageTab.content ?? DEFAULT_TAB.content!}
-              onTab={(t) => setStageTab((m) => ({ ...m, content: t }))} onNavigate={navTo} />
           )}
           {active === 'tasks' && <Tasks onNavigate={navTo} />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}

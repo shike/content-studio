@@ -34,15 +34,17 @@ interface MenuStats {
   tasks: number // 在途（运行+排队+退避中/慢巡；2026-11-11 用户定版：退避中有自动重试排程，不是失败）
   failed: number // 终态失败计数（需要人看的唯一失败口径；Today 待办卡用）
   tasks_alert: number // 终态失败>0 → 徽章变红（退避中不挂红）
+  oreLeadgen: number // 获客矿素材数（获客选题行数，2026-11-14 分型路由）
 }
 
 export async function fetchMenuStats(): Promise<MenuStats> {
-  const [todo, bmP, bmL, jobs, items] = await Promise.all([
+  const [todo, bmP, bmL, jobs, items, oreL] = await Promise.all([
     fetchTodoStats(),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=persona'),
     api<{ counts: { todo: number; pending: number } }>('/benchmarks?limit=1&account_type=leadgen'),
     api<{ counts: { running: number; queued: number; failed: number; summary: { active: number; todo: number; done: number } } }>('/jobs?limit=1'),
     api<{ total: number }>('/articles/content-items?status=pending&limit=1'),
+    api<{ counts: { all: number } }>('/benchmarks?comment_kind=leadgen_ore&scan_status=all&limit=1'),
   ])
   return {
     today: todo.targetsPersona,
@@ -60,18 +62,20 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     tasks: jobs.counts.summary.active,
     failed: jobs.counts.summary.todo,
     tasks_alert: jobs.counts.summary.todo > 0 ? 1 : 0,
+    oreLeadgen: oreL.counts?.all ?? 0,
   }
 }
 
-/** 菜单徽章数字：键与三段式菜单一一对应（2026-11-14 定版）——
-监控=账号候选+拆解待定夺合计；选题=待备稿靶子+获客选题待审合计；
-内容=待定稿脚本两线+待决策稿+待改编源文合计；过程性数字不上菜单。 */
+/** 菜单徽章数字：键与侧重版菜单一一对应（2026-11-14 定版）——
+人设号（主线）=待备稿靶子+待定稿脚本；获客=获客矿数+待定稿脚本；公众号=待决策稿+待改编源文；
+监控=账号候选+拆解待定夺合计；过程性数字不上菜单。 */
 export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
   return {
     today: s.today,
+    persona: s.p_topics + s.p_content,
+    leadgen: s.oreLeadgen + s.l_scripts,
+    article: s.article + s.c_items,
     monitor: s.p_cand + s.l_cand + s.p_bench + s.l_bench,
-    topics: s.p_topics,
-    content: s.p_content + s.l_scripts + s.article + s.c_items,
     tasks: s.tasks,
     failed: s.failed,
     tasks_alert: s.tasks_alert,
