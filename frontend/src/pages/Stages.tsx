@@ -1,6 +1,6 @@
 import HotTargets from './HotTargets'
 import TopicInsights from './TopicInsights'
-import Topics from './Topics'
+import LeadgenOre from './LeadgenOre'
 import Watch from './Watch'
 import Benchmarks from './Benchmarks'
 import DiscoveredAccounts from './DiscoveredAccounts'
@@ -92,7 +92,7 @@ export function MonitorStage(props: { tab: string; onTab: (t: string) => void; o
   )
 }
 
-/** 选题（拍什么的唯一决策地）：人设靶子 / 获客选题 */
+/** 选题（拍什么的唯一决策地）：人设靶子 / 获客选题（=获客矿素材流，分型路由的消费面） */
 export function TopicStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
@@ -101,13 +101,8 @@ export function TopicStage(props: { tab: string; onTab: (t: string) => void; onN
     ]}>
       {({ id }) => (
         <>
-          {id === 'persona' && (
-            <div>
-              <HotTargets onNavigate={props.onNavigate} />
-              <div className="mt-6"><TopicInsights /></div>
-            </div>
-          )}
-          {id === 'leadgen' && <Topics accountType="leadgen" />}
+          {id === 'persona' && <HotTargets onNavigate={props.onNavigate} />}
+          {id === 'leadgen' && <LeadgenOre />}
         </>
       )}
     </StageShell>

@@ -107,10 +107,11 @@ def benchmark_authors(user: User = Depends(require_user)) -> dict:
 @router.get("/api/benchmarks")
 def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
                     analyzed: str = "", source: str = "", scan_status: str = "",
-                    account_type: str = "",
+                    account_type: str = "", comment_kind: str = "",
                     user: User = Depends(require_user)) -> dict:
     """分页 + 服务端筛选（analyzed: done|todo；source: douyin|local；
     scan_status: pending|approved|ignored；account_type: persona|leadgen；
+    comment_kind: persona_ore|leadgen_ore（评论区分型路由，获客选题页用）；
     默认返回 approved+done 的已定夺内容）。
 
     counts 为当前筛选口径（account_type 传入时按该类型统计——打法卡库页
@@ -142,6 +143,8 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
             q = q.where(BenchmarkVideo.author == author)
         if source:
             q = q.where(BenchmarkVideo.source == source)
+        if comment_kind in ("persona_ore", "leadgen_ore"):
+            q = q.where(BenchmarkVideo.comment_kind == comment_kind)  # type: ignore[attr-defined]
         rows = s.exec(q.order_by(BenchmarkVideo.id.desc())).all()  # type: ignore[attr-defined]
         if scan_status == "all":
             pass  # 显式看全部状态（Watch 展开卡：该号最近作品含待定夺）
