@@ -42,6 +42,7 @@ MANAGED: dict[str, str] = {
     "daily_card_limit": "int",        # 每日进靶子箱上限
     "jail_window_days": "int",        # 弃卡池可捞窗口（天）
     "pool_pick_max": "int",           # 二手外站精选上限
+    "pool_peer_window_hours": "int",  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
 }
 
 

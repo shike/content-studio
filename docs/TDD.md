@@ -104,7 +104,7 @@ content-studio/
 asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch_scan_hour /
 creator_data_enabled / ima_kb_enabled / dissect_comment_min / dissect_digg_min /
 pool_peer_min_comments / hook_speed_cps / hook_ban_prefixes / coverage_min / judge_pass_line /
-daily_card_limit / jail_window_days / pool_pick_max`（选题工场参数，2026-11-14）。
+daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（池子线视频新鲜窗，默认 30 小时=只吃新视频；调宽=允许存量真矿进线）`（选题工场参数，2026-11-14）。
 载入时机=启动时（init_db 之后 `settings_store.load_overrides()`）；改 ASR 模型会清进程内模型缓存。
 设置接口/页面只暴露其中一部分（模型/检索通道/扫描计划/拆解闸线/选题工场参数/采集出口），其余键直接改表。
 另有**不在受管登记内的手工配置键**（直接改 app_settings 表，随用随读）：ima 凭证三键
@@ -233,7 +233,7 @@ article:    pending（直出链建稿）──► generating ──► draft ─
 - **车间零·信号采集**（程序，0 LLM）：话题雷达巡检（收编自旧 trending 内联驱动；低粉高赞
   自动拆解同口径不变）+ 监控对标号近 24h 新视频互动实数 + 抖音热点榜 + 外站五路
   （百度/知乎/科技RSS/GitHub/AIHot）。
-- **车间一·池子构建**：一手直产（程序）——监控号新视频 **评论 ≥`pool_peer_min_comments`
+- **车间一·池子构建**：一手直产（程序）——监控号新视频（新鲜窗 `pool_peer_window_hours`(默认 30h) 内） **评论 ≥`pool_peer_min_comments`
   （默认 50，设置页可调）** 过线→池子卡（douyin_evidence=互动实数）；雷达飙升→池子卡
   （spike 速度）；抖音榜→池子卡。二手精选（pool_pick 1 次 LLM ≤`pool_pick_max`(8) 条，
   产 domain_evidence）。**池子闸（程序）**：域内证据非空（词根表兜底）/coverage≠job_narrow/

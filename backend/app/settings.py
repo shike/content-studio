@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     daily_card_limit: int = 20         # 每日进靶子箱的卡上限（用户拍板；宁缺毋滥，空过合法）
     jail_window_days: int = 7          # 法官弃卡池可捞窗口（过期物理清）
     pool_pick_max: int = 8             # 二手外站精选条数上限（一手信号不限）
+    pool_peer_window_hours: int = 30   # 池子线视频新鲜窗（小时）：只读窗口内的监控号新视频（"新视频"口径；调宽=允许存量真矿进线）
 
     @property
     def db_path(self) -> Path:

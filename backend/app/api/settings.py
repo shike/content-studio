@@ -78,6 +78,7 @@ class UpdateIn(BaseModel):
     daily_card_limit: int | None = None        # 每日进靶子箱上限
     jail_window_days: int | None = None        # 弃卡池可捞窗口（天）
     pool_pick_max: int | None = None           # 二手外站精选上限
+    pool_peer_window_hours: int | None = None  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
 

@@ -431,7 +431,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     pools: list[dict] = []  # [{source, pool}]
     meta: dict = {"peer": 0, "radar": 0, "douyin_hot": 0, "external": 0}
 
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _td(hours=30)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _td(
+        hours=max(1, int(settings.pool_peer_window_hours or 30)))
     with Session(engine) as s:
         recent_cards = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
             TopicCard.created_at >= datetime.now(timezone.utc).replace(tzinfo=None) - _td(days=14)
