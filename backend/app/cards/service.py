@@ -197,7 +197,7 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str) -> dic
 
 
 async def _llm_cast(items: list[dict], persona: str, audience_note: str) -> dict[int, dict]:
-    spine_inputs = [{"i": it["i"], "spine": it["spine"], "role": it["role"],
+    spine_inputs = [{"i": it["i"], "spine": it.get("spine") or "", "role": it.get("role") or "",
                      "由头": (it["pool"].get("heat_evidence") or "")[:50]}
                     for it in items]
     data = await gateway.complete_json(
@@ -212,8 +212,8 @@ async def _llm_cast(items: list[dict], persona: str, audience_note: str) -> dict
 
 
 async def _llm_judge(items: list[dict]) -> dict[int, dict]:
-    card_inputs = [{"i": it["i"], "source": it["source"], "spine": it["spine"],
-                    "hook": it["hook"], "coverage": it.get("coverage") or "",
+    card_inputs = [{"i": it["i"], "source": it["source"], "spine": it.get("spine") or "",
+                    "hook": it.get("hook") or "", "coverage": (it["pool"] or {}).get("coverage") or "",
                     "热度证据": (it["pool"].get("heat_evidence") or "")[:60],
                     "一手证据": bool(it["pool"].get("douyin_evidence")),
                     "peer_covered": bool(it["pool"].get("peer_covered"))}
@@ -265,15 +265,19 @@ def _spine_gate(spine: str, role: str, source: str, gates: list,
     return True
 
 
-def _hook_gate(hook: str, gates: list) -> bool:
-    """三秒闸（程序）：字数线 + 劝告/悬念/引入开头词根（hook_ban_prefixes 可编辑）。"""
+def _hook_gate(hook: str, gates: list, spine: str = "") -> bool:
+    """三秒闸（程序）：字数线 + 开头词根 + 钩子≠主线（照抄=主线出口，违反半句话原则）。"""
     hook = hook.strip()
     n = _pron_len(hook)
     if not _gate(gates, "三秒字数线", 0 < n <= _max_chars(), f"{hook[:24]}（{n} 字，线 {_max_chars()}）"):
         return False
     banned = [w.strip() for w in str(settings.hook_ban_prefixes or "").split(",") if w.strip()]
     hit = next((w for w in banned if hook.startswith(w)), "")
-    return _gate(gates, "开头词根闸", not hit, f"{hook[:24]}" + (f"（命中「{hit}」）" if hit else ""))
+    if not _gate(gates, "开头词根闸", not hit, f"{hook[:24]}" + (f"（命中「{hit}」）" if hit else "")):
+        return False
+    hn, sn = _norm(hook), _norm(spine or "")
+    same = bool(sn) and (hn == sn or (len(sn) >= 8 and (sn in hn or hn in sn)))
+    return _gate(gates, "钩子≠主线", not same, f"{hook[:24]}" + ("（照抄主线）" if same else ""))
 
 
 def _merge_card(i: int, pool_entry: dict, forged: dict, hook: str,
@@ -435,6 +439,7 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         if _spine_gate(str(f.get("spine") or ""), str(f.get("role") or ""),
                        p["source"], gates, seen_spine_norms, video_norms):
             survivors.append({"i": i, "source": p["source"], "pool": p["pool"],
+                              "spine": str(f.get("spine") or "").strip(),
                               "forged": f, "gates": gates})
     print(f"[cards] 车间二：{len(pools)} 池 → {len(survivors)} 过主线闸")
 
@@ -451,7 +456,7 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         h = cast.get(it["i"])
         if not h:
             continue
-        if _hook_gate(str(h.get("hook") or ""), it["gates"]):
+        if _hook_gate(str(h.get("hook") or ""), it["gates"], it.get("spine") or ""):
             it["hook"] = str(h["hook"]).strip()
             hooked.append(it)
     print(f"[cards] 车间三：{len(survivors)} 主线 → {len(hooked)} 过三秒闸")
@@ -564,11 +569,12 @@ async def card_seed(ctx: JobContext, payload: dict) -> dict:
     cast = await _llm_cast([{"i": 1, "spine": str(f["spine"]), "role": str(f.get("role") or ""),
                              "pool": pool_entry["pool"]}], persona, audience_note)
     h = cast.get(1)
-    if not h or not _hook_gate(str(h.get("hook") or ""), gates):
+    if not h or not _hook_gate(str(h.get("hook") or ""), gates, str(f["spine"])):
         failed = next((g["detail"] for g in gates if not g["pass"] and g["gate"] in ("三秒字数线", "开头词根闸")), "")
         raise RuntimeError(f"钩子未过闸：{failed or '空回卷'}")
     ctx.set_progress(85, "法官终审")
     item = {"i": 1, "source": "manual", "pool": pool_entry["pool"], "forged": f,
+            "spine": str(f["spine"]).strip(),
             "hook": str(h["hook"]).strip(), "gates": gates}
     judged = await _llm_judge([item])
     j = judged.get(1) or {}
