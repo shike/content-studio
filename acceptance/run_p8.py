@@ -78,9 +78,11 @@ if llm_ready:
     check("切角落库（0~6 条 trending 选题，空过合法）", 0 <= len(ids) <= 6, f"ids={ids}")
     if ids:
         code, t = request("GET", f"/api/topics/{ids[0]}", timeout=30)
-        check("切角选题结构（trending + hotspot 切角证据）",
+        # evidence.hotspot 死副本已删（2026-11-14，唯一消费方就是本断言）；
+        # 现契约=半句话靶子 target.context（前端 HotTargets 实际读取的证据字段）
+        check("切角选题结构（trending + 半句话靶子证据）",
               code == 200 and t.get("source_type") == "trending"
-              and (t.get("evidence") or {}).get("hotspot"),
+              and str((t.get("evidence") or {}).get("target", {}).get("context") or "").strip(),
               f"source_type={t.get('source_type')}")
 else:
     code, d = request("POST", "/api/topics/trending", body={})
