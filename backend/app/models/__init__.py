@@ -161,6 +161,8 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
     transcript: str = ""
     analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
     top_comments: list = Field(default_factory=list, sa_column=Column(JSON))  # 高赞评论原文 [{t,d}]（拆解时抓取存档——评论区=观点的矿脉，R1.4 进料）
+    comment_kind: str = Field(default="")  # 评论区分型：persona_ore(人设矿)|leadgen_ore(获客矿，求学打卡型→归获客线)；''=未采评论未分型
+    comment_leadgen_share: float = Field(default=0.0)  # 求学密度 0~1（求学词根命中占比，分型依据留痕）
     media_path: str = ""
     quality_score: float = 0.0  # 内容热度分 0~10（评论/2+赞/60 封顶 10，_heat_score 2026-11-11 定版）
     account_type: str = Field(default="persona")  # persona(人设) | leadgen(获客)——拆解 prompt 分叉依据

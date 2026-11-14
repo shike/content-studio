@@ -26,6 +26,8 @@ interface Benchmark {
   hot?: boolean
   digg?: number | null
   quality_score?: number
+  comment_kind?: string
+  comment_leadgen_share?: number
   account_type?: string
 }
 
@@ -276,6 +278,18 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
                     )}
                     {b.account_type === 'persona' && (
                       <span className="badge shrink-0 bg-sky-50 text-sky-700">人设</span>
+                    )}
+                    {b.comment_kind === 'leadgen_ore' && (
+                      <span className="badge shrink-0 bg-violet-100 text-violet-700"
+                        title={`评论区求学打卡占比 ${Math.round((b.comment_leadgen_share ?? 0) * 100)}%——判获客矿，素材归获客线`}>
+                        获客矿 {Math.round((b.comment_leadgen_share ?? 0) * 100)}%
+                      </span>
+                    )}
+                    {b.comment_kind === 'persona_ore' && (
+                      <span className="badge shrink-0 bg-emerald-50 text-emerald-700"
+                        title={`评论区求学打卡占比 ${Math.round((b.comment_leadgen_share ?? 0) * 100)}%——判人设矿，供靶子卡抽角度`}>
+                        人设矿
+                      </span>
                     )}
                     {(b.quality_score ?? 0) > 0 && (
                       <span className={`badge shrink-0 ${(b.quality_score ?? 0) >= 6 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}

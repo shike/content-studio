@@ -240,7 +240,13 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
         if top:  # 高赞评论原文=观点的矿脉（R1.4 进料）：先抽评论要点，主线从要点里长出来
             row["高赞评论"] = [f"「{str(c.get('t') or '').strip()[:60]}」（赞{max(0, int(c.get('d') or 0))}）"
                                for c in top]
-        if p["source"] == "manual":
+        if dy.get("kind") == "study_meta":
+            pct = int(round(float(dy.get("study_share") or 0) * 100))
+            row["备注"] = (f"求学现象卡：此池评论区约 {pct}% 是求资料/学习打卡。"
+                           "唯一可用角度=对「大家都在求学」这个现象本身立立场"
+                           "（示范：「开口就问考证的，我不收徒」——筛选立场）；"
+                           "禁止把求资料内容当观点素材；锻不出立场判词就跳过该池")
+        elif p["source"] == "manual":
             row["备注"] = "手动投喂：用户已拍板的题，必须锻出主线，不许跳过"
         h = (spines_hint or {}).get(i)
         if h:  # 修复循环：上一版原句 + 死因，逼模型砍到位
@@ -442,16 +448,24 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         peer_rows = s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
             BenchmarkVideo.created_at >= cutoff)).all()  # type: ignore[attr-defined]
     peer_min = max(1, int(settings.pool_peer_min_comments or 50))
+    routed_leadgen = []  # 求学型评论区视频（获客矿）——元角度口子的候选
     for b in peer_rows:
         stats = b.stats or {}
         comment = int(stats.get("comment") or 0)
         if comment < peer_min or not b.title or b.url in seen_refs:
+            continue
+        if (b.comment_kind or "") == "leadgen_ore":
+            # 分型路由（R1.4）：求学型评论区=获客需求信号，归获客线，人设号不吃；
+            # 每批最多留 1 条做「求学现象卡」（对求学现象立立场的元角度口子，用户批准）
+            routed_leadgen.append(b)
             continue
         pools.append({"source": "douyin_peer", "pool": _pool_dict(
             domain=f"监控对标号 {b.author or '?'}（AI 落地赛道，用户精选清单）",
             heat=f"{b.author or '?'}《{b.title[:36]}》评论 {comment}（抖音实数）",
             level="高", douyin={"kind": "peer_video", "ref": b.url,
                                 "comments": comment, "diggs": int(stats.get("digg") or 0),
+                                "ore_kind": (b.comment_kind or "persona_ore"),
+                                "study_share": float(b.comment_leadgen_share or 0),
                                 "top": [c for c in (b.top_comments or [])
                                         if isinstance(c, dict) and str(c.get("t") or "").strip()][:12],
                                 "digest": str((b.analysis or {}).get("summary") or "")[:80]},
@@ -460,6 +474,23 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         seen_refs.add(b.url)
         if meta["peer"] >= 10:
             break
+    if routed_leadgen:
+        meta["peer_routed_leadgen"] = len(routed_leadgen)
+        best = max(routed_leadgen, key=lambda x: int((x.stats or {}).get("comment") or 0))
+        st = best.stats or {}
+        pools.append({"source": "douyin_peer", "pool": _pool_dict(
+            domain=f"监控对标号 {best.author or '?'}（AI 落地赛道，用户精选清单）",
+            heat=f"{best.author or '?'}《{best.title[:36]}》评论 {int(st.get('comment') or 0)}（抖音实数）",
+            level="高", douyin={"kind": "study_meta", "ref": best.url,
+                                "comments": int(st.get("comment") or 0),
+                                "diggs": int(st.get("digg") or 0),
+                                "study_share": float(best.comment_leadgen_share or 0),
+                                "top": [c for c in (best.top_comments or [])
+                                        if isinstance(c, dict) and str(c.get("t") or "").strip()][:12],
+                                "digest": str((best.analysis or {}).get("summary") or "")[:80]},
+            peer_covered=True)})
+        meta["peer_meta"] = 1
+        seen_refs.add(best.url)
 
     for sp in radar_spikes[:6]:
         key = f"radar:{sp['name']}"

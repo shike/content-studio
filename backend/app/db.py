@@ -222,6 +222,12 @@ def _migrate(engine) -> None:
         if bmvcols and "top_comments" not in bmvcols:  # 高赞评论原文存档（R1.4 进料：观点的矿脉，2026-11-14）
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE benchmark_videos ADD COLUMN top_comments JSON DEFAULT '[]'"))
+        if bmvcols and "comment_kind" not in bmvcols:  # 评论区分型路由（R1.4：求学型→获客线，2026-11-14）
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE benchmark_videos ADD COLUMN comment_kind VARCHAR DEFAULT ''"))
+        if bmvcols and "comment_leadgen_share" not in bmvcols:
+            conn.execute(sqlalchemy.text(
+                "ALTER TABLE benchmark_videos ADD COLUMN comment_leadgen_share REAL DEFAULT 0"))
         tccols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(topic_cards)"))]
         if tccols and "takeaways" not in tccols:  # 评论要点留痕（主线原料，2026-11-14）
             conn.execute(sqlalchemy.text("ALTER TABLE topic_cards ADD COLUMN takeaways JSON DEFAULT '[]'"))

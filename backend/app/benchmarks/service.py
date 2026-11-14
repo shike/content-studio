@@ -1,19 +1,21 @@
-"""同行拆解流水线：下载（在线）→ 高赞评论存档 → ASR 转写 → LLM 拆解 → 选题候选沉淀。"""
+"""同行拆解流水线：下载（在线）→ 高赞评论存档+分型路由 → ASR 转写 → LLM 拆解 → 选题候选沉淀。"""
 from __future__ import annotations
 
 import asyncio
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..asr import transcribe
 from ..db import engine
 from ..settings import settings
 from ..jobs.runner import _DEAD_ERROR_MARKERS, JobContext, register_executor, register_owed, runner
 from ..llm import gateway
-from ..models import BenchmarkVideo, Topic
+from ..models import BenchmarkVideo, Topic, WatchAccount
 from ..prompts import render
 from ..jobs.errors import CaptchaError
 from . import downloader
@@ -347,6 +349,56 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
     return comments[:cap]
 
 
+# ── 评论区分型路由（R1.4，2026-11-14 用户定规则）：求学打卡型评论区=获客需求信号 →
+#    归获客线；观点型评论区=人设号矿脉。程序词根密度判定（0 LLM，可解释可检验）──
+_STUDY_KEYWORDS = ("求带", "带带我", "求资料", "求教程", "求文档", "求源码", "求链接",
+                   "求分享", "求模板", "跪求", "怎么学", "在哪里学", "在哪学", "怎么考",
+                   "在哪里考", "在哪考", "报名", "怎么报名", "想学", "请教", "跟学",
+                   "学习", "打卡", "扣1", "扣个1")
+
+
+def _classify_comments(comments: list) -> tuple[str, float]:
+    """求学密度 → 分型（persona_ore 人设矿 | leadgen_ore 获客矿；空评论=('' ,0)）。
+    阈值=comment_leadgen_route_min（百分比，默认 60%）。词根漏判的风险方向是
+    求学误留人设线——阈值调严即可，v1 不加 LLM 复核。"""
+    texts = [str(c.get("t") or "") for c in (comments or [])
+             if isinstance(c, dict) and str(c.get("t") or "").strip()]
+    if not texts:
+        return "", 0.0
+    hits = sum(1 for t in texts if any(k in t for k in _STUDY_KEYWORDS))
+    share = round(hits / len(texts), 2)
+    line = max(1, int(settings.comment_leadgen_route_min or 60)) / 100.0
+    return ("leadgen_ore" if share >= line else "persona_ore"), share
+
+
+def _rejudge_account_type(tenant_id: int, author: str) -> Optional[str]:
+    """账号层联动：该号近 30 天已分型拆解视频（最多看 5 条）里获客矿 ≥3 →
+    account_type 自动改判 leadgen（两类号策略）。返回改判说明或 None。只改判不挪清单。"""
+    if not author:
+        return None
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    with Session(engine) as s:
+        rows = s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+            BenchmarkVideo.author == author,  # type: ignore[attr-defined]
+            BenchmarkVideo.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            BenchmarkVideo.comment_kind != "",  # type: ignore[attr-defined]
+            BenchmarkVideo.created_at >= cutoff)).all()  # type: ignore[attr-defined]
+        recent = sorted(rows, key=lambda x: x.created_at or "", reverse=True)[:5]
+        lg = sum(1 for x in recent if x.comment_kind == "leadgen_ore")
+        if len(recent) < 3 or lg < 3:
+            return None
+        acc = s.exec(select(WatchAccount).where(  # type: ignore[attr-defined]
+            WatchAccount.name == author,  # type: ignore[attr-defined]
+            WatchAccount.tenant_id == tenant_id)).first()  # type: ignore[call-overload]
+        if acc is None or acc.account_type == "leadgen":
+            return None
+        acc.account_type = "leadgen"
+        s.add(acc)
+        s.commit()
+        return (f"{author} 近 {len(recent)} 条拆解视频 {lg} 条为获客矿（求学型评论区），"
+                "账号类型已自动改判 leadgen——清单挪动请在监控清单页人工操作")
+
+
 @register_executor("benchmark_analyze")
 async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
     benchmark_id = payload["benchmark_id"]
@@ -392,12 +444,24 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         try:
             ctx.set_progress(30, "抓高赞评论原文（评论区=观点的矿脉）")
             top_comments = await asyncio.to_thread(_fetch_top_comments, url)
+            kind, share = _classify_comments(top_comments)
+            author = ""
             with Session(engine) as s:
                 b = s.get(BenchmarkVideo, benchmark_id)
                 if b is not None:
                     b.top_comments = top_comments
+                    b.comment_kind = kind
+                    b.comment_leadgen_share = share
+                    author = b.author or ""
                     s.add(b)
                     s.commit()
+            if kind == "leadgen_ore":
+                ctx.set_progress(31, f"评论区判获客矿（求学密度 {share:.0%}）——素材归获客线，人设号不吃")
+                note = _rejudge_account_type(tenant_id, author)
+                if note:
+                    ctx.set_progress(31, note)
+            else:
+                ctx.set_progress(31, f"评论区判人设矿（求学密度 {share:.0%}）")
         except Exception as e:  # noqa: BLE001
             ctx.set_progress(30, f"高赞评论抓取失败（不挡拆解）：{type(e).__name__}: {str(e)[:60]}")
 

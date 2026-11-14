@@ -104,7 +104,7 @@ content-studio/
 asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch_scan_hour /
 creator_data_enabled / ima_kb_enabled / dissect_comment_min / dissect_digg_min /
 pool_peer_min_comments / hook_speed_cps / hook_ban_prefixes / coverage_min / judge_pass_line /
-daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（池子线视频新鲜窗，默认 30 小时=只吃新视频；调宽=允许存量真矿进线）`（选题工场参数，2026-11-14）。
+daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（池子线视频新鲜窗，默认 30 小时=只吃新视频；调宽=允许存量真矿进线） / comment_leadgen_route_min（评论区分型路由阈值：求学占比≥此%判获客矿，默认 60）`（选题工场参数，2026-11-14）。
 载入时机=启动时（init_db 之后 `settings_store.load_overrides()`）；改 ASR 模型会清进程内模型缓存。
 设置接口/页面只暴露其中一部分（模型/检索通道/扫描计划/拆解闸线/选题工场参数/采集出口），其余键直接改表。
 另有**不在受管登记内的手工配置键**（直接改 app_settings 表，随用随读）：ima 凭证三键
@@ -128,7 +128,8 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
   result_note(实测结论自由文本=成稿论据来源), status(pending/testing/tested/scripted/dismissed),
   script_id | 实测打假清单（R1.4③；实测=物理动作，系统管清单与成稿） |
 | `research_reports` | topic_id(FK), content(MD), model | idea 深研产物 |
-| `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), top_comments(JSON 高赞评论原文[{t,d}]≤20条), media_path, source(douyin/local) | 同行拆解样本 |
+| `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), top_comments(JSON 高赞评论原文[{t,d}]≤20条), comment_kind(persona_ore/leadgen_ore),
+  comment_leadgen_share(求学密度0~1), media_path, source(douyin/local) | 同行拆解样本 |
 | `self_videos` | url, aweme_id, title, transcript, style_analysis(JSON), analyzed_at, published_at, duration, stats(JSON) | 我的账号视频 + 逐条风格标注（R9.2） |
 | `account_metrics_daily` | tenant_id, date, fans/new_fans/cancel_fans, profile_views, play, digg, comment, share, account_search, post_search | 自有账号日级运营指标（创作者中心 overview 回流，按日列合并不整行覆盖；每日 4 点轻活，kill switch=creator_data_enabled）（R9.7） |
 | `video_weekly_reports` | tenant_id, week_start, report(JSON) | 视频表现周报（质量分=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3；LLM 解读按周缓存）（R9.8） |
@@ -217,6 +218,11 @@ article:    pending（直出链建稿）──► generating ──► draft ─
 - 流程：待定夺行评论缺失时先 `downloader.probe_video_stats` 补探（每条一次页开，60s 截止）→ 闸判定 → 过线 approved 并排队 `benchmark_analyze`；不过线标 **ignored 保留行**（notes 记判定理由，页面上可见，手动 approve 可强制拆）；探测失败按赞线单判并如实注「评论?」。
 - 覆盖三条自动路径：watch_scan 新增行、watch_scan 存量 pending 清扫、话题雷达自动拆解（同一 `auto_dissect_rows` 入口，无旁路）。
 - `quality_score` 热度分 = `评论/2 + 赞/60` 封顶 10，公式与闸线同源透明；闸判定时回写。
+- **评论区分型路由**（2026-11-14）：采到评论立即按**求学词根密度**分型（程序 0 LLM，词表在
+  `benchmarks/_STUDY_KEYWORDS`）——占比 ≥`comment_leadgen_route_min`(60%) 判 `leadgen_ore`（获客矿：
+  素材归获客线，人设号车间一不吃；每批 ≤1 条互动最高者做「求学现象卡」=只准对求学现象立立场的
+  元角度口子，锻句备注硬约束）；否则 `persona_ore`（人设矿）。该号近 30 天已分型视频 ≥3 条且获客矿
+  ≥3 → `WatchAccount.account_type` 自动改判 leadgen（清单挪动人工）。
 - **高赞评论存档**（2026-11-14）：`benchmark_analyze` 下载后拦 `aweme/v1/web/comment/list/`
   XHR（免登录；评论面板需一次滚动唤醒，60s 截止轮询——2026-11-02 服务器实测）抓首屏热序
   评论，去重按赞排序取 top20（`[{t≤60字, d=赞数}]`）落 `benchmark_videos.top_comments`；
