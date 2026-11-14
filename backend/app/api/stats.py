@@ -46,11 +46,8 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
                                    status="open", account_type="persona")
         cand_open_leadgen = _count(s, tid, "watch_candidates",
                                    status="open", account_type="leadgen")
-        # 今日靶子（2026-11-12 方向改版=饭碗判决+一线交付）：两路进料的待备稿靶子——叶子徽章口径
-        targets_persona = (_count(s, tid, "topics", status="draft",
-                                  line="persona", source_type="trending")
-                           + _count(s, tid, "topics", status="draft",
-                                    line="persona", source_type="self_story"))
+        # 今日靶子（2026-11-14 选题工场 R1.4）：靶子卡待备稿数——叶子徽章口径
+        targets_persona = _count(s, tid, "topic_cards", status="draft")
     return {"draftTopics": draft_persona + draft_leadgen,
             "draftTopicsLeadgen": draft_leadgen,
             "targetsPersona": targets_persona,

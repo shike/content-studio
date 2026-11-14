@@ -241,6 +241,8 @@ def _migrate(engine) -> None:
         if scolsc and "account_type" not in scolsc:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE scripts ADD COLUMN account_type VARCHAR NOT NULL DEFAULT 'persona'"))
+        if scolsc and "card_id" not in scolsc:  # 选题工场：靶子卡备稿（R1.4，2026-11-14）
+            conn.execute(sqlalchemy.text("ALTER TABLE scripts ADD COLUMN card_id INTEGER"))
         # 引擎统一（2026-10-12）：parked 状态退役 → failed（next_retry_at 保留，沿退避梯子继续）
         jcols2 = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(jobs)"))]
         if jcols2 and "next_retry_at" in jcols2:

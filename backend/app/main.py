@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (articles, auth_api as auth_routes, benchmarks, stats, crawl, health, jobs, llm, metrics, tenant_api,
+from .api import (articles, auth_api as auth_routes, benchmarks, cards, stats, crawl, health, jobs, llm, metrics, tenant_api,
                   public_media, radar, schedules, scripts, settings as settings_api, style,
                   topics, watch)
 from .db import engine, init_db
@@ -22,6 +22,7 @@ from .articles import deepread as _article_deepread  # noqa: F401
 from .articles import miner as _article_kb_miner  # noqa: F401
 from .articles import adapt as _article_adapt  # noqa: F401
 from .benchmarks import service as _benchmark_service  # noqa: F401
+from .cards import service as _card_service  # noqa: F401
 from .radar import service as _radar_service  # noqa: F401
 from .scripts import service as _script_service  # noqa: F401
 from .topics import service as _topic_service  # noqa: F401
@@ -114,6 +115,7 @@ app.include_router(jobs.router, dependencies=[Depends(require_ready_user)])
 app.include_router(llm.router, dependencies=[Depends(require_ready_user)])
 app.include_router(settings_api.router, dependencies=[Depends(require_admin_dep)])
 app.include_router(topics.router, dependencies=[Depends(require_ready_user)])
+app.include_router(cards.router, dependencies=[Depends(require_ready_user)])
 app.include_router(scripts.router, dependencies=[Depends(require_ready_user)])
 app.include_router(articles.router, dependencies=[Depends(require_ready_user)])
 app.include_router(benchmarks.router, dependencies=[Depends(require_ready_user)])

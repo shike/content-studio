@@ -33,6 +33,15 @@ MANAGED: dict[str, str] = {
     "watch_scan_hour": "int",
     "dissect_comment_min": "int",  # 拆解闸：评论≥20 自动拆（2026-11-11 用户定版）
     "dissect_digg_min": "int",     # 拆解闸：赞≥300 自动拆（与评论线任一满足即可）
+    # 选题工场（PRD R1.4，2026-11-14）
+    "pool_peer_min_comments": "int",  # 一手池子线：监控号新视频评论≥此值直产池子卡
+    "hook_speed_cps": "int",          # 三秒口径语速（字/秒）；字数线=3×此值
+    "hook_ban_prefixes": "str",       # 钩子/主线开头词根黑名单（逗号分隔）
+    "coverage_min": "str",            # 覆盖面最低档（job_narrow 恒拦）
+    "judge_pass_line": "int",         # 总法官三维过线值
+    "daily_card_limit": "int",        # 每日进靶子箱上限
+    "jail_window_days": "int",        # 弃卡池可捞窗口（天）
+    "pool_pick_max": "int",           # 二手外站精选上限
 }
 
 

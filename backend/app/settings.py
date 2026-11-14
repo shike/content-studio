@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     dissect_comment_min: int = 20   # 拆解闸：评论 ≥ 此值自动拆解
     dissect_digg_min: int = 300     # 拆解闸：赞 ≥ 此值自动拆解（与评论线任一满足即可）
     search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
+    # 选题工场（PRD R1.4 三原则定版 2026-11-14；三原则=三秒钩子/半句话主线/广度×热度）
+    pool_peer_min_comments: int = 50   # 监控号一手池子线：评论 ≥ 此值直产池子卡（用户拍板，替代拆解闸 OR 线）
+    hook_speed_cps: int = 5            # 三秒口径语速（字/秒）→ 钩子/主线字数线 = 3×此值 = 15（时长是法律，字数是代理）
+    hook_ban_prefixes: str = ("建议,应该,你要,大家要,记住,千万别,一定要,最好,先,快,应,要,记得,"
+                              "试试,赶紧,需要,必须,千万,不妨,最后,今天,你知道,聊聊,说下,讲讲,话说,最近")
+    coverage_min: str = "job_wide"     # 覆盖面最低档（boss/middle/job_wide；job_narrow 恒拦——广度原则）
+    judge_pass_line: int = 7           # 总法官三维（各 1-10）的过线值，任一维低于即 kill
+    daily_card_limit: int = 20         # 每日进靶子箱的卡上限（用户拍板；宁缺毋滥，空过合法）
+    jail_window_days: int = 7          # 法官弃卡池可捞窗口（过期物理清）
+    pool_pick_max: int = 8             # 二手外站精选条数上限（一手信号不限）
 
     @property
     def db_path(self) -> Path:

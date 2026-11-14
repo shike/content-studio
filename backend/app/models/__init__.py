@@ -101,6 +101,28 @@ class Topic(TenantScoped, TimestampMixin, table=True):
     status: str = "draft"  # draft | approved | rejected | produced
 
 
+class TopicCard(TenantScoped, TimestampMixin, table=True):
+    """人设号靶子卡（选题工场，PRD R1.4 三原则定版 2026-11-14）。
+
+    一张卡四面：池子证据（pool）/主线半句话（spine，写作纪律不出口）/三秒钩子（hook，
+    观众听到的第一句）/裁决记录（gates 程序闸 + judge 法官三维与理由，可追溯）。
+    status：draft 待定夺 | approved 已备稿 | discarded 不做 | jail 法官弃卡（窗口内可捞）。"""
+    __tablename__ = "topic_cards"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    batch_date: str = Field(default="", index=True)  # YYYY-MM-DD 批次（本地自然日）
+    source: str = ""  # douyin_peer | radar | douyin_hot | external | self_story | manual
+    pool: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    spine: str = ""  # 主线半句话（单判断；台词里禁止出现）
+    hook: str = ""   # 三秒钩子（≤3秒×语速口径字数线，观点说清+抓人）
+    spice: str = ""  # low | mid | high（辣度不设限，如实标注，传生成端）
+    judge: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    gates: list = Field(default_factory=list, sa_column=Column(JSON))
+    status: str = Field(default="draft", index=True)
+    superseded_by: Optional[int] = None  # 批次替代链（当日无下游旧卡让位）
+    script_id: Optional[int] = None  # 备稿后回填（与 scripts.card_id 双向锚）
+
+
 class ResearchReport(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "research_reports"
     tenant_id: int = Field(default=0, index=True)
@@ -183,6 +205,7 @@ class Script(TenantScoped, TimestampMixin, table=True):
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
     topic_id: Optional[int] = Field(default=None, foreign_key="topics.id", index=True)
+    card_id: Optional[int] = Field(default=None, foreign_key="topic_cards.id", index=True)  # 靶子卡备稿（选题工场 R1.4）
     versions: list = Field(default_factory=list, sa_column=Column(JSON))
     final_text: str = ""
     teleprompter_text: str = ""

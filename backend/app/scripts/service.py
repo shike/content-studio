@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Script, ScriptTemplate, Topic
+from ..models import Script, ScriptTemplate, Topic, TopicCard
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
@@ -76,13 +76,28 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         if script is None:
             raise RuntimeError(f"script {script_id} 不存在")
         topic = s.get(Topic, script.topic_id) if script.topic_id else None
-        topic_info = {
-            "title": topic.title if topic else "",
-            "angle": topic.angle if topic else "",
-            "audience": topic.audience if topic else "both",
-            "pain_points": (topic.evidence or {}).get("pain_points", []) if topic else [],
-            "hooks": (topic.evidence or {}).get("hooks", []) if topic else [],
-        }
+        card = s.get(TopicCard, int(payload["card_id"])) if payload.get("card_id") else None
+        if payload.get("card_id") and card is None:
+            raise RuntimeError(f"card {payload['card_id']} 不存在")
+        if card is not None:
+            # 靶子卡备稿（选题工场 R1.4）：钩子/主线由卡带（备稿时可被用户改写），spice 辣度入通道
+            topic_info = {
+                "title": str(payload.get("hook") or card.hook)[:60],
+                "angle": str(payload.get("angle") or ""),
+                "audience": "both",
+                "pain_points": [],
+                "hooks": [str(payload.get("hook") or card.hook)[:60]],
+                "spine": str(payload.get("spine") or card.spine)[:60],
+                "spice": payload.get("spice") or card.spice or "mid",
+            }
+        else:
+            topic_info = {
+                "title": topic.title if topic else "",
+                "angle": topic.angle if topic else "",
+                "audience": topic.audience if topic else "both",
+                "pain_points": (topic.evidence or {}).get("pain_points", []) if topic else [],
+                "hooks": (topic.evidence or {}).get("hooks", []) if topic else [],
+            }
     template_id = int(payload.get("template_id") or 0)
     template = None
     if template_id:
@@ -122,11 +137,25 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                     if account_type == "leadgen"
                     else "。本条面向【人设号】：结尾判断之外允许带一句自然的关注/合集引导（软引导 2026-11-02 放开），"
                          "仍禁评论区扣字/私信领取/卖课导流")
+    if card is not None:
+        # 三段纪律（PRD R2.1 选题工场口径）：开场逐字用钩子/中段单判断论证主线且主线不出口/收尾不复述
+        discipline_mode = "靶子卡备稿·三段纪律（硬规则）"
+        card_discipline = (
+            f"- 开场（前 3 秒）：**逐字使用钩子**「{payload.get('hook') or card.hook}」——最多 2 个字的口语化微调，"
+            "禁换成话题引入/悬念式开场；钩子里的观点必须完整说出\n"
+            f"- 中段：只论证主线「{payload.get('spine') or card.spine}」，单判断推进，一切案例与数字为它服务；"
+            "**主线这句话本身禁止出现在正文里**（不进台词、不进字幕、不进收尾点题——它是写作纪律，不是台词）\n"
+            "- 结尾：自然收束停在最有力的判断上；**禁止复述主线、禁止「总结一下」式收尾**"
+        )
+    else:
+        discipline_mode = "常规备稿"
+        card_discipline = "- 开场按上方「口播结构」硬规则（前 3 秒直接甩判断或喊话受众）；主切角以 angle 字段为准"
     prompt = render("script_generate", LENGTH=length_spec,
                     MY_STYLE=build_my_style(use_style),
                     ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
                     PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
-                    ACCOUNT_MODE=account_mode)
+                    ACCOUNT_MODE=account_mode,
+                    DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline)
     # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
     ctx.set_progress(20, "生成精品脚本（单版全预算）")
     data = await gateway.complete_json(

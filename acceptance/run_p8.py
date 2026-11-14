@@ -65,29 +65,77 @@ _spec_b_all = "\n".join(v for v in spec_b.values() if isinstance(v, str))
 check("长文规格换画像产物一致（deep 规格租户无关，受众经品牌注入）",
       _spec_all == _spec_b_all)
 
-section("P8 · 今日热点选题提炼（R1.4）")
+section("P8 · 选题工场（R1.4 三原则：三秒钩子/半句话主线/广度×热度）")
+# 白盒：字数口径（时长是法律字数是代理）与三闸纯函数，无 LLM
+from app.cards import service as _cards  # noqa: E402
+check("三秒字数口径=3×语速（15 字线，无宽裕）",
+      _cards._max_chars() == 3 * max(1, int(_cards.settings.hook_speed_cps)))
+check("计长剔除标点（可发音字符口径）",
+      _cards._pron_len("小老板学AI，全是收割？") == 10)
+_g = []
+check("主线闸：窄主语被拦（广度原则，未知角色按窄处理）",
+      _cards._spine_gate("钉钉管理员早晚被取代", "钉钉管理员", "douyin_peer",
+                         _g, [], []) is False
+      and any(x["gate"] == "覆盖面闸" and not x["pass"] for x in _g), f"{_g}")
+_g2 = []
+check("主线闸：大盘角色过闸",
+      _cards._spine_gate("小老板学AI全是收割", "中小企业老板", "douyin_peer",
+                         _g2, [], []) is True, f"{_g2}")
+_g3 = []
+check("三秒闸：超线钩子被拦（>15 可发音字符）",
+      _cards._hook_gate("中小企业上AI之前必须先把这三件事写进合同条款里去", _g3) is False)
+_g4 = []
+check("三秒闸：劝告开头词根被拦",
+      _cards._hook_gate("建议老板先把AI用起来再说", _g4) is False)
+# jail 捞回/不做/投喂受理（HTTP 契约，白盒夹具不动 LLM）
+from app.db import engine as _eng  # noqa: E402
+from app.models import TopicCard as _TC  # noqa: E402
+from sqlmodel import Session as _S  # noqa: E402
+with _S(_eng) as _s:
+    _jc = _TC(tenant_id=1, batch_date="2000-01-01", source="manual", pool={},
+              spine="测试主线", hook="测试钩子", status="jail",
+              judge={"verdict": "kill", "reason": "P8 夹具"})
+    _s.add(_jc)
+    _s.commit()
+    _jid = _jc.id
+code, d = request("GET", "/api/cards/jail")
+check("弃卡池可查（jail 列表含夹具卡+法官理由在位）",
+      code == 200 and any(it["id"] == _jid and (it.get("judge") or {}).get("reason")
+                          for it in d.get("items") or []), f"code={code}")
+code, d = request("POST", f"/api/cards/{_jid}/revive")
+check("弃卡捞回（jail→draft，用户翻案盖过法官）", code == 200 and d.get("status") == "draft", f"code={code}")
+code, d = request("POST", f"/api/cards/{_jid}/discard")
+check("不做出口（draft→discarded）", code == 200 and d.get("status") == "discarded", f"code={code}")
+code, d = request("POST", "/api/cards/seed", body={"text": f"P8 投喂受理测试 {os.urandom(3).hex()}"})
+check("手动投喂受理 202（card_seed 任务）", code == 202 and bool(d.get("job_id")), f"code={code}")
+# 卡备稿→脚本全链（真实 LLM；投喂文案自带判词词根与大盘主语，降低被闸拦的概率；
+# 模型锻出不合闸的主线=如实失败也是契约行为，compose 段以 card_id 在位为前提）
 if llm_ready:
-    code, d = request("POST", "/api/topics/trending", body={})
-    check("热点提炼受理 202", code == 202 and bool(d.get("job_id")), f"code={code}, {str(d)[:80]}")
     from runner import poll_job as _pj2
-    done = _pj2(d["job_id"], timeout=420)
-    check("热点提炼任务完成", (done or {}).get("status") == "succeeded",
-          f"status={(done or {}).get('status')} err={(done or {}).get('error')}")
-    ids = ((done or {}).get("result") or {}).get("topic_ids") or []
-    # 成色终审（2026-11-13 法官闸）可能全删=诚实空过，TDD 契约明写空过合法（宁缺毋滥）
-    check("切角落库（0~6 条 trending 选题，空过合法）", 0 <= len(ids) <= 6, f"ids={ids}")
-    if ids:
-        code, t = request("GET", f"/api/topics/{ids[0]}", timeout=30)
-        # evidence.hotspot 死副本已删（2026-11-14，唯一消费方就是本断言）；
-        # 现契约=半句话靶子 target.context（前端 HotTargets 实际读取的证据字段）
-        check("切角选题结构（trending + 半句话靶子证据）",
-              code == 200 and t.get("source_type") == "trending"
-              and str((t.get("evidence") or {}).get("target", {}).get("context") or "").strip(),
-              f"source_type={t.get('source_type')}")
-else:
-    code, d = request("POST", "/api/topics/trending", body={})
-    check("热点提炼受理 202（无 key 只验契约，不轮询产出）",
-          code == 202 and bool(d.get("job_id")), f"code={code}")
+    code, d = request("POST", "/api/cards/seed",
+                      body={"text": "大量中小企业老板花几万块买的AI课其实就是收割，真正用起来的不到一成"})
+    seed_done = _pj2(d.get("job_id"), timeout=420) if d.get("job_id") else None
+    seed_st = (seed_done or {}).get("status")
+    check("投喂成卡（主线→钩子→法官链走完，或被闸如实拦下）",
+          seed_st == "succeeded" or (seed_st == "failed" and "未过闸" in str((seed_done or {}).get("error"))),
+          f"status={seed_st}, err={str((seed_done or {}).get('error'))[:80]}")
+    card_id = ((seed_done or {}).get("result") or {}).get("card_id") if seed_st == "succeeded" else None
+    if card_id:
+        code, d = request("POST", f"/api/cards/{card_id}/compose", body={"angle": "反常识判断"})
+        check("卡备稿受理 202（卡→脚本，卡转 approved）", code == 202 and d.get("script_id")
+              and d.get("job_id"), f"code={code}, {str(d)[:80]}")
+        if code == 202 and d.get("job_id"):
+            sid, jid = d["script_id"], d["job_id"]
+            code, d = request("POST", f"/api/cards/{card_id}/compose", body={"angle": "反常识判断"})
+            check("同卡在途去重 409（实体级）", code == 409, f"code={code}")
+            done = _pj2(jid, timeout=900)
+            check("卡备稿脚本完成（一版精品直出）", (done or {}).get("status") == "succeeded",
+                  f"status={(done or {}).get('status')}, err={str((done or {}).get('error'))[:80]}")
+            code, sc = request("GET", f"/api/scripts/{sid}")
+            vs = sc.get("versions") or []
+            check("卡备稿脚本契约（persona/一版/钩子非空）",
+                  code == 200 and sc.get("account_type") == "persona" and len(vs) == 1
+                  and bool((vs[0] or {}).get("hook")), f"code={code}, versions={len(vs)}")
 
 section("P8 · 热点雷达整合（2026-10-30：话题雷达并入 trending，独立雷达面退役）")
 code, d = request("GET", "/api/radar")
@@ -220,6 +268,12 @@ check("改编原创度闸：换口径写法不误伤", _r_ok <= 30, f"ratio={_r_
 check("self_story/hl_search 硬超时已配（2026-11-13 补，heavy 唯一 worker 不再被无界占用）",
       _policy_of("self_story_targets").task_timeout == 900
       and _policy_of("hl_search_matrix").task_timeout == 3600)
+check("选题工场硬超时已配（card_daily 1800/card_seed 900）",
+      _policy_of("card_daily").task_timeout == 1800 and _policy_of("card_seed").task_timeout == 900)
+check("选题工场调度在位（card_line_daily 替代 trending/self_story 两调度）",
+      {"card_line_daily"} <= {s.key for s in _sched.REGISTRY}
+      and not {"trending_daily", "self_story_daily"} & {s.key for s in _sched.REGISTRY})
+check("card_daily/card_seed 执行器已注册", "card_daily" in _executors and "card_seed" in _executors)
 check("深读线调度已下线（2026-11-13：TDD「停用中」口径落地，执行器保留回滚）",
       "article_deepread_daily" not in {s.key for s in _sched.REGISTRY})
 check("kb-topics 选题池执行器已退役（2026-11-13 用户裁决整池下线，不在执行器注册表）",
@@ -253,11 +307,12 @@ for _n in ("article_hotspots", "self_style_extract", "self_profile_update"):
 from app.prompts import load as _pload  # noqa: E402
 try:
     for _n in ("article_hotspots", "self_style_extract", "self_profile_update",
-               "article_kb_miner_eval", "benchmark_analyze", "article_title"):
+               "article_kb_miner_eval", "benchmark_analyze", "article_title",
+               "pool_pick", "spine_forge", "hook_cast", "judge_cards"):
         _pload(_n)
-    check("关键 prompt 全部可加载（含 {{GEN_LINE}}/{{AUDIENCE_NOTE}} 新占位符模板）", True)
+    check("关键 prompt 全部可加载（含选题工场四件）", True)
 except Exception as _e:  # noqa: BLE001
-    check("关键 prompt 全部可加载（含 {{GEN_LINE}}/{{AUDIENCE_NOTE}} 新占位符模板）", False, str(_e)[:120])
+    check("关键 prompt 全部可加载（含选题工场四件）", False, str(_e)[:120])
 
 
 # ---------- 租户自助品牌配置（R11.2） ----------

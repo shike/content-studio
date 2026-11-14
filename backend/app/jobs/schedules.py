@@ -243,29 +243,18 @@ register_schedule(Schedule(key="article_adapt_daily", label="源文改编成文�
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))
-async def _run_trending_daily() -> str:
+async def _run_card_line_daily() -> str:
+    """人设号选题工场（PRD R1.4 三车间五段）：进料→池子→主线→钩子→法官落卡。"""
     from .runner import runner
-    # 与 API 端点同款 dedup_key（部分唯一索引只挡活跃状态，跨天可重复）
-    job = await runner.submit("trending_topics", {"tenant_id": 1},
-                              dedup_key="1:trending_topics:daily",
+    job = await runner.submit("card_daily", {"auto": True},
+                              dedup_key=f"1:cards:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}"
+    return f"job #{job.id}（选题工场：靶子卡生产线）"
 
 
-register_schedule(Schedule(key="trending_daily", label="热点靶子·饭碗判决（抖音话题飙升 + 站外热点提炼）",
-                           daily_hour=6, run=_run_trending_daily))
-
-
-async def _run_self_story_daily() -> str:
-    from .runner import runner
-    job = await runner.submit("self_story_targets", {"tenant_id": 1},
-                              dedup_key="1:self_story_targets:daily",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}"
-
-
-register_schedule(Schedule(key="self_story_daily", label="一线交付靶子（自有口播转写挖故事）",
-                           daily_hour=6, run=_run_self_story_daily))
+# 6 点承接原 trending/self_story 两调度（2026-11-14 选题工场定版合并）
+register_schedule(Schedule(key="card_line_daily", label="人设号选题工场（靶子卡生产线）",
+                           daily_hour=6, run=_run_card_line_daily))
 
 
 async def _run_creator_data() -> str:

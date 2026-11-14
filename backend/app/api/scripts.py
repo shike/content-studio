@@ -14,7 +14,10 @@ router = APIRouter(prefix="/api/scripts")
 
 
 class GenerateIn(BaseModel):
-    topic_id: int
+    topic_id: int = 0
+    card_id: int = 0  # 靶子卡备稿（选题工场 R1.4；与 topic_id 二选一）
+    hook: str = ""    # 卡备稿可改写钩子（空=用卡上钩子）
+    spine: str = ""   # 卡备稿可改写主线（空=用卡上主线）
     use_style: bool = True  # 贴合我的风格（R9.4）
     length: str = "short"  # short=240~320字（50~70s 黄金档）| long=600~900字（PRD R2.1 两档，2026-10-09 定档）
     angles: list[str] = []  # 主打打法候选（六打法子集 ≤3 个，取最贴合的一个；空=自动挑）
@@ -37,6 +40,18 @@ class TemplateIn(BaseModel):
 
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict:
+    if body.card_id:  # 靶子卡备稿（选题工场 R1.4）：compose 单点在 cards.service
+        from ..cards.service import compose_card
+        angle = (body.angles[0].strip() if body.angles else "")
+        try:
+            return await compose_card(card_id=body.card_id, hook=body.hook,
+                                      spine=body.spine, angle=angle, user=user)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="card not found") from None
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
     with Session(engine) as s:
         topic = s.get(Topic, body.topic_id)
         if topic is None:
