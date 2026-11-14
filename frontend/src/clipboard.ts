@@ -5,7 +5,7 @@
  */
 
 /** 把根相对地址补成绝对：公众号编辑器跨域抓图，拿不到相对路径（图片会裂）。 */
-export function absolutizeMediaUrls(html: string, origin = location.origin): string {
+function absolutizeMediaUrls(html: string, origin = location.origin): string {
   return html.replace(/(src|href)="\/([^"]*)"/g,
     (_m, attr: string, path: string) => `${attr}="${origin}/${path}"`)
 }

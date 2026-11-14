@@ -1,5 +1,4 @@
 """公众号流水线 API。"""
-import asyncio
 import re
 from datetime import datetime
 
@@ -9,7 +8,6 @@ from pydantic import BaseModel
 from sqlmodel import func, or_, Session, select
 
 from ..articles.images import sign_image, valid_image_name
-from ..articles.service import find_pending_article
 from ..articles.renderer import render_wechat_html, sanitize_html
 from ..auth import require_user
 from ..db import engine
@@ -23,34 +21,8 @@ router = APIRouter(prefix="/api/articles")
 class GenerateIn(BaseModel):
     topic_id: int | None = None
     script_id: int | None = None
-    style: str = ""  # 长文风格（deep_dive/practice/viewpoint/framework/comparison/inquiry/anatomy/outlook）
+    style: str = ""  # 长文风格（deep_dive/practice/comparison/inquiry/anatomy；auto=模型按素材挑）
     length: str = "deep"  # 深度版唯一档位（2026-11-02 feed 退役；参数保留仅为兼容，服务端强制 deep）
-
-
-class DraftIn(BaseModel):
-    title: str
-    note: str = ""  # 报题备注/参考链接
-
-
-class WriteIn(BaseModel):
-    style: str = "auto"
-
-
-@router.post("/draft", status_code=201)
-def create_draft(body: DraftIn, user: User = Depends(require_user)) -> dict:
-    """报题即建长文草稿（公众号独立报题线 2026-11-02）：无选题阶段，直接进草稿箱待写。"""
-    title = body.title.strip()[:60]
-    if not title:
-        raise HTTPException(status_code=400, detail="报题一句话不能为空")
-    with Session(engine) as s:
-        dup = find_pending_article(title)
-        if dup is not None:
-            raise HTTPException(status_code=409, detail=f"同题草稿已存在（#{dup.id}）")
-        row = Article(title=title, note=body.note.strip()[:300], status="pending")
-        s.add(row)
-        s.commit()
-        s.refresh(row)
-        return row.model_dump()
 
 
 # ── 内容清单（源文改编产线，2026-11-11）──
@@ -77,14 +49,6 @@ async def mine_sources(user: User = Depends(require_user)) -> dict:
     """手动补挖：提交一批源文评估（调度每日 04:00 自动跑）。"""
     job = await runner.submit("article_kb_miner", {},
                               dedup_key=f"1:kbminer:{datetime.now():%Y%m%d}")
-    return {"job_id": job.id}
-
-
-@router.post("/adapt", status_code=202)
-async def adapt_once(user: User = Depends(require_user)) -> dict:
-    """手动改编：从清单取项成文（调度每日 05:00 自动跑）。"""
-    job = await runner.submit("article_adapt", {},
-                              dedup_key=f"1:adapt:{datetime.now():%Y%m%d}")
     return {"job_id": job.id}
 
 
@@ -206,33 +170,6 @@ def reflow_article(article_id: int, body: ReflowIn,
         return art.model_dump()
 
 
-@router.post("/{article_id}/write", status_code=202)
-async def write_draft(article_id: int, body: WriteIn,
-                      user: User = Depends(require_user)) -> dict:
-    """待写草稿 → 生成长文（深度版唯一档位）。"""
-    with Session(engine) as s:
-        article = s.get(Article, article_id)
-        if article is None:
-            raise HTTPException(status_code=404, detail="article not found")
-        if article.status == "generating":
-            raise HTTPException(status_code=409, detail="该草稿正在生成长文")
-        topic_docs = list(article.kb_doc_ids or [])
-    if topic_docs:  # 知识库选题线草稿：绑定文档全文取材，走书面语短文规格
-        job = await runner.submit("article_kb_write",
-                                  {"article_id": article_id, "kb_doc_ids": topic_docs})
-    else:
-        job = await runner.submit("article_generate",
-                                  {"article_id": article_id, "style": body.style or "auto",
-                                   "length": "deep", "kb_grounding": True})
-    with Session(engine) as s:
-        article = s.get(Article, article_id)
-        if article is not None:
-            article.status = "generating"
-            s.add(article)
-            s.commit()
-    return {"article_id": article_id, "job_id": job.id}
-
-
 @router.get("/style-summary")
 def style_summary(user: User = Depends(require_user)) -> dict:
     """公众号独立风格画像（app_settings.article_style_note）。"""
@@ -246,13 +183,6 @@ def style_summary(user: User = Depends(require_user)) -> dict:
 async def extract_style(user: User = Depends(require_user)) -> dict:
     """从已成文长文提取公众号风格画像。"""
     job = await runner.submit("article_style_extract", {})
-    return {"job_id": job.id}
-
-
-@router.post("/extract-hotspots", status_code=202)
-async def extract_hotspots(user: User = Depends(require_user)) -> dict:
-    """独立热点报题任务（手动触发；调度每晚 0:30 自动跑）：产出待写长文草稿。"""
-    job = await runner.submit("article_hotspots", {"tenant_id": user.tenant_id})
     return {"job_id": job.id}
 
 
@@ -325,36 +255,6 @@ def list_articles(status: str = "", limit: int = 50, offset: int = 0,
         counts = {st: n for st, n in s.exec(cq).all()}
         return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
 
-
-
-class GenImageIn(BaseModel):
-    caption: str = ""
-    keywords: str = ""
-
-
-@router.post("/generate-image")
-async def generate_image(body: GenImageIn) -> dict:
-    """AI 生图（智谱 CogView）：为配图位生成插画，落本地并返回访问 URL。
-
-    计费约 0.06 元/张（cogview-3-flash）；生成 URL 有时效，必须下载落盘。"""
-    if not settings.zhipu_api_key:
-        raise HTTPException(status_code=400, detail="未配置 ZHIPU_API_KEY")
-    # prompt 组装在 images.gen_image 内部（此处的 theme/prompt 死变量 2026-11-13 清除）
-    out_dir = settings.data_dir / "article_images"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    def _gen() -> dict:
-        from ..articles.images import gen_image
-
-        return gen_image(body.caption, body.keywords)
-
-    try:
-        r = await asyncio.to_thread(_gen)
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"生图失败: {str(e)[:120]}")
-    return r
 
 
 @router.get("/images/{filename}")

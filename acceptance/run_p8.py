@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P8 全量功能契约补缺：审计标出的无脚本覆盖功能，一次补齐（R1.8/R6.6/R7.3/R11.3a/X10/R5.1）。
+"""P8 全量功能契约补缺：审计标出的无脚本覆盖功能，一次补齐（R1.8/R7.3/R11.2/X10/R5.1）。
 
 对应 docs/TDD.md 各契约节。纯 API 层、标准库；热点提炼与自动透镜按 llm_ready 分流
 （有 key 实例轮询产出，无 key 实例只验受理契约，不触发 LLM 调用）。
@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from runner import check, finish, request, section, server_down, skip
+from runner import check, finish, request, section, server_down
 
 if server_down():
     sys.exit(finish("P8 功能补全"))
@@ -24,7 +24,7 @@ from app.jobs.runner import policy_of as _policy_of  # noqa: E402
 from app.jobs import schedules as _sched  # noqa: E402
 from app.benchmarks import service as _bms  # noqa: E402
 from app.articles.service import length_specs as _ls  # noqa: E402
-from app.jobs.runner import RETRY_LADDER, _ladder_delay, policy_of as _policy_of  # noqa: E402
+from app.jobs.runner import RETRY_LADDER, _ladder_delay  # noqa: E402
 from app.jobs.runner import _EXECUTORS as _executors  # noqa: E402
 
 class _FakeRow:  # effective_hour 只读 key/hour
@@ -56,11 +56,11 @@ finally:
     _bms._CAPTCHA_FAILS.clear()
 # feed 档已退役（2026-11-02，其 {{WHO}} 受众插槽随之消亡）；deep 唯一档位的受众个性化
 # 走 PERSONA/品牌注入，规格本身租户无关——契约=占位符全解析、无旧 FDE 行业话术残留
-spec = _ls("deep", "目标读者：制造业中小企业老板与决策者。")
+spec = _ls("deep")
 _spec_all = "\n".join(v for v in spec.values() if isinstance(v, str))
 check("长文规格实例化（无 {{WHO}} 残留、无旧行业话术）",
       "{{" not in _spec_all and "项目烂尾" not in _spec_all)
-spec_b = _ls("deep", "面向健身爱好者和想减脂的上班族。")
+spec_b = _ls("deep")
 _spec_b_all = "\n".join(v for v in spec_b.values() if isinstance(v, str))
 check("长文规格换画像产物一致（deep 规格租户无关，受众经品牌注入）",
       _spec_all == _spec_b_all)
@@ -258,8 +258,8 @@ except Exception as _e:  # noqa: BLE001
     check("关键 prompt 全部可加载（含 {{GEN_LINE}}/{{AUDIENCE_NOTE}} 新占位符模板）", False, str(_e)[:120])
 
 
-# ---------- 租户自助品牌配置（R11.3a） ----------
-section("P8 · 租户自助品牌配置（R11.3a）")
+# ---------- 租户自助品牌配置（R11.2） ----------
+section("P8 · 租户自助品牌配置（R11.2）")
 code, d = request("GET", "/api/tenant/brand")
 orig_brand = (d.get("brand") or {})  # 测后还原用
 check("自助品牌 GET（本人租户）", code == 200 and orig_brand.get("persona"), f"code={code}")

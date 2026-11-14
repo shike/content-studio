@@ -121,7 +121,6 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
   const totalAtStart = session.approved + session.rejected + session.skipped + queue.length
   const doneCount = session.approved + session.rejected + session.skipped
 
-  const filtered = all // 服务端已按 status/source 筛选并分页
 
   const fetchDetail = useCallback(
     async (id: number) => {
@@ -463,7 +462,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
 
       {/* 紧凑表格 */}
       <div className="card mt-4 overflow-hidden p-0">
-        {filtered.length === 0 ? (
+        {all.length === 0 ? (
           <div className="p-6">
             <EmptyState
               icon={Inbox}
@@ -473,7 +472,7 @@ export default function Topics({ accountType }: { accountType?: 'persona' | 'lea
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filtered.map((t) => {
+            {all.map((t) => {
               const exp = expandedId === t.id
               const full = exp ? merged(t.id) : null
               return (

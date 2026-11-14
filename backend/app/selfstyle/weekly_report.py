@@ -24,11 +24,6 @@ def _week_window(today: date | None = None) -> tuple[date, date]:
     return last_monday, last_monday + timedelta(days=6)
 
 
-def _norm(t: str) -> str:
-    import re
-    return re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]", "", str(t)).lower()
-
-
 def video_score(play: int, digg: int, comment: int, share: int, collect: int) -> float:
     """质量分：课程号的钱途信号加权（收藏=学习意图、转发=圈层传播）。"""
     p = max(play, 1)
@@ -90,7 +85,7 @@ async def _interpret(facts: dict) -> str:
         prompt = (load("weekly_report") + json.dumps(facts, ensure_ascii=False))
         out = await gateway.complete(
             [{"role": "user", "content": prompt}],
-            purpose="weekly_report", max_tokens=2048, thinking="disabled")
+            max_tokens=2048, thinking="disabled")
         return (out or "").strip()[:600]
     except Exception as e:  # noqa: BLE001 解读失败不拦周报
         print(f"[weekly] 解读失败保留数字版: {type(e).__name__}: {str(e)[:80]}")

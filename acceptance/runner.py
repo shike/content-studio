@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """Content Studio 验收脚本公共库（仅标准库）。
 
-供 run_p0/p1/p2/p6/p7/p8 与 e2e_run.py 引用（P3/P4/P5 已随退役面删除）。判定规则见 README.md：
+供 run_p0/p1/p6/p7/p8 与 e2e_run.py 引用（P2~P5 已随退役面删除）。判定规则见 README.md：
 FAIL = 契约被打破；SKIP = 外部依赖缺失。
 """
 from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
 
 API_BASE = os.environ.get("CS_API_BASE", "http://127.0.0.1:8100")
 POLL_INTERVAL = 2.0
@@ -65,31 +62,18 @@ def skip(name: str, reason: str) -> None:
 
 
 def request(method: str, path: str, body: dict | None = None,
-            files: dict | None = None, timeout: float = 60.0):
-    """发起 HTTP 请求，返回 (status_code, json或文本)。
+            timeout: float = 60.0):
+    """发起 HTTP 请求，返回 (status_code, json或文本)。连接失败等异常返回 (0, 错误说明)。
 
-    files: {字段名: (文件名, bytes, content_type)}，自动组 multipart。
-    连接失败等异常返回 (0, 错误说明)。
-    """
+    （multipart files= 组装机制随 P2 本地上传用例裁除 2026-11-14；将来补本地上传验收
+    时按需重写。）"""
     url = API_BASE + path
     _ensure_login()
     data = None
     headers: dict[str, str] = {}
     if _cookie:
         headers["Cookie"] = _cookie
-    if files is not None:
-        boundary = "----cs" + uuid.uuid4().hex
-        buf = bytearray()
-        for k, v in (body or {}).items():
-            buf += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n').encode()
-        for k, (fn, blob, ctype) in files.items():
-            buf += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"; filename="{fn}"\r\n'
-                    f'Content-Type: {ctype}\r\n\r\n').encode()
-            buf += blob + b"\r\n"
-        buf += f"--{boundary}--\r\n".encode()
-        data = bytes(buf)
-        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
-    elif body is not None:
+    if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -142,21 +126,3 @@ def server_down() -> bool:
         return True
     return False
 
-
-def ensure_speech_video(path: str) -> str | None:
-    """生成带中文语音的测试视频，返回路径；依赖缺失返回 None。
-    已存在真语音版（随仓库同步，>200KB；无 say 环境生成的无声版 ~130KB）直接复用，
-    别在服务器上覆盖成 ASR 必空的正弦音视频（2026-11-07 服务器 P2 实测教训）。"""
-    if os.path.exists(path) and os.path.getsize(path) > 200_000:
-        return path
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "make_video.py")
-    ret = subprocess.run(
-        [sys.executable, script, "--out", path, "--speech",
-         "大家好，今天聊一聊传统工厂如何用人工智能做质量检测。"
-         "我们先从一条试点产线讲起，两周时间就能看到可验收的结果，"
-         "先有交付物，再谈规模化，这是这套做法的基本方式。"],
-        capture_output=True, text=True)
-    if ret.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 0:
-        return path
-    print(f"    fixture 生成失败: {ret.stderr.strip()[:200]}")
-    return None

@@ -19,8 +19,6 @@ interface WatchCandidate {
   stats: { digg?: number; comment?: number; share?: number; collect?: number }
   account_type?: string
   leadgen_density?: number
-  leadgen_comments?: number
-  recent_same?: number
 }
 
 const fmtFollow = (n: number) =>
@@ -229,17 +227,7 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
                             </button>
                           </span>
                         )}
-                        {c.account_type === 'leadgen' && (c.leadgen_comments ?? 0) > 0 && (
-                          <span className="badge shrink-0 bg-orange-100 text-orange-700" title="该视频评论区求带评论条数（转化规模，主排序键）">
-                            求带 {c.leadgen_comments} 条
-                          </span>
-                        )}
-                        {(c.recent_same ?? 0) >= 3 && (
-                          <span className="badge shrink-0 bg-emerald-100 text-emerald-700" title="作者近 30 天同类视频 ≥3 条 = 持续获客验证通过">
-                            持续获客 ✓
-                          </span>
-                        )}
-                        {c.account_type === 'leadgen' && (c.leadgen_comments ?? 0) === 0 && (
+                        {c.account_type === 'leadgen' && (
                           <span className="badge shrink-0 bg-amber-100 text-amber-800" title="评论区求带密度判定（旧发现逻辑）">
                             获客 · 密度 {Math.round((c.leadgen_density ?? 0) * 100)}%
                           </span>
@@ -270,7 +258,7 @@ export default function DiscoveredAccounts({ accountType }: { accountType?: 'per
                           <div className="space-y-1 text-slate-600">
                             <div className="mb-1.5 text-xs font-semibold text-slate-500">来源与状态</div>
                             <div>发现关键词：{c.keyword}{c.direction ? ` · ${c.direction}` : ''}</div>
-                            <div>粉丝：{fmtFollow(c.follower_count)}（按此排序）</div>
+                            <div>粉丝：{fmtFollow(c.follower_count)}</div>
                             <div className="break-all">
                               主页：<a className="text-sky-600 hover:underline" href={safeHref(c.url)} target="_blank" rel="noreferrer">{c.url}</a>
                             </div>

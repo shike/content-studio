@@ -18,9 +18,8 @@ ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
     "script_generate": (Script, "script_id", "generating"),
     "script_polish": (Script, "script_id", "polishing"),
     "article_generate": (Article, "article_id", "generating"),
-    # kb_write/adapt/deepread 三条公众号成文线同样产出 Article 且注册了
+    # adapt/deepread 两条公众号成文线同样产出 Article 且注册了
     # _article_generate_fail（2026-11-13 补映射：此前它们的失败文章不在复活/孤儿射程）
-    "article_kb_write": (Article, "article_id", "generating"),
     "article_adapt": (Article, "article_id", "generating"),
     "article_deepread": (Article, "article_id", "generating"),
     # SelfVideo 无失败态（分析失败行保持 approved），coverage/孤儿判定需要它的映射

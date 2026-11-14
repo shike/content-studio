@@ -315,7 +315,7 @@ async def self_analyze(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(70, "风格拆解")
     data = await gateway.complete_json(
         [{"role": "user", "content": load("self_style_extract") + transcript[:6000]}],
-        purpose="self_style_extract", max_tokens=12000)
+        max_tokens=12000)
 
     with Session(engine) as s:
         v = s.get(SelfVideo, video_id)
@@ -377,7 +377,7 @@ async def self_profile_update(ctx: JobContext, payload: dict) -> dict:
         [{"role": "user", "content": (load("self_profile_update")
                                       + "【上一版画像】\n" + str(prev_data)
                                       + "\n\n【风格标注】\n" + str(marks))}],
-        purpose="self_profile_update", max_tokens=16000)
+        max_tokens=16000)
 
     with Session(engine) as s:
         acc = s.exec(select(WatchAccount).where(WatchAccount.kind == "self")).first()  # type: ignore[attr-defined]

@@ -284,8 +284,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         from ..topics.service import is_similar_title, recent_topic_titles
 
         persona_text = brand_of(tenant_id)["persona"]
-        b_row = s.get(BenchmarkVideo, benchmark_id)
-        account_type = (b_row.account_type if b_row is not None else "") or "persona"
+        account_type = b.account_type or "persona"
 
     if not media_path:
         if source != "douyin" or not url:
@@ -313,7 +312,6 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(45, f"ASR 转写中（{settings.asr_model}，首次运行含模型下载）")
     try:  # 内存防线：available 低于水位时显式告警（3.6G 机器 large-v3 转写曾把系统拖入 swap 颠簸）
-        import shutil as _sh
         with open("/proc/meminfo") as _mi:
             avail_mb = next(int(l.split()[1]) // 1024 for l in _mi if l.startswith("MemAvailable"))
         if avail_mb < 800:
@@ -368,7 +366,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                 14, line=account_type if account_type in ("persona", "leadgen") else ""))
             or "（近 14 天无出题记录）")},
          {"role": "user", "content": llm_input}],
-        purpose="benchmark_analyze", max_tokens=5000)
+        max_tokens=5000)
 
     with Session(engine) as s:
         b = s.get(BenchmarkVideo, benchmark_id)
@@ -383,9 +381,9 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         # 不同同行视频产出同一角度是选题趋同的主通道（2026-10-10 用户裁定拦截）
         candidate = (analysis.get("topic_candidate") or {})
         topic_id = None
-        judged = (analysis.get("content_type") or account_type) or ""
+        judge_line = (analysis.get("content_type") or account_type) or ""
         dup_of = (is_similar_title(str(candidate.get("title") or ""),
-                                   line=judged if judged in ("persona", "leadgen") else "")
+                                   line=judge_line if judge_line in ("persona", "leadgen") else "")
                   if candidate.get("title") else None)
         if dup_of is not None:
             analysis["topic_candidate_suppressed"] = f"与近期选题 #{dup_of} 撞车，候选未入库"
@@ -405,7 +403,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
                     "replicable_points": analysis.get("replicable_points") or [],
                     "hook": analysis.get("hook") or {},
                     "account_type": analysis.get("content_type") or account_type,
-                    "benchmark_quality_score": b_row.quality_score if b_row is not None else 0,
+                    "benchmark_quality_score": b.quality_score or 0,
                 },
             )
             if (topic.score or 0) < 7.0:

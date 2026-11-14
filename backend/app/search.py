@@ -71,14 +71,8 @@ def web_search(query: str, max_results: int = 4) -> tuple[list[dict], str, str, 
     if results:
         _cache_put(cache, key, results, "ddg")
         return results, ddg_status, "ddg", note
-    # 境内服务器直连 DDG 不可达（Errno 101）。带 site: 的查询（账号发现等）回退 Bing——
-    # 2026-09-28 实测：Bing 可达且返回真实 douyin.com/video 结果（此前"投毒"记载已过期）
-    if re.search(r"\b(site:|inurl:|intitle:)", query, re.I):
-        bing_results, bing_status = _bing_search(query, max_results)
-        if bing_results:
-            _cache_put(cache, key, bing_results, "bing")
-            note2 = f"DDG 不可达（{ddg_status}），已回退 Bing"
-            return bing_results, bing_status, "bing", note2
+    # （历史注：曾在此回退 Bing 中国站——2026-11-14 双出口实测 site:douyin.com 三连查
+    # b_algo 全零，"9-28 可用"记载过期，AGENTS「Bing 不可作备胎」铁律成立，兜底已删。）
     return [], ddg_status, "ddg", note
 
 
@@ -167,33 +161,6 @@ def _ddg_gate() -> Optional[str]:
         st["last"] = time.time()
         st["window"].append(st["last"])
     return None
-
-
-def _bing_search(query: str, max_results: int) -> tuple[list[dict], str]:
-    """Bing 网页搜索（境内可达）。解析 <li class="b_algo"> 里的标题与真实链接。
-
-    2026-09-28 实测：site:douyin.com/video 查询返回真实抖音视频结果（此前"投毒"记载已过期）；
-    用途=DDG 不可达（境内服务器 Errno 101）时，带引擎限定符的查询的回退通道。
-    """
-    try:
-        resp = httpx.get("https://www.bing.com/search",
-                         params={"q": query, "setlang": "zh-hans"},
-                         headers={"User-Agent": _UA,
-                                  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
-                         timeout=15, follow_redirects=True)
-    except Exception as e:  # noqa: BLE001
-        return [], f"error({type(e).__name__})"
-    if resp.status_code != 200:
-        return [], f"http_{resp.status_code}"
-    results = []
-    for m in re.finditer(r'<li class="b_algo".*?<h2><a href="([^"]+)"[^>]*>(.*?)</a></h2>', resp.text, re.S):
-        url = m.group(1)
-        title = _clean(m.group(2))
-        if title and url.startswith("http") and "bing.com" not in urlparse(url).netloc:
-            results.append({"title": title, "snippet": "", "url": url})
-        if len(results) >= max_results:
-            break
-    return results, ("ok" if results else "empty")
 
 
 def _ddg_search(query: str, max_results: int) -> tuple[list[dict], str]:

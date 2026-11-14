@@ -124,7 +124,7 @@ else:
     # 深度版唯一档位（2026-11-02 三线定版：公众号做深度内容，feed 退役）。
     # P1 端到端跑的就是用户拿到的默认产物：报题/选题 → 深度长文。
     status, r = request("POST", "/api/articles/generate",
-                        body={"topic_id": topic_id, "length": "deep", "style": "auto"})
+                        body={"topic_id": topic_id, "style": "auto"})
     if not check("长文生成任务受理", status == 202 and r.get("article_id"),
                  f"status={status}, {str(r)[:120]}"):
         sys.exit(finish("P1 内容核心"))

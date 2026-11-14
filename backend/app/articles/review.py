@@ -25,7 +25,7 @@ async def review_facts(md: str, source: str) -> list[str]:
         v = await gateway.complete_json(
             [{"role": "user", "content": render("article_review_facts",
                                                 DRAFT=md[:9000], SOURCE=source[:9000])}],
-            purpose="article_review_facts", max_tokens=1024, thinking="disabled")
+            max_tokens=1024, thinking="disabled")
         return [str(x).strip()[:160] for x in (v or {}).get("issues") or [] if str(x).strip()][:8]
     except Exception as e:  # noqa: BLE001
         print(f"[review] 事实对源失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
@@ -37,7 +37,7 @@ async def review_reader(md: str) -> list[str]:
     try:
         v = await gateway.complete_json(
             [{"role": "user", "content": render("article_review_reader", DRAFT=md[:9000])}],
-            purpose="article_review_reader", max_tokens=1024, thinking="disabled")
+            max_tokens=1024, thinking="disabled")
         return [str(x).strip()[:160] for x in (v or {}).get("drop_points") or [] if str(x).strip()][:8]
     except Exception as e:  # noqa: BLE001
         print(f"[review] 读者审校失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
@@ -53,7 +53,7 @@ async def score_titles(candidates: list[str]) -> list[tuple[str, float]]:
         v = await gateway.complete_json(
             [{"role": "user", "content": render("article_title_score",
                                                 CANDIDATES="\n".join(f"- {c}" for c in cands))}],
-            purpose="article_title_score", max_tokens=1024, thinking="disabled")
+            max_tokens=1024, thinking="disabled")
         ranked = []
         seen = set()
         for row in (v or {}).get("ranked") or []:
@@ -80,7 +80,7 @@ async def revise_once(md: str, issues: list[str]) -> str | None:
             [{"role": "user", "content": render("article_adapt_revise",
                                                 ISSUES="\n".join(f"- {x}" for x in issues),
                                                 DRAFT=md)}],
-            purpose="article_adapt_revise", max_tokens=8192, thinking="disabled")
+            max_tokens=8192, thinking="disabled")
         body = _strip_fence(body)
         lines = body.split("\n")
         if not lines or not lines[0].lstrip().startswith("# "):

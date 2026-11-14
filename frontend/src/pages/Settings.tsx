@@ -31,11 +31,10 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
   const [conf, setConf] = useState<AppSettings | null>(null)
   const [ownBrand, setOwnBrand] = useState<Partial<BrandShape> | null>(null)
   useEffect(() => {
-    if (role === 'member') return
     api<{ brand?: Partial<BrandShape> }>('/tenant/brand')
       .then((d) => setOwnBrand(d.brand ?? {}))
       .catch(() => setOwnBrand({}))
-  }, [role])
+  }, [])
   const saveOwnBrand = (payload: Partial<BrandShape>) =>
     api('/tenant/brand', { method: 'PUT', body: JSON.stringify(payload) })
 

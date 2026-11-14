@@ -12,14 +12,14 @@
 
 ## 验收纪律（违反 = 白干）
 
-- 套件 `run_p0/p1/p2/p6/p7/p8` + `e2e_run.py`（P8/e2e 必须用 `backend/.venv/bin/python`）。**后端改动必重跑受影响套件**。
-- 隔离实例：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；跑完删 `data-acceptance`）。复制库先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`。
-- 全线 naive-UTC，SQL 用 `datetime('now')`。P2：软链 `data/asr-models` + `ASR_MODEL=small`；在线拆解向用户要 `DOUYIN_TEST_URL`。测试数据收尾必清（假数据污染选题评分）。
+- 套件 `run_p0/p1/p6/p7/p8` + `e2e_run.py`（P8/e2e 必须用 `backend/.venv/bin/python`）。**后端改动必重跑受影响套件**。
+- 隔离实例：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；跑完删 `data-acceptance`）。跑套件同环境变量三件套：`CS_API_BASE`/`CS_BOOTSTRAP_PASSWORD`/`DATA_DIR`（p0/p6/p7/e2e 直读库文件，漏 DATA_DIR 会摸到默认 data/）。复制库先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`。
+- 全线 naive-UTC，SQL 用 `datetime('now')`。测试数据收尾必清（假数据污染选题评分）。
 - 失败是异常不是工作流：瞬时失败走退避梯子 30min→2h→6h→24h→每日慢巡（30 次上限）；确定性失败安静终态；界面只有红徽章+行内重试（后端 failures API 保留）。
 
 ## LLM 硬规矩（GLM Coding Plan，思考型）
 
-- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_write/kb_polish/adapt_reduce/adapt_revise；8000=script_finalize/trending_target/self_story_target｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/kb_brief/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/trending_queries/ping。
+- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_polish/deepread_write/adapt_reduce/adapt_revise；8000=script_finalize/trending_target/self_story_target｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/trending_queries/ping。
 - httpx 超时 600s；验收轮询 ≥600s、脚本生成 ≥900s。空正文必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定（按量余额不足报 1113）；密钥/模型/检索走设置页运行时改（存 app_settings，.env 只留引导项）。系统不记录成本，花销看服务商控制台。
 

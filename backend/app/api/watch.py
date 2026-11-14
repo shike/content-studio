@@ -284,7 +284,6 @@ def list_candidates(status: str = "", account_type: str = "") -> dict:
         if account_type in ("persona", "leadgen"):
             q = q.where(WatchCandidate.account_type == account_type)  # type: ignore[attr-defined]
         rows = s.exec(q.order_by(  # type: ignore[attr-defined]
-            WatchCandidate.leadgen_comments.desc(),  # type: ignore[attr-defined]
             WatchCandidate.id.desc(),  # type: ignore[attr-defined]
         )).all()
         return {"items": [_cand_dict(r) for r in rows]}

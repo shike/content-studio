@@ -8,7 +8,6 @@ socks5://127.0.0.1:11080），空=直连。只作用于抖音相关抓取，不�
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 from .settings import settings
@@ -25,13 +24,10 @@ if _platform.system() == "Darwin":
         "PLAYWRIGHT_BROWSERS_PATH",
         str(Path(__file__).resolve().parents[2] / ".ms-playwright"),
     )
-del sys
 
 # UA 必须与实际运行平台一致：抖音风控会校验 UA 与 navigator.platform 是否匹配，
 # 不一致（如 UA 声称 Mac、实际跑在 Linux）→ 详情接口 100% 返回空体挑战页
 # （2026-09-27 实测：Mac UA 在 Linux 上 0/4，Linux UA 4/4）。可用 DOUYIN_UA 覆盖。
-_UA_MOBILE = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
-              "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 _UA_LINUX = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
 _UA_MAC = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -53,16 +49,14 @@ def parse_cookie_header(cookie_str: str) -> list[dict]:
     return out
 
 
-def ua(mobile: bool = False) -> str:
+def ua() -> str:
     override = (settings.douyin_ua or "").strip()
     if override:
         return override
-    if mobile:
-        return _UA_MOBILE
     return _UA_MAC if _platform.system() == "Darwin" else _UA_LINUX
 
 
-def launch(p, *, mobile: bool = False, login: bool = False):
+def launch(p, *, login: bool = False):
     """统一启动 Chromium：反自动化特征 + 可选代理 + **完整版内核**。
 
     用完整版（channel="chromium"，headless 新模式）而非 playwright 的

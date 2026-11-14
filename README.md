@@ -80,7 +80,7 @@ DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 \
 
 # 2) 跑套件（仓库根执行）
 export CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 DATA_DIR=data-acceptance
-python3 acceptance/run_p0.py                       # …p1/p2/p6/p7（标准库即可）
+python3 acceptance/run_p0.py                       # …p1/p6/p7（标准库即可）
 backend/.venv/bin/python acceptance/run_p8.py      # P8 白盒 import 需要 sqlmodel，必须走 venv
 backend/.venv/bin/python acceptance/e2e_run.py     # E2E（playwright+PIL，必须走 venv）
 

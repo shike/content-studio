@@ -79,7 +79,6 @@ _FP_RULES: list[tuple[str, str, tuple[str, ...]]] = [
                                     "remote end closed")),
     ("db:constraint", "数据库约束（FK 悬空等）", ("foreign key constraint", "integrityerror",
                                                   "no such column", "no such table")),
-    ("credit:insufficient", "租户积分不足", ("积分不足",)),
     ("infra:config", "配置缺失", ("未配置", "not configured", "no_key", "不能为空")),
 ]
 

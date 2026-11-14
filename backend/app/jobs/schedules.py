@@ -198,21 +198,19 @@ async def _run_article_hotspots() -> str:
 # 钟点 0 点（错峰窗 0-6 内最前，与 1:00 扫描错开；不可 hour_from_settings，同 watch_discover 理由）
 register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点报题（独立提炼）",
                            daily_hour=0, run=_run_article_hotspots))
-async def _run_deepread() -> str:
-    """深读写（2026-11-11 拆锁定版）：每天读一个域的完整文档 → 跨文档综合判断 → 成文。
-    取代池子两线（03:00 抽卡选题 + 04:00 自动圈题）——选题是读的产物，不再是标题抽卡。"""
-    from .runner import runner
-
-    job = await runner.submit("article_deepread", {},
-                              dedup_key=f"1:deepread:{datetime.now():%Y%m%d}",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（深读一个域 → 成文）"
-
-
 # 深读线调度 2026-11-13 下线（TDD §6「停用中」口径落地：cb76a56 建线当日被 25b7ed6
 # 源文改编产线取代，但调度一直没摘——与挖掘器同挂 ima 门同为 4 点，ima 启用日每天
 # 双跑多烧 18 篇全文 + 20 余次 LLM 调用并多产一篇进待发。执行器与 prompt 保留作回滚
-# 窗口；如需复活，恢复下面这行注册即可：
+# 窗口；如需复活，把下面的 runner 函数落回并恢复注册行即可：
+#
+# async def _run_deepread() -> str:
+#     """深读写（2026-11-11 拆锁定版）：每天读一个域的完整文档 → 跨文档综合判断 → 成文。"""
+#     from .runner import runner
+#     job = await runner.submit("article_deepread", {},
+#                               dedup_key=f"1:deepread:{datetime.now():%Y%m%d}",
+#                               actor=(1, 0, "platform_admin"))
+#     return f"job #{job.id}（深读一个域 → 成文）"
+#
 # register_schedule(Schedule(key="article_deepread_daily", label="知识库深读写（域轮读·综合成文）",
 #                            daily_hour=4, enabled_by="ima_kb_enabled",
 #                            run=_run_deepread))

@@ -163,12 +163,6 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_accounts ADD COLUMN kind VARCHAR NOT NULL DEFAULT 'competitor'"))
         wccols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_candidates)"))]
-        if wccols and "leadgen_comments" not in wccols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE watch_candidates ADD COLUMN leadgen_comments INTEGER DEFAULT 0"))
-        if wccols and "recent_same" not in wccols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE watch_candidates ADD COLUMN recent_same INTEGER DEFAULT 0"))
         if wccols and "pure_reason" not in wccols:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE watch_candidates ADD COLUMN pure_reason VARCHAR DEFAULT ''"))
@@ -189,9 +183,6 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE articles ADD COLUMN kb_sources JSON DEFAULT '[]'"))
         # 知识库选题线（2026-11-09）：选题绑定的依据文档
-        if acols and "kb_doc_ids" not in acols:
-            conn.execute(sqlalchemy.text(
-                "ALTER TABLE articles ADD COLUMN kb_doc_ids JSON DEFAULT '[]'"))
         # 源文改编产线（2026-11-11）：发布登记与 48h 回流落库
         if acols and "publish_url" not in acols:
             conn.execute(sqlalchemy.text(
@@ -263,8 +254,6 @@ def _migrate(engine) -> None:
         acols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(articles)"))]
         if acols and "title" not in acols:
             conn.execute(sqlalchemy.text("ALTER TABLE articles ADD COLUMN title VARCHAR DEFAULT ''"))
-        if acols and "title_alts" not in acols:
-            conn.execute(sqlalchemy.text("ALTER TABLE articles ADD COLUMN title_alts JSON DEFAULT '[]'"))
         tcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(tenants)"))]
         if tcols and "brand" not in tcols:
             conn.execute(sqlalchemy.text("ALTER TABLE tenants ADD COLUMN brand JSON DEFAULT '{}'"))
@@ -295,7 +284,7 @@ def _migrate(engine) -> None:
         # （dismissals/harvest_profiles 两张死壳表已从建表管道退役 2026-11-10：模型已删，
         #   生产库里已有行原地保留，不再迁移维护）
         for table in ("articles", "benchmark_videos",
-                      "media_assets", "radar_topics",
+                      "radar_topics",
                       "research_reports", "scripts", "self_videos", "style_profiles",
                       "topics", "watch_accounts", "watch_candidates"):
             tcols = [r[1] for r in conn.execute(sqlalchemy.text(f"PRAGMA table_info({table})"))]

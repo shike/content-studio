@@ -33,7 +33,7 @@ def is_configured() -> bool:
     return bool(active()["key"])
 
 
-# 全局 LLM 并发闸：直调端点（ping/generate-image 等）不入任务队列，
+# 全局 LLM 并发闸：直调端点（ping）不入任务队列，
 # 也没有任何并发限制——信号量统一收编全部 LLM 调用（队列任务同样过闸，heavy 本就串行无感）
 _LLM_SEM: Optional[asyncio.Semaphore] = None
 _LLM_CONCURRENCY = 2
@@ -46,7 +46,7 @@ def _llm_sem() -> asyncio.Semaphore:
     return _LLM_SEM
 
 
-async def complete(messages: list[dict], *, purpose: str = "chat",
+async def complete(messages: list[dict], *,
                    temperature: float = 0.7, max_tokens: int = 4096,
                    thinking: Optional[str] = None) -> str:
     """thinking="disabled" 时关闭思考链（长文场景：预算全给正文，防推理耗尽空正文）。"""
@@ -106,16 +106,16 @@ async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict) -> st
     return content
 
 
-async def complete_json(messages: list[dict], *, purpose: str = "json",
+async def complete_json(messages: list[dict], *,
                         temperature: float = 0.3, max_tokens: int = 4096,
                         thinking: Optional[str] = None) -> dict:
     """要求模型输出严格 JSON；解析失败带错误回炉一次。"""
     attempt_msgs = list(messages)
     last_err = "未执行"
     for _ in range(2):
-        reply = await complete(attempt_msgs, purpose=purpose,
-                               temperature=temperature, max_tokens=max_tokens,
-                               thinking=thinking)
+        reply = await complete(attempt_msgs,
+                           temperature=temperature, max_tokens=max_tokens,
+                           thinking=thinking)
         try:
             return _extract_json(reply)
         except ValueError as e:

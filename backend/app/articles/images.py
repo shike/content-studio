@@ -1,4 +1,8 @@
-"""配图生成（智谱 CogView）：文章自动配图与占位卡手动生图共用。"""
+"""配图文件签名与合法性（公众号粘贴链路的公开签名图基座）。
+
+（AI 生图 gen_image 已随 search: 占位图链路退役 2026-11-14：提示词不再产出
+search: 标记，自动配图循环与手动生图端点双双无输入；charts.py 的图表/头图
+渲染仍在产 gen_ 之外前缀的本地图，签名/校验/白名单照旧服务。）"""
 from __future__ import annotations
 
 import base64
@@ -6,23 +10,10 @@ import hashlib
 import hmac
 import json
 import secrets
-import time
 
-import httpx
-
-from ..settings import settings
 
 # 配图文件名前缀白名单（防目录穿越；公开签名图路由共用）
 IMAGE_PREFIXES = ("gen_", "chart_", "cover_", "flow_", "kg_")
-
-
-def _tenant_image_dir():
-    """配图按租户分目录（媒体租户边界）；归属=当前 ACTOR，系统上下文回落租户 1。"""
-    from ..auth import ACTOR
-    tenant_id, _u, _r = ACTOR.get()
-    d = settings.data_dir / "article_images" / str(tenant_id or 1)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
 
 
 # ===== 配图公开签名（公众号粘贴链路）=====
@@ -68,38 +59,3 @@ def verify_image(name: str, sig: str) -> bool:
 def valid_image_name(name: str) -> bool:
     """文件名合法性：白名单前缀 + 无路径分隔（公开路由与登录路由共用同一判据）。"""
     return ("/" not in name and ".." not in name and name.startswith(IMAGE_PREFIXES))
-
-
-_COGVIEW = "cogview-3-flash"  # ≈0.06 元/张；质量不满意可换 cogview-4（≈0.25 元/张）
-
-
-def gen_image(caption: str, keywords: str = "") -> dict:
-    """生成 1344x768 插画并下载落盘。返回 {image_url, file}。"""
-    if not settings.zhipu_api_key:
-        raise RuntimeError("未配置 ZHIPU_API_KEY")
-    theme = (caption or keywords or "").strip()[:80]
-    prompt = (f"为一篇行业深度分析文章生成配图。配图主题：{theme}。"
-              "现代简洁的商务科技插画风格，冷色调蓝灰为主，画面干净专业，构图疏朗，"
-              "画面中不要出现任何文字，横版构图")
-    resp = httpx.post(
-        "https://open.bigmodel.cn/api/paas/v4/images/generations",
-        headers={"Authorization": f"Bearer {settings.zhipu_api_key}",
-                 "Content-Type": "application/json"},
-        json={"model": _COGVIEW, "prompt": prompt, "size": "1344x768"},
-        timeout=120)
-    if resp.status_code != 200:
-        raise RuntimeError(f"CogView http {resp.status_code}: {resp.text[:120]}")
-    url = ((resp.json().get("data") or [{}])[0].get("url") or "")
-    if not url:
-        raise RuntimeError("CogView 未返回图片")
-    import shutil
-
-    free_gb = shutil.disk_usage(settings.data_dir).free / 1e9
-    if free_gb < 1:
-        raise RuntimeError(f"磁盘剩余 {free_gb:.1f}GB 不足，跳过生图（清理后可在占位卡重试）")
-    out_dir = _tenant_image_dir()
-    dest = out_dir / f"gen_{int(time.time() * 1000)}.png"
-    img = httpx.get(url, timeout=60)
-    img.raise_for_status()
-    dest.write_bytes(img.content)
-    return {"image_url": f"/api/articles/images/{dest.name}", "file": str(dest)}

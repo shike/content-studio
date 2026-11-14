@@ -166,7 +166,6 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
       .then((d) => setAuthorOptions(d.authors ?? []))
       .catch(() => {})
   }, [])
-  const filtered = items
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const changeFilter = (k: string) => {
     setFilter(k)
@@ -250,7 +249,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
       )}
 
       <div className="card mt-4 overflow-hidden p-0">
-        {filtered.length === 0 ? (
+        {items.length === 0 ? (
           <div className="p-6">
             <EmptyState
               icon={Inbox}
@@ -260,7 +259,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filtered.map((b) => {
+            {items.map((b) => {
               const exp = expandedId === b.id
               return (
                 <div key={b.id} className={exp ? 'bg-sky-50/40' : ''}>

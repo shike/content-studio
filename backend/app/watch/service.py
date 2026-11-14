@@ -619,8 +619,6 @@ def _probe_leadgen_signal(video_id: str) -> dict:
     """打开视频页拦评论 XHR，返回 {comments, leadgen, density}。失败抛 RuntimeError。"""
     from playwright.sync_api import sync_playwright
 
-    from ..browser import launch, ua
-
     comments: list[str] = []
     try:
         with sync_playwright() as p:
@@ -815,11 +813,7 @@ async def watch_discover(ctx, payload: dict) -> dict:
             "skipped": skipped, "top": [f"{d['name']}（{_fmt_follow(d['follower_count'])}粉）"
                                         for d in ranked], "notes": notes}
 
-# ---- 已扫池（获客挖掘 / hl 搜索矩阵共用：解析过的 sec_uid 不重复撞主页限速）----
-
-_HARVEST_SEEN_KEY = "harvest_seen_secs"
-_HARVEST_SEEN_CAP = 3000
-
+# ---- 战役预算覆盖（挖号冲刺期可临时调大）----
 
 def _harvest_budget(key: str, default: int) -> int:
     """战役模式预算覆盖：app_settings.harvest_hl_search / harvest_hl_verify 可临时调大
@@ -833,29 +827,6 @@ def _harvest_budget(key: str, default: int) -> int:
     except (TypeError, ValueError):
         v = default
     return max(1, min(v, 200))
-
-
-def _load_harvest_seen() -> set[str]:
-    from ..models import AppSetting
-    with Session(engine) as s:
-        row = s.get(AppSetting, _HARVEST_SEEN_KEY)
-    try:
-        return set(json.loads(row.value)) if row is not None and row.value else set()
-    except Exception:  # noqa: BLE001 损坏即重建
-        return set()
-
-
-def _save_harvest_seen(seen: set[str]) -> None:
-    from ..models import AppSetting
-    with Session(engine) as s:
-        row = s.get(AppSetting, _HARVEST_SEEN_KEY)
-        val = json.dumps(sorted(seen)[-_HARVEST_SEEN_CAP:])
-        if row is None:
-            s.add(AppSetting(key=_HARVEST_SEEN_KEY, value=val))
-        else:
-            row.value = val
-            s.add(row)
-        s.commit()
 
 
 _HL_CITIES = ["苏州", "上海", "杭州", "南京", "无锡", "宁波", "温州", "常州", "南通",
@@ -1020,7 +991,6 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
 
         # ---- 逐号取证 ----
         verified: list[dict] = []
-        seen_mark: set[str] = set()
 
         def on_w(r, rec):
             if "aweme/post" in r.url and "/web/api/v2/" in r.url:
@@ -1053,7 +1023,6 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
                     page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
                     page.wait_for_timeout(1800)
                 verified.append(rec)
-                seen_mark.add(sec)
             except Exception:
                 pass
             finally:
@@ -1066,7 +1035,7 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
             time.sleep(random.uniform(2.2, 3.5))
         browser.close()
     return {"searched": searched, "todo_left": todo, "done_queries": done_queries,
-            "authors": authors, "verified": verified, "seen_mark": seen_mark}
+            "authors": authors, "verified": verified}
 
 
 @register_executor("hl_search_matrix")
@@ -1099,7 +1068,6 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
     if not cands:
         ctx.set_progress(100, f"搜索 {len(searched)}，作者池 {len(result['authors'])}，"
                               f"取证 {len(result['verified'])}，无新候选")
-        _save_harvest_seen(_load_harvest_seen() | result["seen_mark"])
         return {"searches": len(searched), "secs": len(result["authors"]),
                 "verified": len(result["verified"]), "inserted": 0, "notes": notes}
 
@@ -1115,7 +1083,7 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
     data = await gateway.complete_json(
         [{"role": "system", "content": sys_prompt},
          {"role": "user", "content": json.dumps(batch, ensure_ascii=False)}],
-        purpose="leadgen_judge", max_tokens=4000, thinking="disabled")
+        max_tokens=4000, thinking="disabled")
     jmap = {r.get("id"): r for r in (data.get("ranks") or []) if isinstance(r, dict)}
 
     inserted = 0
@@ -1147,7 +1115,6 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
                 mid += 1
             notes.append(f"LLM判{tier}：{c['nick']} · {why}")
         s.commit()
-    _save_harvest_seen(_load_harvest_seen() | result["seen_mark"])
     ctx.set_progress(100, f"搜索 {len(searched)}，取证 {len(result['verified'])}，"
                           f"LLM 入表 {inserted}（强{strong} 中{mid} 否{rejected}）")
     return {"searches": len(searched), "secs": len(result["authors"]),

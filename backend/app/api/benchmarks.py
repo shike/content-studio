@@ -230,15 +230,6 @@ async def resolve_pending(body: ResolveIn,
     return {"resolved": resolved, "job_ids": job_ids}
 
 
-@router.get("/api/benchmarks/{benchmark_id}")
-def get_benchmark(benchmark_id: int) -> dict:
-    with Session(engine) as s:
-        b = s.get(BenchmarkVideo, benchmark_id)
-        if b is None:
-            raise HTTPException(status_code=404, detail="benchmark not found")
-        return b.model_dump()
-
-
 @router.delete("/api/benchmarks/{benchmark_id}")
 def delete_benchmark(benchmark_id: int) -> dict:
     """删除拆解样本：连带删除其产出的待审选题候选，解绑结构模板引用，删除已下载的媒体文件。"""

@@ -109,9 +109,6 @@ class ResearchReport(TenantScoped, TimestampMixin, table=True):
     topic_id: Optional[int] = Field(default=None, foreign_key="topics.id", index=True)
     content: str = ""
     model: str = ""
-    tokens_in: int = 0
-    tokens_out: int = 0
-    cost_est: float = 0.0
 
 
 class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
@@ -125,7 +122,7 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
     transcript: str = ""
     analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
     media_path: str = ""
-    quality_score: float = 0.0  # 内容热度分 0~10（赞粉比×赞数量，2026-10-28 评分口径）
+    quality_score: float = 0.0  # 内容热度分 0~10（评论/2+赞/60 封顶 10，_heat_score 2026-11-11 定版）
     account_type: str = Field(default="persona")  # persona(人设) | leadgen(获客)——拆解 prompt 分叉依据
     notes: str = ""  # 自动拆解闸标记等（自动批准原因/雷达来源）
     source: str = "douyin"  # douyin | local
@@ -134,11 +131,11 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
 
 class Tenant(TimestampMixin, table=True):
     """租户（单用户版退化为「工作室档案」）：承载名称与品牌九字段。
-    credits 列已废（积分概念拆除）：模型不再声明，生产库旧列原地保留，新库不再建列。"""
+    credits/status 两列已废（积分拆除、单管理员无禁用通道）：模型不再声明，
+    生产库旧列原地保留，新库不再建列。"""
     __tablename__ = "tenants"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = ""
-    status: str = Field(default="active", index=True)  # active | disabled
     brand: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 租户品牌/人设：栏目名、署名、人设描述（SaaS 产品化，2026-09-30）
 
 
@@ -181,9 +178,7 @@ class RadarTopic(TenantScoped, TimestampMixin, table=True):
     enabled: bool = True
     notify: bool = True
     seen_ids: list = Field(default_factory=list, sa_column=Column(JSON))  # 已见视频 id（尾端截断 300）
-    recent: list = Field(default_factory=list, sa_column=Column(JSON))  # 上次巡检新视频 [{id, desc}]
     hits: list = Field(default_factory=list, sa_column=Column(JSON))  # 低粉高赞清单 [{id, desc, author, digg, followers, ratio}]
-    new_since_last: int = 0
     last_checked_at: Optional[datetime] = None
 
 
@@ -224,9 +219,7 @@ class Article(TenantScoped, TimestampMixin, table=True):
     md: str = ""
     title: str = ""  # 公众号主标题（报题即草稿：报题一句话就是初始标题）
     note: str = ""  # 报题备注/参考链接（公众号独立报题线，2026-11-02）
-    title_alts: list = Field(default_factory=list, sa_column=Column(JSON))  # 备选标题
     kb_sources: list = Field(default_factory=list, sa_column=Column(JSON))  # ima 知识库素材来源（2026-11-08 取材写文）
-    kb_doc_ids: list = Field(default_factory=list, sa_column=Column(JSON))  # 选题绑定的库内依据文档 [{media_id,title}]（2026-11-09 知识库选题线）
     publish_url: str = ""  # 发布登记：公众号文章链接（发布永远人工，系统只记账，2026-11-11 源文改编产线）
     published_at: str = ""  # 发布登记时间
     stats: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 48h 回流 {reads,welook,follows,leads,filled_at}
@@ -236,6 +229,9 @@ class Article(TenantScoped, TimestampMixin, table=True):
 
 # kb_documents / kb_topics 两表（2026-11-09 知识库选题线）模型已随选题池整池退役删除
 # （2026-11-13 用户裁决）：模型删=新库不再建，生产库旧表不动，对齐 harvest_profiles 划线口径。
+# 同批划线退役的列：research_reports.tokens_in/tokens_out/cost_est（成本台账）、
+# tenants.status、watch_candidates.leadgen_comments/recent_same、radar_topics.recent/
+# new_since_last、articles.title_alts/kb_doc_ids——生产库旧列原地保留，新库不再建。
 
 
 class ContentItem(TenantScoped, TimestampMixin, table=True):
@@ -306,8 +302,6 @@ class WatchCandidate(TenantScoped, TimestampMixin, table=True):
     sample_stats: str = ""  # JSON：digg/comment/share/collect
     account_type: str = Field(default="persona")  # persona | leadgen（评论区求带密度判定）
     leadgen_density: float = 0.0  # 评论区求带密度 0~1（获客信号，2026-10-28）
-    leadgen_comments: int = 0  # 求带评论绝对数（获客号挖掘 v2 主排序键，2026-10-31）
-    recent_same: int = 0  # 作者近 30 天同类视频数（持续性验证；-1/0=未验证）
     pure_reason: str = ""  # 纯获客判定依据（名字/签名/近期作品命中的引流词，v3 挖号先行 2026-11-02）
     status: str = Field(default="open", index=True)  # open 待定夺 | added 已加入 | dismissed 已忽略
 

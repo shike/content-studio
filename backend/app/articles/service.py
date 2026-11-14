@@ -17,8 +17,9 @@ from ..prompts import load, render
 
 # 长文风格库（R10）：key → 结构骨架。生成时单选，auto 交给模型按素材挑。
 ARTICLE_STYLES: dict[str, str] = {
-    # 八个风格 = 同一深度长文底座下的八种拆解视角（2026-09-27 重定义：全部零故事、专业书面语，
-    # 差异只在「分析的透镜」）。共享硬约束见 deep_dive 的文体/语言/质量判据三行——其余风格
+    # 五个风格 = 同一深度长文底座下的五种拆解视角（2026-09-27 重定义：全部零故事、专业书面语，
+    # 差异只在「分析的透镜」；auto 精选五=全部键，viewpoint/framework/outlook 三键因无任何
+    # 传参通道于 2026-11-14 裁除）。共享硬约束见 deep_dive 的文体/语言/质量判据三行——其余风格
     # 只写视角结构，共享约束由 Prompt 底座统一注入。
     "deep_dive": (
         "【深度研究·机制拆解视角】行业深度分析：有铺垫的专业拆解，深度与可读性并重。硬性结构：\n"
@@ -41,25 +42,6 @@ ARTICLE_STYLES: dict[str, str] = {
         "- 验收收尾：落地后拿什么指标验收、看多久；最后停在最重的那个判断上\n"
         "文体与语言：与深度研究同一底座——专业书面语、中文为主、术语规范、判断直给。\n"
         "质量判据：读者拿着实施路径就能对照自己的项目列计划。禁止：故事/场景/对话/亲历叙事、口语化、无验收标准的空泛步骤。"
-    ),
-    "viewpoint": (
-        "【立场论证·判断论证视角】同一深度长文底座，透镜=一个反共识判断的完整论证链。硬性结构：\n"
-        "- 开头：2~3 句行业共识铺垫，随后亮出反共识的核心判断（一句话，不留歧义）\n"
-        "- 论据链：三条以上独立成立的论据（公开数据/行业事实/机制推演），每条带出处与数字\n"
-        "- 最强反驳：把反对者最硬的理由完整摆出来，正面拆解（机制层面，不许立稻草人）\n"
-        "- 判断边界：这个判断在什么条件下不成立（诚实列出，增强可信度）\n"
-        "- 收尾：停在最重的那条论据上\n"
-        "文体与语言：与深度研究同一底座。\n"
-        "质量判据：把观点遮住，懂行的人也能认出立场；反驳环节让反对者承认被正面回应过。禁止：和稀泥、骑墙、堆免责声明。"
-    ),
-    "framework": (
-        "【框架清单·检查框架视角】同一深度长文底座，透镜=一套可复用的分析/检查框架。硬性结构：\n"
-        "- 开头：2~3 句铺垫这个框架回答什么问题，随后一句话给出框架全貌\n"
-        "- 框架总览：3~6 个组成维度，每个维度 = 定义 + 为什么它是必要维度（机制解释）\n"
-        "- 逐维拆解：每维配一个公开行业事实佐证 + 应用条件（什么时候这条权重最高）\n"
-        "- 优先级收尾：资源只够覆盖一个维度时先做哪个、为什么；最后停在最重的那个判断上\n"
-        "文体与语言：与深度研究同一底座。\n"
-        "质量判据：读者能拿这套框架去审自己手里的同类问题。禁止：凑数维度、各维度篇幅悬殊、无机制解释的名词罗列。"
     ),
     "comparison": (
         "【方案对比·机制对比视角】同一深度长文底座，透镜=两条以上技术/方案路线的机制级对比。硬性结构：\n"
@@ -89,16 +71,6 @@ ARTICLE_STYLES: dict[str, str] = {
         "- 收尾：停在最反直觉的那条发现上\n"
         "文体与语言：与深度研究同一底座。\n"
         "质量判据：读者能按同一套维度去解剖同类对象。禁止：成功学叙事、只讲结果不讲结构、无适用条件的规律。"
-    ),
-    "outlook": (
-        "【趋势推演·变量推演视角】同一深度长文底座，透镜=从当下机制推演未来演变。硬性结构：\n"
-        "- 开头：2~3 句铺垫当前行业机制或普遍预期，随后一句话亮出推演的核心判断（带时间点）\n"
-        "- 驱动变量：找出 2~4 个真正驱动演变的变量（成本曲线/政策条款/技术成熟度），每个带当前数值或状态\n"
-        "- 推演路径：变量变化如何传导到行业格局（因果链，不罗列现象）\n"
-        "- 分众影响：对两类核心受众分别意味着什么\n"
-        "- 校准收尾：给未来 6~12 个月的判断 + 现在该做的准备；最后停在最可验证的那个预测上\n"
-        "文体与语言：与深度研究同一底座。\n"
-        "质量判据：一年后可以拿这篇文章对答案。禁止：无时间点无变量的空泛预言、科幻式畅想。"
     ),
 }
 # 违禁词表（程序化合规红线）抽单一数据源 banned_words.json：与 acceptance/quality.py
@@ -157,23 +129,12 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
 DEFAULT_LENGTH = "deep"  # 深度版唯一档位（2026-11-02 用户定版：公众号做深度内容，feed 退役）
 
 
-def _audience_short(audience_note: str) -> str:
-    """受众域口径 → 标题/大纲里的"目标读者"短语（去提示前缀，取核心人群）。"""
-    t = (audience_note or "").strip()
-    for pre in ("目标读者：", "目标读者", "面向", "受众：", "受众"):
-        if t.startswith(pre):
-            t = t[len(pre):]
-    return t[:40] or "目标读者"
+def length_specs(length: str) -> dict[str, str]:
+    """档位规格（租户无关：受众经 PERSONA/品牌注入进 prompt，规格只留中性框架与句式示范）。
 
-
-def length_specs(length: str, audience_note: str) -> dict[str, str]:
-    """按租户受众域实例化档位规格：行业锚点随画像注入，模板只留中性框架与句式示范。
-
-    此前"中小企业老板/项目烂尾"等 FDE 行业话术写死在所有租户的默认规格里
-    （换行业部署即错默认）。"""
-    base = ARTICLE_LENGTHS.get(length) or ARTICLE_LENGTHS[DEFAULT_LENGTH]
-    who = _audience_short(audience_note)
-    return {k: v.replace("{{WHO}}", who) if isinstance(v, str) else v for k, v in base.items()}
+    （历史注：曾按租户受众域 replace {{WHO}}，占位符随 feed 档消亡后机制恒空转，
+    2026-11-14 拆除。）"""
+    return dict(ARTICLE_LENGTHS.get(length) or ARTICLE_LENGTHS[DEFAULT_LENGTH])
 
 # 刻意转化话术（自然收尾红线）：表本体同在 banned_words.json（与 acceptance/quality.py 共用）
 _CTA_PATTERNS = _BANNED_TABLE["cta_patterns"]
@@ -212,7 +173,7 @@ async def _gen_titles(persona_text: str, length_spec: dict[str, str],
         [{"role": "user", "content": render("article_title", PERSONA=persona_text,
                                             TITLE_SPEC=length_spec["title"])
           + material_block}],
-        purpose="article_title", max_tokens=8192, thinking="disabled")
+        max_tokens=8192, thinking="disabled")
     title = str(title_data.get("title") or "").strip()
     title_alts = [t for t in (title_data.get("title_alts") or []) if t][:2]
     return title, title_alts
@@ -230,7 +191,7 @@ async def _attach_charts(md_text: str, tenant_id: int, log_prefix: str) -> str:
         spec_resp = await gateway.complete_json(
             [{"role": "system", "content": load("article_charts")},
              {"role": "user", "content": md_text[:8000]}],
-            purpose="article_charts", max_tokens=4000,
+            max_tokens=4000,
             thinking="disabled")
         specs = [x for x in (spec_resp.get("charts") or []) if isinstance(x, dict)][:3]
     except Exception as e:  # noqa: BLE001
@@ -269,15 +230,14 @@ async def _attach_cover(md_text: str, title: str, tenant_id: int, log_prefix: st
     return md_text
 
 
-def _finalize_article(article_id: int, *, title: str, title_alts: list[str],
+def _finalize_article(article_id: int, *, title: str,
                       kb_sources: list, md_text: str) -> None:
-    """成文落库收尾（两条成文执行器共用）：写回标题/素材来源/正文并置 draft。"""
+    """成文落库收尾（各成文执行器共用）：写回标题/素材来源/正文并置 draft。"""
     with Session(engine) as s:
         article = s.get(Article, article_id)
         if article is None:
             raise RuntimeError(f"article {article_id} 不存在（落稿时已被删除）")
         article.title = title or article.title
-        article.title_alts = title_alts
         article.kb_sources = kb_sources
         article.md = md_text
         article.status = "draft"
@@ -302,7 +262,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         if article is None:
             raise RuntimeError(f"article {article_id} 不存在")
         tenant_id = article.tenant_id
-        from ..tenant_brand import audience_note_of, brand_of
+        from ..tenant_brand import brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
         topic = s.get(Topic, article.topic_id) if article.topic_id else None
@@ -337,30 +297,9 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         if style_row is not None and (style_row.value or "").strip():
             material["公众号风格画像（从已发长文提取的表达习惯，行文必须贴合）"] = style_row.value[:1200]
 
-    # ima 知识库取材（2026-11-08/09）：两条路径。
-    # A. kb_doc_ids（知识库选题线）：把选题绑定的依据文档全文抽出来注入——素材在报题时就已确定。
-    # B. kb_grounding（人工报题写文链）：按报题语义检索 ima，命中注入、零命中=缺料报错不硬写。
-    # 每晚自动直出链两者都不带——热点判决走公开事实，不受知识库闸约束。
-    kb_sources: list | None = None
-    if payload.get("kb_grounding"):
-        from ..articles.ima_kb import fetch_kb_material
-
-        ctx.set_progress(6, "检索 ima 知识库素材")
-        kb_sources, kb_text = await fetch_kb_material(article.title, article.note or "")
-        if kb_sources:
-            material["知识库素材（唯一事实来源）"] = kb_text
-            material["知识库取材纪律"] = (
-                "案例/数字/流程/验收标准等事实一律只用上面素材里出现的；"
-                "素材里没有的不许编造；公开行业事件可引用但须注明是公开信息；"
-                "每个小节至少呼应一处素材内容")
-        else:
-            raise RuntimeError(
-                f"知识库缺料：ima 检索无相关素材（报题：{(article.title or '')[:40]}）。"
-                "先往 ima 知识库补料，或改报题重写")
-
     style = payload.get("style") or DEFAULT_STYLE
-    length = "deep"  # 深度版唯一档位（2026-11-02 用户定版，feed 退役；payload.length 忽略）
-    length_spec = length_specs(length, audience_note_of(tenant_id))
+    length = "deep"  # 深度版唯一档位（2026-11-02 用户定版，feed 退役）
+    length_spec = length_specs(length)
 
     # 自动透镜（style=auto）：读选题素材挑最合适的分析透镜，无效回落默认
     if style == "auto":
@@ -370,7 +309,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         pick = await gateway.complete_json(
             [{"role": "user", "content": render("style_pick", PERSONA=_bo(tenant_id)["persona"])
               + "\n\n" + json.dumps(material, ensure_ascii=False)}],
-            purpose="style_pick", max_tokens=1024, thinking="disabled")
+            max_tokens=1024, thinking="disabled")
         picked = str(pick.get("style") or "").strip()
         curated = ("deep_dive", "practice", "inquiry", "anatomy", "comparison")
         if picked not in curated and picked in ARTICLE_STYLES:
@@ -384,9 +323,9 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
             style = DEFAULT_STYLE
     style_guide = ARTICLE_STYLES.get(style) or ARTICLE_STYLES[DEFAULT_STYLE]
 
-    # 第一段：标题组 + 配图规划（小 JSON，稳）
-    ctx.set_progress(15, "起标题、规划配图位")
-    title, title_alts = await _gen_titles(
+    # 第一段：标题组（小 JSON，稳）
+    ctx.set_progress(15, "起标题")
+    title, _ = await _gen_titles(
         persona_text, length_spec,
         f"【风格框架】{style_guide}\n\n" + json.dumps(material, ensure_ascii=False))
     # 第二段：大纲 → 分节写作 → 组装（分段小调用，绕开长输出偶发空正文）
@@ -395,7 +334,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         [{"role": "user", "content": render("article_outline", STYLE_GUIDE=style_guide,
                                             PERSONA=persona_text, LENGTH_SPEC=length_spec["outline"])
           + "\n\n选题与素材（JSON）：\n" + json.dumps(material, ensure_ascii=False)}],
-        purpose="article_outline", max_tokens=8192, thinking="disabled")
+        max_tokens=8192, thinking="disabled")
     sections_plan = [x for x in (outline.get("sections") or []) if isinstance(x, dict) and x.get("heading")]
     # 节数依从性守卫：模型偶尔无视档位节数要求只出 1~2 节（#11 实测：大纲只给 1 节，
     # 成文 475 字就"完成"了）——带明确节数重试一次，仍不达标才放行（质量评审/长度窗兜底拦截）
@@ -409,7 +348,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                         + "选题与素材（JSON）：\n" + json.dumps(material, ensure_ascii=False))
         outline2 = await gateway.complete_json(
             [{"role": "user", "content": retry_prompt}],
-            purpose="article_outline", max_tokens=8192, thinking="disabled")
+            max_tokens=8192, thinking="disabled")
         sections_plan2 = [x for x in (outline2.get("sections") or [])
                           if isinstance(x, dict) and x.get("heading")]
         if len(sections_plan2) > len(sections_plan):
@@ -441,7 +380,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                       + "\n\n选题与素材（JSON）：\n" + json.dumps(material, ensure_ascii=False))
         part = await gateway.complete(
             [{"role": "system", "content": sec_prompt}],
-            purpose="article_section", max_tokens=12000,
+            max_tokens=12000,
             thinking="disabled")
         # 截断守卫：结尾无句读 = 疑似被截断，带上下文重写一次
         if part.strip() and not part.rstrip().endswith(("。", "！", "？", "”", "」", "…")):
@@ -449,7 +388,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                 [{"role": "system", "content": sec_prompt
                   + f"\n\n注意：你上一稿在小节中间被截断了。请完整重写本节，"
                     f"篇幅 {length_spec['words']} 字，并以完整句子收尾。"}],
-                purpose="article_section", max_tokens=12000,
+                max_tokens=12000,
                 thinking="disabled")
         # 合规守卫：违禁词/刻意转化话术命中即定向重写一次（与 acceptance/quality.py 同表）
         _hits = _banned_hits(part)
@@ -462,7 +401,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                     "所有判断改为概率化、可验证的表述，禁止任何'最/第一/保证/百分百'类绝对化措辞，"
                     "禁止评论区/私信/关注/扣字/领资料等与读者互动的引导——"
                     f"「下一步」只写读者业务上的动作，篇幅 {length_spec['words']} 字，以完整句子收尾。"}],
-                purpose="article_section", max_tokens=12000,
+                max_tokens=12000,
                 thinking="disabled")
         # 标题行防线：分节模型偶尔无视「不要写标题行」把「## 标题」写进正文开头（2026-10-08
         # deep 档实测一篇重复 2 处）——组装前剥掉正文里的 2 级标题行（只有组装处该出 ##；### 子标题保留）
@@ -478,7 +417,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
             edited = await gateway.complete(
                 [{"role": "system", "content": load("article_editor")},
                  {"role": "user", "content": md_text}],
-                purpose="article_editor", max_tokens=20000,
+                max_tokens=20000,
                 thinking="disabled")
             # 元指令防线：编辑模型偶尔把「全文已符合修订标准…原样输出」这类流水线
             # 自述写进正文（2026-10-02 P1 实测 voice=5.0）——命中即弃用编辑稿保留原稿
@@ -496,27 +435,10 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
     # 数据图表（专职步骤）：提取数据对比点 → matplotlib 渲染 → 按节插入。
     md_text = await _attach_charts(md_text, tenant_id, "[article]")
 
-    # 自动配图（Q：文章要有一堆配图且自动出现）：剩余图片占位逐张 CogView 生成，
-    # 单篇成本约 0.06×张数；失败跳过保留占位标记（可手动在占位卡再生成）
-    from ..articles.images import gen_image
-
-    placeholders = re.findall(r"!\[([^\]]*)\]\(search:([^)]*)\)", md_text)
-    for cap, kw in placeholders:
-        try:
-            r = await asyncio.to_thread(gen_image, cap, kw)
-            fname = Path(r["file"]).name
-            md_text = md_text.replace(f"![{cap}](search:{kw})", f"![]({fname})", 1)
-            ctx.set_progress(97, f"AI 配图完成：{(cap or kw)[:28]}")
-        except Exception as e:  # noqa: BLE001 单张失败不阻塞成文
-            print(f"[article] 自动配图失败（保留占位）: {type(e).__name__}: {str(e)[:80]}")
-
-
-
     # 头图（深靛渐变+白字标题+账号名）：渲染并插入 md 顶部
     md_text = await _attach_cover(md_text, title, tenant_id, "[article]")
 
-    _finalize_article(article_id, title=title, title_alts=title_alts,
-                      kb_sources=kb_sources or [], md_text=md_text)
+    _finalize_article(article_id, title=title, kb_sources=[], md_text=md_text)
     ctx.set_progress(100, "完成")
     return {"article_id": article_id, "title": title, "style": style, "length": length}
 
@@ -565,7 +487,7 @@ async def _quality_gate(ctx: JobContext, md_text: str) -> float | None:
     try:
         verdict = await gateway.complete_json(
             [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
-            purpose="article_quality_gate", max_tokens=1024, thinking="disabled")
+            max_tokens=1024, thinking="disabled")
         score = float(verdict.get("overall") or 0)
         worst = str(verdict.get("worst") or "")[:80]
     except Exception as e:  # noqa: BLE001 自评失败不阻塞
@@ -580,14 +502,14 @@ async def _quality_gate(ctx: JobContext, md_text: str) -> float | None:
             [{"role": "user", "content": render("article_kb_polish",
                                                 VIOLATIONS=f"主编评审 {score:.1f} 分，最大问题：{worst}。按此意见改写全文，其余要求不变。",
                                                 DRAFT=md_text)}],
-            purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
+            max_tokens=8192, thinking="disabled")
         polished = (polished or "").strip()
         if polished and _content_signature(polished) == _content_signature(md_text):
             md_text = polished
             try:
                 verdict2 = await gateway.complete_json(
                     [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
-                    purpose="article_quality_gate", max_tokens=1024, thinking="disabled")
+                    max_tokens=1024, thinking="disabled")
                 score = float(verdict2.get("overall") or score)
                 print(f"[kb-write] 重写后自评 {score:.1f}")
             except Exception:  # noqa: BLE001
@@ -597,145 +519,6 @@ async def _quality_gate(ctx: JobContext, md_text: str) -> float | None:
     except Exception as e:  # noqa: BLE001 重写失败不阻塞
         print(f"[kb-write] 质量重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
     return score
-
-
-@register_executor("article_kb_write", on_fail=_article_generate_fail)
-async def article_kb_write(ctx: JobContext, payload: dict) -> dict:
-    """知识库选题成文：绑定依据文档全文，单遍写出书面语 1900~2200 字规格。
-
-    与 article_generate 的分节流水线不同——素材在选用时已锁定（kb_doc_ids），
-    配方的关键是单遍成文让全分辨率细节不被大纲切碎（配方见 prompts/article_kb_write.md，
-    由两篇认可稿反推固化）。失败回退复用 _article_generate_fail（文章不得卡"生成中"）。
-    """
-    article_id = payload["article_id"]
-    with Session(engine) as s:
-        article = s.get(Article, article_id)
-        if article is None:
-            raise RuntimeError(f"article {article_id} 不存在")
-        tenant_id = article.tenant_id
-        article_title0 = article.title or ""
-        article_note = article.note or ""
-        docs = [d for d in (article.kb_doc_ids or []) if isinstance(d, dict) and d.get("media_id")]
-        judgment = article_note or article_title0  # 选题池线退役（2026-11-13）：判词只取报题备注/标题
-        from ..tenant_brand import audience_note_of, brand_of
-
-        persona_text = brand_of(tenant_id)["persona"]
-        length_spec = length_specs("deep", audience_note_of(tenant_id))
-        from ..articles.ima_kb import kb_config
-
-        cfg = kb_config(s)
-    if not docs:
-        raise RuntimeError("知识库成文缺少依据文档（kb_doc_ids 为空），无法按素材成文")
-    if cfg is None:
-        raise RuntimeError("ima 知识库未启用或凭证不全，无法取依据文档全文")
-
-    # 依据文档全文（ima COS 直链逐篇拉取）；全空=多半是 403 限流窗，走退避梯子
-    from ..articles.ima_kb import fetch_full_doc
-
-    ctx.set_progress(8, f"取依据文档全文（{len(docs)} 篇）")
-    parts: list[str] = []
-    got_any = False
-    for i, d in enumerate(docs, 1):
-        text = await fetch_full_doc(cfg["client_id"], cfg["api_key"], str(d["media_id"]))
-        got_any = got_any or bool(text.strip())
-        parts.append(f"【文档{i}】{str(d.get('title') or '').strip()}\n{text}")
-    material = "\n\n".join(parts)
-    if not got_any:
-        raise TransientError("依据文档全文全部获取失败（ima 限流或文档不可读），稍后自动重试")
-
-    # 作者案头：先把"要说的一句新话"想出来（增量判断+主证据+砍料+带走动作）——
-    # 没有这道，成稿必然沦为对单篇依据文档的改写（#8 教训：判断=文档标题复述）
-    ctx.set_progress(18, "作者案头：提炼增量判断与主证据")
-    brief = None
-    try:
-        brief = await gateway.complete_json(
-            [{"role": "user", "content": render("article_kb_brief", MATERIAL=material)}],
-            purpose="article_kb_brief", max_tokens=4000, thinking="disabled")
-    except Exception as e:  # noqa: BLE001 简报失败降级回选题判断，不阻塞成文
-        print(f"[kb-write] 简报失败，降级用选题判断: {type(e).__name__}: {str(e)[:80]}")
-    b_judgment = str((brief or {}).get("judgment") or "").strip()
-    if not b_judgment:
-        b_judgment = judgment
-        print("[kb-write] 增量判断为空，降级用选题判断")
-    brief_text = json.dumps(brief, ensure_ascii=False) if brief else json.dumps(
-        {"judgment": b_judgment, "evidence": [], "cut": [], "takeaway": ""}, ensure_ascii=False)
-
-    # 标题组（与主线同一 prompt：标题+备选）
-    ctx.set_progress(30, "起标题")
-    title_from_call, title_alts = await _gen_titles(
-        persona_text, length_spec, "\n\n选题素材：\n" + material[:9000])
-
-    # 带范本成文：两篇认可稿全文进提示词——模型先见过"好长什么样"，再谈规则
-    ctx.set_progress(45, "成文（范本对齐+硬红线）")
-    anchors_text = load("article_kb_anchors")
-    body = await gateway.complete(
-        [{"role": "user", "content": render("article_kb_write", ANCHORS=anchors_text,
-                                            BRIEF=brief_text, MATERIAL=material)}],
-        purpose="article_kb_write", max_tokens=8192, thinking="disabled")
-    body = (body or "").strip()
-    if body.startswith("```"):  # 剥掉模型偶发的代码围栏
-        body = re.sub(r"^```[a-z]*\n?", "", body)
-        body = re.sub(r"\n?```$", "", body).strip()
-    lines = body.split("\n")
-    if not lines or not lines[0].lstrip().startswith("# "):
-        raise TransientError("成文输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
-    title = lines[0].lstrip()[2:].strip() or title_from_call or article_title0
-    md_text = "\n".join(lines[1:]).strip()
-    n_chars = len(re.sub(r"\s", "", md_text))
-    if n_chars < 1500:
-        raise TransientError(f"成文仅 {n_chars} 字（规格 1900~2200、下限 1500），疑似截断，稍后自动重试")
-
-    # 禁令机检→定向重写（只动违规处；数字/图片标记签名守卫，变了弃用）
-    anchor_texts = [x for x in anchors_text.split("## 范本")[1:] if len(x) > 200]
-    violations = _kb_style_violations(md_text, anchor_texts)
-    if violations:
-        ctx.set_progress(75, f"机检命中 {len(violations)} 项，定向重写")
-        try:
-            polished = await gateway.complete(
-                [{"role": "user", "content": render("article_kb_polish",
-                                                    VIOLATIONS="\n".join(f"- {v}" for v in violations),
-                                                    DRAFT=md_text)}],
-                purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
-
-            polished = (polished or "").strip()
-            if polished and _content_signature(polished) == _content_signature(md_text):
-                remain = _kb_style_violations(polished, anchor_texts)
-                print(f"[kb-write] 定向重写完成，剩余违规 {len(remain)} 项"
-                      + (f"：{remain[0][:40]}" if remain else ""))
-                md_text = polished
-            else:
-                print("[kb-write] 重写稿签名不符（数字/图片变化），保留原稿")
-        except Exception as e:  # noqa: BLE001 重写失败不阻塞成文
-            print(f"[kb-write] 定向重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
-
-    # 数据图表：与主线同一套后处理；提取不到就不加，绝不编造
-    md_text = await _attach_charts(md_text, tenant_id, "[kb-write]")
-
-    # 头图（渲染失败不影响正文）
-    ctx.set_progress(92, "渲染头图")
-    md_text = await _attach_cover(md_text, title, tenant_id, "[kb-write]")
-
-    # 质量自评闸门：低于 7 分按评审意见定向重写一次（2026-11-10 用户定版：系统全干）
-    ctx.set_progress(95, "质量自评")
-    score = await _quality_gate(ctx, md_text)
-
-    _finalize_article(article_id, title=title, title_alts=title_alts,
-                      kb_sources=docs, md_text=md_text)
-
-    # 自动排版成「待发」终态：用户只做最终决策（公众号后台点发表 / 一键复制），不再手动渲染
-    from .renderer import render_wechat_html
-    with Session(engine) as s:
-        art = s.get(Article, article_id)
-        if art is not None and (art.md or "").strip():
-            art.html = render_wechat_html(art.md)
-            art.status = "rendered"
-            if score is not None:
-                art.note = (art.note or "") + f"｜质量自评 {score:.1f}"
-            s.add(art)
-            s.commit()
-    ctx.set_progress(100, "完成：已排版待发")
-    return {"article_id": article_id, "title": title, "style": "kb_write",
-            "quality": score}
 
 
 def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str) -> str:
@@ -818,7 +601,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
           "（真实教训：《甲醇混动车成本账》受众对但主题是汽车，与目标零关系）\n"
           '\n清单：\n' + json.dumps(items, ensure_ascii=False) +
           '\n输出 JSON：{"relevant": [双锚都命中的序号数组]}。一条都没有就给空数组。'}],
-        purpose="hotspot_keywords", max_tokens=1024, thinking="disabled")
+        max_tokens=1024, thinking="disabled")
     keep = {int(x) for x in (screen.get("relevant") or []) if str(x).strip().isdigit()}
     items = [x for i, x in enumerate(items) if (i + 1) in keep] if keep else []
     if not items:
@@ -833,7 +616,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     data = await gateway.complete_json(
         [{"role": "user", "content": render("article_hotspots", PERSONA=persona_text)
           + "\n\n热点清单（JSON）：\n" + json.dumps(items, ensure_ascii=False)}],
-        purpose="article_hotspots", max_tokens=4000, thinking="disabled")
+        max_tokens=4000, thinking="disabled")
     picks = [x for x in (data.get("topics") or []) if isinstance(x, dict) and (x.get("title") or "").strip()][:1]
     if not picks:
         raise TransientError("热点提炼未产出切角（LLM 空响应），稍后自动重试")
@@ -901,7 +684,7 @@ async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
             "{\"note\": \"200 字以内的风格画像（句式习惯/开头收尾方式/论证风格/用词偏好/忌讳），"
             "写成给写作模型的指令，不要罗列例子\"}\n\n"
             + "\n\n———\n\n".join(samples)}],
-        purpose="article_style_extract", max_tokens=2000, thinking="disabled")
+        max_tokens=2000, thinking="disabled")
     note = str(data.get("note") or "").strip()
     if not note:
         raise TransientError("风格提炼空响应，稍后自动重试")
@@ -923,8 +706,11 @@ async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
 # /select 选用建草稿链写 article_kb_write、/dismiss 不做。kb_auto 删除后已无任何提交方，
 # 前端 UI 2026-11-10 已撤、全仓 0 调用 select/dismiss，回滚窗口已过。prompt
 # article_kb_topic.md 与 kb_topics/kb_documents 两张表同日移除（生产库旧表不动，
-# 对齐 harvest_profiles 划线退役口径）。手动报题 draft→article_kb_write 保留；
-# 知识库成文现行线=挖掘器→清单→改编器（自动）+手动报题。
+# 对齐 harvest_profiles 划线退役口径）。手动报题线（POST /draft→/{id}/write）与
+# article_kb_write 执行器因 kb_doc_ids 全仓零写入方成为死链，2026-11-14 随死码清理一并
+# 拆除（/write 的 kb_grounding 取材链同删）；article_kb_write.md 保留——深读回滚线的
+# 成文范本仍挂它（article_kb_brief.md 无其余消费者，同日删除）。
+# 知识库成文现行线=挖掘器→清单→改编器（自动）。
 
 
 # article_kb_auto（全自动圈题成文，2026-11-10 定版）于 2026-11-13 删除：注册后从未有

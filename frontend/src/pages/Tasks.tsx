@@ -31,7 +31,6 @@ const FAIL_CLASS_LABEL: Record<string, string> = {
 
 interface Counts {
   running: number
-  parked: number  // 已退役状态（历史行兼容）
   queued: number
   superseded: number
   failed: number
@@ -124,7 +123,7 @@ type Tab = 'run' | 'sched' | 'history'
 export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [items, setItems] = useState<TaskRow[]>([])
   const [counts, setCounts] = useState<Counts>({
-    running: 0, parked: 0, queued: 0, superseded: 0, failed: 0, succeeded: 0,
+    running: 0, queued: 0, superseded: 0, failed: 0, succeeded: 0,
     summary: { active: 0, todo: 0, done: 0 },
   })
   const [total, setTotal] = useState(0)

@@ -42,8 +42,6 @@ def _coerce(kind: str, raw: str):
         return bool(v)
     if kind == "int":
         return int(v)
-    if kind == "float":
-        return float(v)
     return str(v)
 
 

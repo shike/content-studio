@@ -80,7 +80,6 @@ def main() -> int:
     os.makedirs(img_dir, exist_ok=True)
     Image.new("RGB", (1080, 460), (94, 106, 210)).save(os.path.join(img_dir, "cover_e2e.png"))
     article_title = f"E2E 种子文章 {stamp}"
-    topic_title = f"E2E 种子选题 {stamp}"
     check("种子写入（文章+选题+关闭首登改密）", True)
 
     # ---------- E2E 本体（Playwright） ----------

@@ -201,10 +201,8 @@ async def check_topic(row: RadarTopic) -> dict:
     with Session(engine) as s:
         row = s.merge(row)
         row.seen_ids = ((row.seen_ids or []) + sorted(fresh_ids))[-SEEN_CAP:]
-        row.new_since_last = len(fresh_ids)
-        row.recent = recent
         row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC
-        spiked = bool(row.enabled and row.notify and row.new_since_last >= SPIKE_NEW and seen)
+        spiked = bool(row.enabled and row.notify and len(fresh_ids) >= SPIKE_NEW and seen)
         s.add(row)
         s.commit()
 

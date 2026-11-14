@@ -137,7 +137,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     data = await gateway.complete_json(
         [{"role": "system", "content": prompt},
          {"role": "user", "content": json.dumps(topic_info, ensure_ascii=False)}],
-        purpose="script_generate", max_tokens=20000)  # v7 prompt 变长，思考链耗尽 12000 致空正文（2026-10-10 实测）
+        max_tokens=20000)  # v7 prompt 变长，思考链耗尽 12000 致空正文（2026-10-10 实测）
     versions = _normalize_versions((data.get("versions") or []))[:1]
     if not versions:
         raise RuntimeError("脚本生成失败：没有任何可用版本")
@@ -177,7 +177,7 @@ async def _polish_core(versions: list[dict], use_style: bool = True,
         [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style),
                                               LENGTH=length_spec, CTA_RULE=cta_rule)},
          {"role": "user", "content": json.dumps(versions, ensure_ascii=False)}],
-        purpose="script_polish", max_tokens=20000)  # 同上，v5 动刀清单变长
+        max_tokens=20000)  # 同上，v5 动刀清单变长
     polished = _normalize_versions(data.get("versions") or [])
     critiques = data.get("critiques") or []
     merged = list(versions)
@@ -257,7 +257,7 @@ async def finalize_script(script_id: int, version_index: int = 0) -> Script:
     data = await gateway.complete_json(
         [{"role": "system", "content": load("script_finalize")},
          {"role": "user", "content": json.dumps(chosen, ensure_ascii=False)}],
-        purpose="script_finalize", max_tokens=8000)
+        max_tokens=8000)
 
     with Session(engine) as s:
         script = s.get(Script, script_id)

@@ -121,17 +121,14 @@ def client_ip(request: Request) -> str:
     return peer or "unknown"
 
 
-def create_session(user: User, tenant_id: int = 0) -> tuple[str, datetime]:
-    """创建服务端会话，返回 (明文 token, 带 UTC 时区的过期时间)。token 只存哈希。
-
-    tenant_id=会话的活跃租户；0 取用户默认租户（改密重建等场景应显式传原活跃租户，
-    否则用户会被切回默认租户）。"""
+def create_session(user: User) -> tuple[str, datetime]:
+    """创建服务端会话，返回 (明文 token, 带 UTC 时区的过期时间)。token 只存哈希。"""
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with Session(engine) as s:
         s.add(UserSession(token_hash=token_hash, user_id=user.id,
-                          tenant_id=tenant_id or user.tenant_id,
+                          tenant_id=user.tenant_id,
                           expires_at=expires.replace(tzinfo=None)))
         s.commit()
     return token, expires

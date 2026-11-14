@@ -3,7 +3,7 @@ import { api } from './api'
 /** 流水线待办统计（工作台卡片数据源）。
 2026-11-10 清理：pendingScripts/unwrittenTopics/unwrittenPersona/unwrittenLeadgen/finalScripts
 5 个孤儿字段已随后端 /stats/todos 同步删除，契约只剩下面这些。 */
-export interface TodoStats {
+interface TodoStats {
   draftTopics: number // 待审选题（两线合计）
   draftTopicsPersona: number // 待审选题·人设库
   draftTopicsLeadgen: number // 待审选题·获客库
@@ -15,7 +15,7 @@ export interface TodoStats {
   openCandidatesLeadgen: number // 候选账号待定夺·获客线
 }
 
-export async function fetchTodoStats(): Promise<TodoStats> {
+async function fetchTodoStats(): Promise<TodoStats> {
   // 服务端真值口径（/api/stats/todos，全库·本租户）——此前前端拉 4 个大列表自行派生，
   // 窗口口径不一致（scripts 被后端截断 200/ articles 只拉 100）且随数据量增长失真
   return api<TodoStats>('/stats/todos')
@@ -23,7 +23,7 @@ export async function fetchTodoStats(): Promise<TodoStats> {
 
 /** 菜单徽章统计（2026-11-07 产线树定版）：徽章落在每个叶子页面自身，
 不再做产线合计——树组徽章由 App 按子叶求和。过程性数字（生成中/排队/待拆）不上菜单。 */
-export interface MenuStats {
+interface MenuStats {
   today: number // 今天=待审选题合计
   p_topics: number // 今日靶子=待备稿靶子（2026-11-11 人设号观点怼热点主轴）
   p_content: number // 内容看板=待定稿脚本·人设

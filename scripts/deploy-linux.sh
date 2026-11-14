@@ -113,7 +113,8 @@ EOF
      改好域名后放到 /etc/nginx/conf.d/，certbot --nginx -d 你的域名 签发证书；
      .env 里设 COOKIE_SECURE=1（HTTPS 下会话 Cookie 只走加密通道）。
   2) Playwright 系统依赖（抓取抖音用）：backend/.venv/bin/playwright install-deps chromium
-  3) ASR 模型（首次）：跑一次拆解任务会自动下载（约 3.5GB，建议 HF_ENDPOINT=https://hf-mirror.com）
+  3) ASR 模型（首次）：跑一次拆解任务会自动下载（large-v3 约 3.5GB；建议 .env 设 ASR_MODEL=small
+     约 466MB 够用，HF_ENDPOINT=https://hf-mirror.com 加速）
   4) 查看日志：journalctl -u ${SVC} -f ｜ 看门狗：journalctl -u ${WDSVC} -n 20
 TIP
 }

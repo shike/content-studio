@@ -20,19 +20,13 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode
 
+from ..browser import parse_cookie_header
+
 
 class CreatorCookieError(RuntimeError):
     """cookie 失效/未登录（用户需要重新导出）。"""
 
 _WORK_LIST_PATH = "janus/douyin/creator/pc/work_list"
-
-
-def _parse_cookie(cookie_str: str) -> list[dict]:
-    """整串 Cookie 头 → playwright cookie 列表（.douyin.com 全域）。
-    （2026-11-08 实现上移 browser.parse_cookie_header 供下载器登录态共用）"""
-    from ..browser import parse_cookie_header
-
-    return parse_cookie_header(cookie_str)
 
 
 def _entry_of(raw: dict) -> Optional[dict]:
@@ -89,7 +83,7 @@ def fetch_all_videos(cookie: str, max_pages: int = 60) -> tuple[Optional[list[di
         return None, "未安装 playwright"
     from ..browser import launch, ua
 
-    jar = _parse_cookie(cookie)
+    jar = parse_cookie_header(cookie)
     if not any(c["name"] in ("sessionid", "sessionid_ss") for c in jar):
         return None, ("cookie 里没有 sessionid——拿到的不像是创作者中心的登录态"
                       "（要在 creator.douyin.com 登录状态下取）")

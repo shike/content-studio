@@ -104,7 +104,7 @@ class _WechatTransformer(HTMLParser):
         return f"<{tag}{attrs_str}{style_attr}>"
 
     def _img_html(self, attrs) -> str | None:
-        """<img> 专项：本地配图 → 内联本地地址；search: 关键词 → 虚线占位卡。
+        """<img> 专项：本地配图 → 内联本地地址。
 
         返回 None 表示交给通用标签路径（外链图等）。注意两种本地图写法都要认：
         裸文件名（gen_x.png）与 md 拼装实际用的 scheme 形态（cover:x.png / chart:x.png）——
@@ -120,20 +120,6 @@ class _WechatTransformer(HTMLParser):
             # 历史文章引用 kg_ 图时公众号粘贴即裂图
             keep = [(k, v) for k, v in attrs if k not in ("src", "style")]
             return self._styled_open("img", keep + [("src", f"/api/articles/images/{srcv}")])
-        if srcv.startswith("search:"):
-            kw = srcv[len("search:"):].strip()
-            cap = (attrs_d.get("alt") or "").strip()
-            card = (
-                '<section style="margin:16px 0;border:1px dashed #b9b9b9;'
-                'border-radius:8px;padding:18px 14px;text-align:center;background:#fafafa">'
-                '<div style="font-size:22px;line-height:1">🖼️</div>'
-                f'<div style="margin-top:8px;font-size:14px;color:#444">配图：{_esc(cap)}</div>'
-                f'<div style="margin-top:4px;font-size:12px;color:#999">搜图/制图关键词：{_esc(kw)}'
-                ' ｜ 插图后删除本占位框</div></section>'
-            )
-            if self._depth == 0:
-                return f'<section style="{_ROOT_STYLE}">{card}</section>'
-            return card
         return None
 
     def handle_starttag(self, tag, attrs):

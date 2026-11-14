@@ -70,7 +70,7 @@ def _strip_fence(body: str) -> str:
 @register_executor("article_adapt", on_fail=_article_generate_fail)
 async def article_adapt(ctx: JobContext, payload: dict) -> dict:
     """每日改编：清单取项（CAS）→ 拉源文全文 → 保骨架保原话换口径成文 → 原创度闸 → 机检 → 排版。"""
-    from ..tenant_brand import audience_note_of, brand_of
+    from ..tenant_brand import brand_of
     from .ima_kb import fetch_full_doc, kb_config
 
     with Session(engine) as s:
@@ -148,7 +148,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         # 标题组 + 改编成文
         persona_text = brand_of(1)["persona"]
         title_from_call, title_alts = await _gen_titles(
-            persona_text, length_specs("deep", audience_note_of(1)),
+            persona_text, length_specs("deep"),
             "\n\n选题素材：\n" + source[:6000])
         ctx.set_progress(30, "改编成文（保骨架保原话换口径）")
         quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
@@ -156,7 +156,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             [{"role": "user", "content": render("article_adapt_write",
                                                 SOURCE=source, ANGLE=angle,
                                                 QUOTES=quotes_block)}],
-            purpose="article_adapt_write", max_tokens=20000, thinking="enabled")
+            max_tokens=20000, thinking="enabled")
         body = _strip_fence(body)
         lines = body.split("\n")
         if not lines or not lines[0].lstrip().startswith("# "):
@@ -176,7 +176,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 [{"role": "user", "content": render("article_adapt_reduce",
                                                     HITS="\n".join(f"- {h}" for h in hits),
                                                     DRAFT=md_text, SOURCE=source[:_SRC_CAP])}],
-                purpose="article_adapt_reduce", max_tokens=8192, thinking="disabled")
+                max_tokens=8192, thinking="disabled")
             polished = _strip_fence(polished)
             p_lines = polished.split("\n")
             if p_lines and p_lines[0].lstrip().startswith("# "):
@@ -208,7 +208,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 [{"role": "user", "content": render("article_kb_polish",
                                                     VIOLATIONS="\n".join(f"- {v}" for v in violations),
                                                     DRAFT=md_text)}],
-                purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
+                max_tokens=8192, thinking="disabled")
             polished = _strip_fence(polished)
             if polished and _content_signature(polished) == _content_signature(md_text):
                 md_text = polished
@@ -252,7 +252,6 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         ranked = await score_titles(cands)
         if ranked and ranked[0][1] > 0:
             title = ranked[0][0]
-        title_alts = [t for t, _ in ranked if t != title] or title_alts
     except TransientError:
         with Session(engine) as s:
             it = s.get(ContentItem, item_id)
@@ -268,7 +267,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
     md_text = await _attach_cover(md_text, title, 1, "[adapt]")
 
     # ── 定稿排版 + 清单项收尾 + 当日账 ──
-    _finalize_article(article_id, title=title, title_alts=title_alts,
+    _finalize_article(article_id, title=title,
                       kb_sources=[{"media_id": mid, "title": src_title}], md_text=md_text)
     from .renderer import render_wechat_html
     with Session(engine) as s:

@@ -26,8 +26,6 @@ def _ensure_disk_space(min_gb: int = 2) -> None:
     """磁盘余量硬防御：不足时显式报错（进失败中台待处置），绝不写满系统盘。"""
     import shutil
 
-    from ..settings import settings
-
     free_gb = shutil.disk_usage(settings.data_dir).free / 1e9
     if free_gb < min_gb:
         raise RuntimeError(

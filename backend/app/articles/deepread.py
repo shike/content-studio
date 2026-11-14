@@ -68,7 +68,7 @@ async def _digest_doc(ctx: JobContext, cfg: dict, title: str, text: str,
         note = await gateway.complete_json(
             [{"role": "user", "content": render("article_deepread_digest",
                                                 DOC=f"《{title}》\n\n{text}")}],
-            purpose="article_deepread_digest", max_tokens=2000, thinking="disabled")
+            max_tokens=2000, thinking="disabled")
     except Exception as e:  # noqa: BLE001 单篇消化失败跳过（该篇内容当天缺席，不阻塞整批）
         print(f"[deepread] 消化失败（{title[:24]}）: {type(e).__name__}: {str(e)[:80]}")
         return None
@@ -175,7 +175,7 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
             [{"role": "user", "content": render("article_deepread_synth",
                                                 RECENT=recent_block,
                                                 DIGESTS=_digest_book(notes))}],
-            purpose="article_deepread_synth", max_tokens=4000, thinking="disabled")
+            max_tokens=4000, thinking="disabled")
     except Exception as e:  # noqa: BLE001
         raise TransientError(f"跨文档综合失败（{type(e).__name__}），稍后自动重试")
     judgment = str((brief or {}).get("judgment") or "").strip()
@@ -207,11 +207,10 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
 
     # ── 标题组 + 范本成文（与池子线同一写作 prompt：范本对齐+硬红线继承）──
     material = _digest_book(notes)
-    from ..tenant_brand import audience_note_of
 
     persona_text = brand_of(1)["persona"]
-    title_from_call, title_alts = await _gen_titles(
-        persona_text, length_specs("deep", audience_note_of(1)),
+    title_from_call, _ = await _gen_titles(
+        persona_text, length_specs("deep"),
         "\n\n选题素材：\n" + material[:9000])
     ctx.set_progress(72, "成文（范本对齐+硬红线）")
     anchors_text = load("article_kb_anchors")
@@ -219,7 +218,7 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
         [{"role": "user", "content": render("article_kb_write", ANCHORS=anchors_text,
                                             BRIEF=json.dumps(brief, ensure_ascii=False),
                                             MATERIAL=material)}],
-        purpose="article_kb_write", max_tokens=8192, thinking="disabled")
+        max_tokens=8192, thinking="disabled")
     body = (body or "").strip()
     if body.startswith("```"):
         body = re.sub(r"^```[a-z]*\n?", "", body)
@@ -243,7 +242,7 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
                 [{"role": "user", "content": render("article_kb_polish",
                                                     VIOLATIONS="\n".join(f"- {v}" for v in violations),
                                                     DRAFT=md_text)}],
-                purpose="article_kb_polish", max_tokens=8192, thinking="disabled")
+                max_tokens=8192, thinking="disabled")
             polished = (polished or "").strip()
             if polished and _content_signature(polished) == _content_signature(md_text):
                 md_text = polished
@@ -275,7 +274,7 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
 
     kb_sources = [{"media_id": str(d.get("media_id") or ""), "title": str(d.get("title") or "")}
                   for d in batch if d.get("media_id")]
-    _finalize_article(article_id, title=title, title_alts=title_alts,
+    _finalize_article(article_id, title=title,
                       kb_sources=kb_sources, md_text=md_text)
     from .renderer import render_wechat_html
     with Session(engine) as s:

@@ -3,22 +3,18 @@
 腾讯 ima 官方 OpenAPI（凭证只发 ima.qq.com，鉴权=三个明文头，无签名）。
 配置走 app_settings：ima_kb_enabled=1 / ima_client_id / ima_api_key /
 ima_kb_ids（逗号分隔，只配用户自建库——订阅的他人库不是自有经验，不作素材源）。
-生成铁律（用户钉死）：检索零命中 = 缺料，报错不硬写。
+（历史注：检索取材 fetch_kb_material 曾服务人工报题写文链「零命中=缺料报错不硬写」，
+该链 2026-11-14 拆除；本模块现只服务挖掘器/改编器/深读的目录遍历与全文拉取。）
 """
 from __future__ import annotations
 
 import httpx
 from sqlmodel import Session
 
-from ..db import engine
-from ..jobs.errors import TransientError
 from ..models import AppSetting
 
 BASE = "https://ima.qq.com"
 CTX = "skill_version=content-studio-1.0.0"
-MAX_HITS = 6          # 最多取几篇素材原文
-PER_SOURCE_CHARS = 4000   # 单篇截选
-TOTAL_CHARS = 16000   # 注入总量（三段 prompt 的 material 均摊可控）
 
 # 选题线默认遍历目录（水滴跃动 AI-FDE 库核心真货区；可用 ima_topic_folders 覆盖）
 DEFAULT_TOPIC_FOLDERS = "folder_7520695068157353:案例-交付实战复盘,folder_7520695084935296:案例-案例集与行业标杆,folder_7520695080739753:案例-行业场景与趋势,folder_7520695063956771:案例-方法论与工作包,folder_7520695126877635:岗位认知与转型路径,folder_7520695613417012:接单报价与个人品牌,folder_7520695097516987:市场与人才数据,folder_7520695110094246:研究报告与白皮书,folder_7520695378529762:能力模型与角色认知,folder_7520695445637163:企业落地与组织,folder_7520695386917111:行业观察与源流,folder_7520695206571358:工程规范与工具箱"
@@ -122,77 +118,3 @@ async def _post(cfg: dict, path: str, body: dict) -> dict:
     if data.get("code") != 0:
         raise RuntimeError(f"ima {path} 业务错误: {data.get('msg')}")
     return data.get("data") or {}
-
-
-def _queries(title: str, note: str) -> list[str]:
-    """短词查询（ima 搜索按标题/关键词匹配：「项目验收」零命中而「验收」命中 8 条——实证）。"""
-    import re
-
-    t = re.sub(r"[，。！？：；、·…—\"'（）()\[\]\s]", "", title or "")
-    qs = [t[:10]] if t else []
-    for w in re.split(r"[^\w一-龥]+", note or ""):
-        w = w[:8]
-        if len(w) >= 2 and w not in qs:
-            qs.append(w)
-        if len(qs) >= 3:
-            break
-    return qs or ["FDE"]
-
-
-async def fetch_kb_material(title: str, note: str) -> tuple[list | None, str]:
-    """返回 (sources, material_text)。sources=None=未配置（调用方走旧行为）；
-    []=已配置但零命中（缺料，调用方报错不硬写）。"""
-    with Session(engine) as s:
-        cfg = kb_config(s)
-    if cfg is None:
-        return None, ""
-
-    queries = _queries(title, note)
-    hits: dict[str, dict] = {}
-    api_ok = False
-    for q in queries:
-        for kb_id in cfg["kb_ids"]:
-            try:
-                data = await _post(cfg, "openapi/wiki/v1/search_knowledge",
-                                   {"query": q, "knowledge_base_id": kb_id, "cursor": ""})
-                api_ok = True
-            except Exception as e:  # noqa: BLE001 单点失败继续别的库/词
-                print(f"[ima-kb] 检索失败（{q[:10]}/{kb_id[:12]}）: {type(e).__name__}: {str(e)[:80]}")
-                continue
-            for it in data.get("info_list") or []:
-                mid = str(it.get("media_id") or "")
-                if mid and mid not in hits:
-                    hits[mid] = {"title": str(it.get("title") or "")[:60],
-                                 "media_id": mid, "kb_id": kb_id}
-            if len(hits) >= MAX_HITS:
-                break
-        if len(hits) >= MAX_HITS:
-            break
-
-    if not hits:
-        if not api_ok:
-            raise TransientError("ima 知识库接口全部失败（网络/凭证问题），稍后自动重试")
-        return [], ""
-
-    blocks: list[str] = []
-    sources: list[dict] = []
-    for h in list(hits.values())[:MAX_HITS]:
-        try:
-            info = await _post(cfg, "openapi/wiki/v1/get_media_info",
-                               {"media_id": h["media_id"]})
-            url = (info.get("url_info") or {}).get("url") or ""
-            if not url:
-                continue
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cli:
-                r = await cli.get(url)
-            if r.status_code != 200 or not r.content or len(r.content) > 400_000:
-                continue
-            text = r.content.decode("utf-8", "ignore")
-            if text[:5] == "%PDF" or not text.strip():
-                continue  # 非文本原文跳过（v1 只吃 markdown/txt；PDF 走 ima 客户端看）
-            blocks.append(f"【素材：{h['title']}】\n{text[:PER_SOURCE_CHARS]}")
-            sources.append(h)
-        except Exception as e:  # noqa: BLE001 单篇失败不阻塞其余素材
-            print(f"[ima-kb] 取原文失败（{h['title'][:24]}）: {type(e).__name__}: {str(e)[:80]}")
-
-    return sources, "\n\n".join(blocks)[:TOTAL_CHARS]

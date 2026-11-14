@@ -1,6 +1,4 @@
-"""GET /api/health：服务、数据库、LLM、本地依赖与外部容器健康。"""
-import shutil
-
+"""GET /api/health：服务、数据库、LLM 与本地浏览器依赖健康。"""
 from fastapi import APIRouter
 from sqlmodel import Session, text
 
@@ -24,7 +22,7 @@ def health() -> dict:
     try:  # playwright 浏览器二进制探测：清理工具清掉缓存目录时这里立刻可见（不启动浏览器，只查路径）
         import os
 
-        from .. import browser as _browser  # 先经 browser.py 写入 PLAYWRIGHT_BROWSERS_PATH（Mac 浏览器在项目内）
+        from .. import browser as _browser  # noqa: F401 副作用导入：先经 browser.py 写入 PLAYWRIGHT_BROWSERS_PATH（Mac 浏览器在项目内）
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
@@ -43,8 +41,6 @@ def health() -> dict:
             "configured": gateway.is_configured(),
         },
         "deps": {
-            "ffmpeg": shutil.which("ffmpeg") is not None,
-            "docker": shutil.which("docker") is not None,
             "playwright": pw_ok,
         },
     }

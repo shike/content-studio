@@ -32,7 +32,7 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
             q_data = await gateway.complete_json(
                 [{"role": "system", "content": load("research_queries")},
                  {"role": "user", "content": text}],
-                purpose="research_queries", max_tokens=1024)
+                max_tokens=1024)
             queries = [str(q) for q in (q_data.get("queries") or []) if str(q).strip()]
             if queries:
                 ctx.set_progress(8, f"联网检索：{queries[0][:24]}")
@@ -55,15 +55,14 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
     report_md = await gateway.complete(
         [{"role": "system", "content": render("idea_research_report", PERSONA=persona_text, AUDIENCE_NOTE=audience_note)},
          {"role": "user", "content": text + search_context}],
-        purpose="idea_research_report", max_tokens=5000)
+        max_tokens=5000)
 
     ctx.set_progress(60, "结构化评分中")
     data = await gateway.complete_json(
         [{"role": "system", "content": render(
             "idea_research_struct", AUDIENCE_NOTE=audience_note,
             RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(14)) or "（近 14 天无出题记录）")},
-         {"role": "user", "content": report_md}],
-        purpose="idea_research_struct")
+         {"role": "user", "content": report_md}])
 
     audience = data.get("audience")
     with Session(engine) as s:
@@ -202,7 +201,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                     HOT_WORDS=json.dumps([x["word"] for x in hot_items[:12]], ensure_ascii=False),
                     WATCH_TITLES=json.dumps([x["title"] for x in watch_items[:8]],
                                             ensure_ascii=False))}],
-                purpose="trending_queries", max_tokens=1024, thinking="disabled")
+                max_tokens=1024, thinking="disabled")
             queries = [str(q).strip() for q in (pick.get("queries") or [])
                        if str(q).strip()][:4]
             q_status = "ok" if queries else "empty"
@@ -335,7 +334,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         data = await gateway.complete_json(
             [{"role": "system", "content": system_prompt},
              {"role": "user", "content": user_hint}],
-            purpose="trending_target", max_tokens=8000, thinking="disabled")
+            max_tokens=8000, thinking="disabled")
         return [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("sentence")]
 
     ctx.set_progress(64, "行业事件挑靶（社会热点不在菜单）")
@@ -396,7 +395,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 CANDIDATES=json.dumps(
                     [{"sentence": x["sentence"], "context": str(x.get("context") or "")}
                      for x in items], ensure_ascii=False))}],
-            purpose="trending_target", max_tokens=2000, thinking="disabled")
+            max_tokens=2000, thinking="disabled")
         keep = {str(v.get("sentence") or "").strip()
                 for v in (judge.get("verdicts") or []) if v.get("keep") is True}
         before = len(items)
@@ -535,7 +534,7 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
         [{"role": "system", "content": render(
             "self_story_target", PERSONA=persona_text, AUDIENCE_NOTE=audience_note,
             TODAY=datetime.now().strftime("%Y-%m-%d"), VIDEOLIST=videolist)}],
-        purpose="self_story_target", max_tokens=8000, thinking="disabled")
+        max_tokens=8000, thinking="disabled")
     items = [x for x in (data.get("targets") or []) if isinstance(x, dict) and x.get("sentence")]
 
     # 闸1：半句话 + 劝告开头（判词词根/行业闸不适用——franchise 靶形态是续集与反差）

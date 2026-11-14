@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 
-interface OpenCand { id: number; name: string; follower_count: number; signature: string; keyword: string }
+interface OpenCand { id: number; name: string; signature: string; keyword: string }
 
 /** 手机轻量页（2026-11-05 ⑤，/?view=m）：候选一键定夺 · 今日长文状态。
 只做拍板动作，产线与设置留在电脑端。三锐/贴链已砍（2026-11-07 用户逐组拍板）。moxt 主题。 */
 export default function Mobile({ onExit }: { onExit: () => void }) {
-  const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [cands, setCands] = useState<OpenCand[]>([])
   const [article, setArticle] = useState<{ title: string; status: string } | null>(null)

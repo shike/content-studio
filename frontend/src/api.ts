@@ -29,7 +29,7 @@ export function apiErrText(e: unknown): string {
   return raw
 }
 
-export interface Job {
+interface Job {
   id: number
   type: string
   status: string
@@ -74,7 +74,7 @@ export interface Topic {
   updated_at?: string
 }
 
-export interface ScriptVersion {
+interface ScriptVersion {
   label: string
   hook: string
   body: string
@@ -96,9 +96,7 @@ export interface Script {
 
 export interface Article {
   title?: string
-  title_alts?: string[]
   kb_sources?: { title: string; media_id: string; kb_id?: string }[] | null
-  kb_doc_ids?: { title: string; media_id: string }[] | null
   id: number
   topic_id: number | null
   script_id: number | null
@@ -135,6 +133,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   idea: 'idea深研',
   benchmark: '同行拆解',
   manual: '手动',
+  trending: '热点切角',
+  self_story: '一线交付',
 }
 
 export const STATUS_LABELS: Record<string, string> = {

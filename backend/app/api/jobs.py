@@ -282,6 +282,8 @@ def failure_groups() -> dict:
 
 _ENTITY_LABELS = {
     "article_generate": "长文生成失败（无在途任务）",
+    "article_adapt": "源文改编失败（无在途任务）",
+    "article_deepread": "深读成文失败（无在途任务）",
     "script_generate": "脚本生成失败（无在途任务）",
     "script_polish": "脚本打磨失败（无在途任务）",
 }
@@ -323,7 +325,8 @@ def _coverage(s: Session) -> dict[int, int]:
 
 
 def _id_key_of(job_type: str) -> str:
-    return {"article_generate": "article_id", "script_generate": "script_id",
+    return {"article_generate": "article_id", "article_adapt": "article_id",
+            "article_deepread": "article_id", "script_generate": "script_id",
             "script_polish": "script_id",
             "self_analyze": "video_id"}.get(job_type, "")
 

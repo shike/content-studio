@@ -256,7 +256,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
       {/* 添加账号（行内表单：贴链接识别 / 搜账号） */}
       {showAdd && (
         <div className="card mt-3 space-y-2 border-sky-200 bg-sky-50/40 p-4">
-            <>
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={form.platform}
@@ -307,7 +306,6 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: Se
                 </button>
               </div>
               {resolveHint && <div className="text-xs text-sky-600">{resolveHint}</div>}
-            </>
         </div>
       )}
 

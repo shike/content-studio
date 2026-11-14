@@ -87,9 +87,8 @@ export default function TopicInsights() {
     })()
 
   useEffect(() => {
-    api<{ items: TopicRow[] }>('/radar/topics')
-      .then((d) => { setItems(d.items || []); setLoaded(true) })
-      .catch((e) => { setError(String(e)); setLoaded(true) })
+    load()
+    setLoaded(true)
   }, [])
 
   const enabled = items.filter((t) => t.enabled)
