@@ -1,7 +1,7 @@
 # 跃迁内容工作室 · Agent 工作规约
 
 单管理员流水线（登录门禁，PRD R11/TDD §15）：选题 → 口播脚本（一版精品直出）→ 公众号长文。发布永远人工；数字人成片/发布台/多租户不在系统范围。
-架构：FastAPI + SQLModel + SQLite（`backend/app/`，23 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。
+架构：FastAPI + SQLModel + SQLite（`backend/app/`，24 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。
 两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约+验收纪律（§13：套件清单/隔离实例/审计对账）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根）
@@ -19,7 +19,7 @@
 
 ## LLM 硬规矩（GLM Coding Plan，思考型）
 
-- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_polish/deepread_write/adapt_reduce/adapt_revise；8000=script_finalize｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge/pool_pick/judge_cards｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract/spine_forge/hook_cast｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/ping。
+- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish/falsify_script｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_polish/deepread_write/adapt_reduce/adapt_revise；8000=script_finalize｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge/pool_pick/judge_cards/falsify_hunt｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract/spine_forge/hook_cast｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/ping。
 - httpx 超时 600s；验收轮询 ≥600s、脚本生成 ≥900s。空正文必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定（按量余额不足报 1113）；密钥/模型/检索走设置页运行时改（存 app_settings，.env 只留引导项）。系统不记录成本，花销看服务商控制台。
 

@@ -124,13 +124,16 @@ daily_card_limit / jail_window_days / pool_pick_max`（选题工场参数，2026
   pool(JSON 四证), spine, hook, spice, judge(JSON 三维+verdict+reason), gates(JSON 程序闸记录),
   status(draft/approved/discarded/jail), superseded_by, script_id | 人设号靶子卡（选题工场，R1.4；
   jail=法官弃卡 7 天可捞） |
+| `falsify_items` | claim(主张≤60), target(对象≤40), evidence_note(线索自由文本),
+  result_note(实测结论自由文本=成稿论据来源), status(pending/testing/tested/scripted/dismissed),
+  script_id | 实测打假清单（R1.4③；实测=物理动作，系统管清单与成稿） |
 | `research_reports` | topic_id(FK), content(MD), model | idea 深研产物 |
 | `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), media_path, source(douyin/local) | 同行拆解样本 |
 | `self_videos` | url, aweme_id, title, transcript, style_analysis(JSON), analyzed_at, published_at, duration, stats(JSON) | 我的账号视频 + 逐条风格标注（R9.2） |
 | `account_metrics_daily` | tenant_id, date, fans/new_fans/cancel_fans, profile_views, play, digg, comment, share, account_search, post_search | 自有账号日级运营指标（创作者中心 overview 回流，按日列合并不整行覆盖；每日 4 点轻活，kill switch=creator_data_enabled）（R9.7） |
 | `video_weekly_reports` | tenant_id, week_start, report(JSON) | 视频表现周报（质量分=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3；LLM 解读按周缓存）（R9.8） |
 | `style_profiles` | tenant_id, account_name, version, digest, traits(JSON), exemplars(JSON), based_on | 风格画像版本快照，保留历史（R9.3） |
-| `scripts` | topic_id?(FK), card_id?(FK 靶子卡备稿), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
+| `scripts` | topic_id?(FK), card_id?(FK 靶子卡备稿), falsify_item_id?(FK 实测稿备稿), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
 | `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
 | `articles` | topic_id?(FK), script_id?(FK), title, note(素材备注), md, html, kb_sources(JSON ima 素材来源), status(pending/generating/failed/draft/edited/rendered/published) | 公众号文章（pending=直出链建稿，failed 可重试） |
 | `content_items` | media_id(索引防重), kb_id/folder, title, source_author, quality_score, why_good, adapt_angle, best_quotes(JSON), category, priority, status(pending/running/done/published/dismissed/low), article_id | 内容清单=知识库挖出的高质量源文（挖掘器≥线入清单，改编器取项成文；低分落 low 防回卷重评）（R5.6b 源文改编流） |
@@ -242,7 +245,7 @@ article:    pending（直出链建稿）──► generating ──► draft ─
   <`judge_pass_line`(默认 7)=kill。
 - **落卡**：pass 按总分排序取前 `daily_card_limit`(默认 **20**) 张 draft；kill 落 jail
   （`jail_window_days`=7 可捞）；批次替代（当日无下游旧 draft 让位，approved 不动）；空过合法。
-  每日 LLM 共 4 次（pick/forge/cast/judge）。
+  每日 LLM 共 5 次（pick/forge/cast/judge/hunt——尾段自动猎取实测候选 ≤3 条：拆解库分析+当日热源里挑「一人可实测验证」的主张，claim 归一化去重 ≥0.55 拦；纯观点争议不猎，归靶子卡）。
 - **手动投喂**：`POST /api/cards/seed {text, url?}` → 直接成池子卡（coverage/域内由法官补判）。
 
 **API**：
@@ -260,6 +263,21 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 
 **prompt 四件**（替代旧三件）：pool_pick / spine_forge / hook_cast / judge_cards
 （max_tokens 初值 4000/2000/2000/4000，按实测×2 校准；占位符 render 强制校验）。
+
+### 实测打假（R1.4③，2026-11-14 定版 v1）
+
+- 数据 `falsify_items`：claim/target/evidence_note（线索）/result_note（实测结论=成稿论据来源）/
+  status(pending 待实测|testing 实测中|tested 已实测|scripted 已成稿|dismissed 不做)/script_id。
+- 自动猎取：`falsify_hunt` 挂 `card_daily` 尾段（96~99%），输入=拆解库近 14 天 analysis 摘要+
+  当日 AIHot/科技头条，LLM ≤3 条（falsify_hunt 4000），claim 归一化与既有清单 ≥0.55 拦。
+- API（/api/falsify）：
+  - `GET ?status=` → `{items, counts}`；`POST` `{claim, target?, evidence_note?}` → 201（手动添加）
+  - `PUT /{id}` `{status?, result_note?}` → 状态推进/结论回填（compose 要求 tested+结论非空）
+  - `POST /{id}/compose` → 202 `{script_id, job_id}`（成稿：`falsify_script.md` 独立模板——
+    钩子=实测结果数字、中段=实测过程复盘只准用 result_note 事实、判词落证据上；
+    scripts 落 falsify_item_id，item→scripted 回填；打磨/定稿复用既有链）
+  - `POST /{id}/dismiss` → 不做
+- 前端：今日靶子页第三 tab「实测打假」（行=主张+对象+状态；展开=线索/结论编辑+状态推进+成稿）。
 
 ### 同行监测（对标账号管理与扫描）
 - `GET /api/watch/digest` → 同行监测周报（近 7 天实时摘要，不落库：新视频/待定夺按作者分布+高分选题 Top3 带切角一句话）
@@ -404,7 +422,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
   - 自动重试放行（`_reenqueue`）与人工重试同样先做实体复活，failed 状态不跨重试周期。
   - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate）的实体回退统一由 on_fail 承担，执行器体内不带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
-- **执行器注册表**（22 类）：`article_generate / article_hotspots（站外热点报题建稿）/ article_style_extract / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；card_id 备稿走三段纪律：hook 逐字开场/spine 不出口/单判断推进）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / idea_research / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）/ watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸） / article_deepread（深读写，调度不注册，保留回滚）/ card_daily（选题工场五段：信号采集→池子→主线→钩子→总法官）/ card_seed（手动投喂：单池子即走主线→钩子→法官）`。
+- **执行器注册表**（23 类）：`article_generate / article_hotspots（站外热点报题建稿）/ article_style_extract / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；card_id 备稿走三段纪律：hook 逐字开场/spine 不出口/单判断推进）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / idea_research / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）/ watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸） / article_deepread（深读写，调度不注册，保留回滚）/ card_daily（选题工场五段：信号采集→池子→主线→钩子→总法官）/ card_seed（手动投喂：单池子即走主线→钩子→法官）/ falsify_hunt（实测候选猎取，挂 card_daily 尾段）`。
 - **热点雷达（话题查看域）**：`radar_topics` 表（ch_id 全局唯一/seen_ids 防重/recent 最近新视频）。每日 6 点随 `card_line_daily` 车间零巡检话题新视频，低粉高赞同口径自动进拆解（R3.7）；
   雷达飙升（新增视频速度）兼作选题工场一手池子信号（R1.4）；`/api/radar` 仅保留查看域 4 端点（契约见 §6 雷达节）；独立话题雷达面与 topic_radar 任务并入每日热点。
 - **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，与 acceptance/quality.py 同表）；均只在命中时多花一次 LLM 调用。
