@@ -209,6 +209,15 @@ async def scan(user: User = Depends(require_user)) -> dict:
     return {"job_id": job.id}
 
 
+@router.post("/backfill", status_code=202)
+async def watch_backfill(user: User = Depends(require_user)) -> dict:
+    """监控号 30 天存量回填：锚点列近期作品→过闸→自动拆解（采评论分型）。在途去重。"""
+    job = await runner.submit("watch_backfill", {"auto": True},
+                              dedup_key="1:watch_backfill",
+                              actor=(user.tenant_id, user.id, user.role))
+    return {"job_id": job.id}
+
+
 @router.post("/accounts/{account_id}/scan", status_code=202)
 async def scan_account(account_id: int, user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:

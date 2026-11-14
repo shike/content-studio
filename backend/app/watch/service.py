@@ -266,6 +266,7 @@ def _list_account_videos_playwright(url: str) -> tuple[Optional[list], Optional[
 
 
 register_concurrent("watch_scan")
+register_concurrent("watch_backfill")
 @register_executor("watch_scan")
 async def watch_scan(ctx, payload: dict) -> dict:
     account_id = payload.get("account_id")
@@ -1034,6 +1035,76 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
         browser.close()
     return {"searched": searched, "todo_left": todo, "done_queries": done_queries,
             "authors": authors, "verified": verified}
+
+
+@register_executor("watch_backfill")
+async def watch_backfill(ctx, payload: dict) -> dict:
+    """监控号 30 天存量回填（2026-11-14）：逐启用对标账号用锚点路线列近期作品——
+    发布时间 ≤30 天 + 拆解闸同口径（评论≥20 或赞≥300）→ 未入库的建行自动拆解
+    （拆解自动采高赞评论+分型路由）。监控以来只入库增量，存量从未翻账。"""
+    from ..benchmarks import service as bms
+    from ..settings import settings
+
+    cmin = max(1, int(settings.dissect_comment_min or 20))
+    dmin = max(1, int(settings.dissect_digg_min or 300))
+    with Session(engine) as s:
+        accounts = s.exec(select(WatchAccount).where(  # type: ignore[attr-defined]
+            WatchAccount.enabled == True,  # noqa: E712
+            WatchAccount.platform == "douyin")).all()  # type: ignore[attr-defined]
+    if not accounts:
+        ctx.set_progress(100, "无启用对标账号，诚实空过")
+        return {"accounts": 0, "created": 0, "queued": 0, "notes": []}
+    cap = 100  # 单次建行上限（heavy 串行消化，可重复跑续扫）
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+    created_n = queued = 0
+    notes: list[str] = []
+    for i, acc in enumerate(accounts, 1):
+        if created_n >= cap:
+            notes.append(f"达单次上限 {cap}，剩余账号下次再跑")
+            break
+        ctx.set_progress(int(90 * (i - 1) / len(accounts)), f"回填 {acc.name}（{i}/{len(accounts)}）")
+        entries, err, _is_anchor = await asyncio.to_thread(_list_author_videos_via_anchor, acc.url)
+        if entries is None:
+            entries, err2, _ = await asyncio.to_thread(_list_author_videos_via_share_page, acc.url)
+        if entries is None:
+            notes.append(f"{acc.name} 列表未生效：{(err2 or err or '')[:50]}")
+            continue
+        created_rows: list = []
+        for e in entries:
+            if created_n >= cap:
+                break
+            vid = str(e.get("id") or "")
+            if not vid:
+                continue
+            ctime = int(e.get("ctime") or 0)
+            st = e.get("stats") or {}
+            c = int(st.get("comment") or 0)
+            dg = int(st.get("digg") or 0)
+            if ctime and datetime.fromtimestamp(ctime, tz=timezone.utc).replace(tzinfo=None) < cutoff:
+                continue  # 超 30 天
+            if c < cmin and dg < dmin:
+                continue  # 不过拆解闸（R3.7 同口径）
+            url = e.get("url") or f"https://www.douyin.com/video/{vid}"
+            with Session(engine) as s:
+                if s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                        BenchmarkVideo.url == url)).first() is not None:
+                    continue  # 已在拆解库
+                b = BenchmarkVideo(tenant_id=acc.tenant_id, url=url, author=acc.name,
+                                   title=str(e.get("title") or "")[:80], stats=st,
+                                   source="douyin", account_type=acc.account_type or "persona",
+                                   scan_status="pending", notes="监控号存量回填（30 天）")
+                s.add(b)
+                s.commit()
+                s.refresh(b)
+                created_rows.append(b)
+            created_n += 1
+        if created_rows:
+            n = await bms.auto_dissect_rows(created_rows, f"存量回填#{acc.name}")
+            queued += n
+        notes.append(f"{acc.name}：列 {len(entries)}，过闸建行 {len(created_rows)}")
+        await asyncio.sleep(2)
+    ctx.set_progress(100, f"存量回填完成：{len(accounts)} 账号 / 过闸建行 {created_n} / 排队拆解 {queued}")
+    return {"accounts": len(accounts), "created": created_n, "queued": queued, "notes": notes[:24]}
 
 
 @register_executor("hl_search_matrix")

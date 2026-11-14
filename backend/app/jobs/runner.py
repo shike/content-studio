@@ -108,6 +108,7 @@ _POLICIES: dict[str, RetryPolicy] = {
     "self_analyze": RetryPolicy(task_timeout=2700),
     "self_profile_update": RetryPolicy(task_timeout=1800),
     "watch_scan": RetryPolicy(task_timeout=3600),
+    "watch_backfill": RetryPolicy(task_timeout=3600),  # 存量回填：账号数×锚点列表逐号枚举
     "self_scan": RetryPolicy(task_timeout=2700),
     "watch_resolve": RetryPolicy(task_timeout=1800),
     "watch_discover": RetryPolicy(task_timeout=3600),

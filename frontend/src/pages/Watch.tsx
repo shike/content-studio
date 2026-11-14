@@ -56,6 +56,21 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: st
   // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
   const { guard, busy, error, setError } = usePageGuard()
 
+  const [bfBusy, setBfBusy] = useState('')
+  const backfill = async () => {
+    if (bfBusy) return
+    setBfBusy('提交中…')
+    try {
+      const r = await api<{ job_id: number }>('/watch/backfill', { method: 'POST' })
+      await waitJob(r.job_id, (j) => setBfBusy(`存量回填：${j.progress}% ${j.message || ''}`))
+      setBfBusy('')
+      await reload()
+    } catch (e) {
+      setBfBusy('')
+      setError(apiErrText(e))
+    }
+  }
+
   const reload = useCallback(async () => {
     const p = new URLSearchParams()
     if (accountType) p.set('account_type', accountType)
@@ -238,6 +253,9 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: st
             </button>
             <button onClick={scanAll} disabled={Boolean(scanBusy)} className="btn-accent disabled:opacity-50">
               <Play size={14} /> 扫一遍（{counts.on} 个监控中）
+            </button>
+            <button onClick={backfill} disabled={Boolean(bfBusy)} className="btn-ghost" title="把每个监控号近 30 天的存量作品翻一遍：过拆解闸的自动进拆解采评论分型">
+              {bfBusy || '存量回填'}
             </button>
           </div>
         }
