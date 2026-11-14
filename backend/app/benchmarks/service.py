@@ -308,17 +308,26 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             page.goto(f"https://www.douyin.com/video/{rid}",
                       timeout=45000, wait_until="domcontentloaded")
             # 评论面板不保证随页面自动加载（2026-11-02 服务器实测：需一次滚动才触发
-            # comment/list），等不到就滚动唤醒，60s 截止轮询。
+            # comment/list）；首屏只有几条——矿脉要采够：持续轮询收集，直到 40 条
+            # 或 12s 无新增（静默窗）或 60s 截止；一直为空才反复滚动唤醒。
             deadline = _time.monotonic() + 60
-            while not comments and _time.monotonic() < deadline:
+            last_n, quiet = 0, 0
+            while _time.monotonic() < deadline:
                 page.wait_for_timeout(3000)
-                if not comments and _time.monotonic() < deadline:
+                if not comments:
                     try:
                         page.mouse.wheel(0, 600)
-                        page.wait_for_timeout(1500)
+                        page.wait_for_timeout(1200)
                         page.mouse.wheel(0, -600)
                     except Exception:  # noqa: BLE001
                         break  # 页面已跳转/关闭，别空转
+                    continue
+                if len(comments) >= 40:
+                    break
+                quiet = quiet + 1 if len(comments) <= last_n else 0
+                last_n = len(comments)
+                if quiet >= 4:
+                    break  # 12s 没有新评论进账=本页已采尽，别干等满窗
             ctx.close()
         finally:
             browser.close()
