@@ -7,6 +7,7 @@
 """
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from runner import check, finish, request, section, server_down
@@ -140,6 +141,7 @@ if llm_ready:
                   and bool((vs[0] or {}).get("hook")), f"code={code}, versions={len(vs)}")
 
 section("P8 · 实测打假（R1.4③）")
+from app.falsify import service as _ff  # noqa: F401  执行器注册副作用导入（main 同款）
 check("falsify_hunt 执行器已注册", "falsify_hunt" in _executors)
 code, d = request("POST", "/api/falsify",
                   body={"claim": f"P8 实测主张 {os.urandom(2).hex()}", "target": "某 AI 课",
@@ -266,9 +268,16 @@ gen_job = next((j["id"] for j in (jobs.get("items") or [])
                 if j.get("type") == "article_generate" and j.get("status") in ("queued", "running")),
                None)
 if gen_job and llm_ready:
-    done = _pj(gen_job, timeout=420)
+    done = _pj(gen_job, timeout=600)
     check("自动透镜生成完成", (done or {}).get("status") == "succeeded",
           f"status={(done or {}).get('status')}")
+# 慢 LLM 防抖（无条件）：首稿离开 generating/polishing 后才打非法 style，
+# 否则同源在途去重会把「非法 style 回落」探测误伤成 409 假红（慢 LLM 日实测踩中）
+for _ in range(180):
+    _, art = request("GET", f"/api/articles/{article_id}")
+    if (art or {}).get("status") not in ("generating", "polishing"):
+        break
+    time.sleep(2)
 
 # 非法 style 回落受理（内部回落 deep_dive，不崩溃即契约）
 if article_id and not llm_ready:

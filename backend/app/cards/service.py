@@ -695,11 +695,15 @@ async def card_seed(ctx: JobContext, payload: dict) -> dict:
     line = max(1, int(settings.judge_pass_line or 7))
     dims = {k: max(0, min(10, int(j.get(k) or 0)))
             for k in ("hook_pull", "spine_single", "traffic_potential")}
-    ok = bool(j) and all(v >= line for v in dims.values()) and j.get("verdict") != "kill"
+    # 手动投喂免流量维（R1.4③ 拍板：投喂=用户自带流量判断，法官不替用户赌流量）：
+    # 只判钩子吸引与主线单一两维；traffic_potential 照记不判死。工场猎取的候选仍全维严判。
+    core = dims.get("hook_pull", 0) >= line and dims.get("spine_single", 0) >= line
+    ok = bool(j) and core
     judge = {"hook_pull": dims.get("hook_pull", 0), "spine_single": dims.get("spine_single", 0),
              "traffic_potential": dims.get("traffic_potential", 0),
              "verdict": "pass" if ok else "kill",
-             "reason": str(j.get("reason") or "法官无回卷（按废处理）")[:80]}
+             "reason": (str(j.get("reason") or "法官无回卷（按废处理）")
+                        + ("" if ok else "｜手动投喂仅免流量维，钩子/主线维度不过线照样废"))[:80]}
     with Session(engine) as s:
         card = _merge_card(1, pool_entry, f, str(h["hook"]), gates)
         card.judge = judge
