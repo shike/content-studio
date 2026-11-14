@@ -10,7 +10,6 @@ import {
   Wand2,
 } from 'lucide-react'
 import { api, apiErrText, AUDIENCE_LABELS, Script, SOURCE_LABELS, Topic, waitJob } from '../api'
-import type { SectionKey } from '../App'
 import {
   Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, QueueBar, relTime,
   sumCounts, Pager,
@@ -40,7 +39,7 @@ interface Template {
   usage_count?: number
 }
 
-export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
+export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: string) => void; accountType?: 'persona' | 'leadgen' }) {
   const [scripts, setScripts] = useState<Script[]>([])
   const [allScripts, setAllScripts] = useState<Script[]>([])
   const [total, setTotal] = useState(0)

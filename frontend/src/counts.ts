@@ -67,7 +67,17 @@ export async function fetchMenuStats(): Promise<MenuStats> {
   }
 }
 
-/** 菜单徽章数字：键与 App 树叶子一一对应，透传即可。 */
+/** 菜单徽章数字：键与三段式菜单一一对应（2026-11-14 定版）——
+监控=账号候选+拆解待定夺合计；选题=待备稿靶子+获客选题待审合计；
+内容=待定稿脚本两线+待决策稿+待改编源文合计；过程性数字不上菜单。 */
 export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
-  return { ...s }
+  return {
+    today: s.today,
+    monitor: s.p_cand + s.l_cand + s.p_bench + s.l_bench,
+    topics: s.p_topics + s.l_topics,
+    content: s.p_content + s.l_scripts + s.article + s.c_items,
+    tasks: s.tasks,
+    failed: s.failed,
+    tasks_alert: s.tasks_alert,
+  }
 }

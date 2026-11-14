@@ -3,7 +3,6 @@ import { CircleAlert, Fingerprint, Sparkles } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, ErrorLine, relTime, Pager, safeHref } from '../components'
 
-import type { SectionKey } from '../App'
 
 interface Profile {
   version: number
@@ -31,7 +30,7 @@ interface Overview {
 
 /** 风格画像区（2026-11-07 并入账号经营页，本组件不再自带页头）：
 从自己作品提炼说话方式，脚本生成时自动注入。 */
-export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionKey) => void }) {
+export default function StyleSection({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [data, setData] = useState<Overview | null>(null)
   const [videos, setVideos] = useState<SelfVideoRow[]>([])
   const [vtotal, setVtotal] = useState(0)

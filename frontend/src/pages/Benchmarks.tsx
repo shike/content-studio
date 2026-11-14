@@ -3,7 +3,6 @@ import { FileVideo, Inbox, Lightbulb, Scissors, Sparkles } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import { Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { usePageGuard } from '../hooks'
-import type { SectionKey } from '../App'
 
 interface BenchCounts {
   all: number
@@ -34,7 +33,7 @@ interface Benchmark {
 const analyzed = (b: Benchmark) =>
   Boolean(b.analysis && (b.analysis.hook || b.analysis.structure || b.analysis.score != null))
 
-export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
+export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (k: string) => void; accountType?: 'persona' | 'leadgen' }) {
   const [items, setItems] = useState<Benchmark[]>([])
   const [filter, setFilter] = useState('')
   const [author, setAuthor] = useState('')

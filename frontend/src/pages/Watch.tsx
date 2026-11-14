@@ -6,7 +6,6 @@ import { api, apiErrText, waitJob } from '../api'
 import {
   Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime, safeHref } from '../components'
 import { useClientPager, usePageGuard } from '../hooks'
-import type { SectionKey } from '../App'
 
 interface WatchAccount {
   id: number
@@ -40,7 +39,7 @@ interface BenchmarkLite {
 
 const ABNORMAL_RE = /未生效|降级|失败|不存在/
 
-export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: SectionKey) => void; accountType?: 'persona' | 'leadgen' }) {
+export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: string) => void; accountType?: 'persona' | 'leadgen' }) {
   const [accounts, setAccounts] = useState<WatchAccount[]>([])
   const [history, setHistory] = useState<ScanJob[]>([])
   const [filter, setFilter] = useState('')
