@@ -28,11 +28,10 @@ def _actor_of(j: Job):
 
 @router.get("")
 def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 50,
-              offset: int = 0, tenant_id: int = 0) -> dict:
+              offset: int = 0) -> dict:
     """管道内任务列表：运行中置顶、排队按 FIFO、挂起次之、其余按新→旧。
 
     counts 为全库口径；queue_position 仅排队任务有（近似 FIFO 位次）。
-    tenant_id 过滤仅 platform_admin 可用（管理后台租户详情用）。
     """
     user = get_current_user(request)
     if user is None or user.status != "active":
@@ -76,10 +75,6 @@ def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 5
         if type:
             names = [t.strip() for t in type.split(",") if t.strip()]
             q = q.where(Job.type.in_(names))  # type: ignore[attr-defined]
-        if tenant_id:
-            if user.role != "platform_admin":
-                raise HTTPException(status_code=403, detail="需要平台管理员权限")
-            q = q.where(Job.tenant_id == tenant_id)  # type: ignore[attr-defined]
         # 真 COUNT（不受 500 窗口封顶——任务页"共 N 条"与分页可达性口径一致）
         from sqlmodel import func as _f
         total = s.exec(select(_f.count()).select_from(q.subquery())).one() or 0

@@ -163,7 +163,6 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const totalAtStart = session.final + session.skipped + queue.length
   const doneCount = session.final + session.skipped
 
-  const filtered = scripts // 服务端已筛选分页
   const pendingWriteTopics = useMemo(() => {
     const started = new Set(allScripts.map((x) => x.topic_id))
     return topics.filter((t) => t.status === 'approved' && !started.has(t.id))
@@ -660,7 +659,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
         </div>
       ) : (
       <div className="card mt-4 overflow-hidden p-0">
-        {filtered.length === 0 ? (
+        {scripts.length === 0 ? (
           <div className="p-6">
             <EmptyState
               icon={Inbox}
@@ -672,7 +671,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filtered.map((s) => {
+            {scripts.map((s) => {
               const exp = expandedId === s.id
               return (
                 <div key={s.id} className={exp ? 'bg-sky-50/40' : ''}>

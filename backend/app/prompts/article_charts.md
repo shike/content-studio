@@ -10,10 +10,10 @@ version: 1
 
 ## 规格
 - type：bar（对比）| hbar（排行）| line（趋势）| pie（占比）
-- title：图表标题（中文，≤20 字）；ylabel：纵轴单位（如 "%"、"万元"）
+- title：图表标题（中文，≤20 字）；unit：数值单位（如 "%"、"万元"）
 - categories 与 values 必须等长（≤8 项）；values 一律为数字
 
 JSON 输出（无解释无代码块）：
-{"charts": [{"title": "...", "type": "bar", "ylabel": "...", "categories": ["..."], "values": [1, 2], "unit": "", "after_section": 2}]}
+{"charts": [{"title": "...", "type": "bar", "categories": ["..."], "values": [1, 2], "unit": "", "after_section": 2}]}
 
 文章全文：

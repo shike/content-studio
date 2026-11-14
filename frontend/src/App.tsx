@@ -258,8 +258,6 @@ export default function App() {
     )
   }
 
-  const renderSystemItem = (s: LeafDef) => renderItem(s)
-
   /** 跳转：叶子键直达，旧键走 NAVMAP 兼容，未知键落工作台。 */
   const LEAF_KEYS = new Set<string>(['today', 'tasks', 'settings', ...TREE.flatMap((g) => g.children.map((c) => c.key))])
   const navTo = (k: string) =>
@@ -305,8 +303,8 @@ export default function App() {
         </nav>
 
         <div className="border-t border-[rgba(240,233,213,0.1)] px-3 py-3">
-          {renderSystemItem({ key: 'tasks', label: '任务', icon: Activity })}
-          {renderSystemItem({ key: 'settings', label: '设置', icon: Settings })}
+          {renderItem({ key: 'tasks', label: '任务', icon: Activity })}
+          {renderItem({ key: 'settings', label: '设置', icon: Settings })}
         </div>
       </aside>
 

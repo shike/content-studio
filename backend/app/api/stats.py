@@ -52,7 +52,7 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
                            + _count(s, tid, "topics", status="draft",
                                     line="persona", source_type="self_story"))
     return {"draftTopics": draft_persona + draft_leadgen,
-            "draftTopicsPersona": draft_persona, "draftTopicsLeadgen": draft_leadgen,
+            "draftTopicsLeadgen": draft_leadgen,
             "targetsPersona": targets_persona,
             "pendingScriptsPersona": pending_scripts_persona,
             "pendingScriptsLeadgen": pending_scripts_leadgen,

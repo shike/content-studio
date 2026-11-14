@@ -102,7 +102,6 @@ interface ScheduleRow {
   last_run_at: string | null
   next_run_at: string | null
   last_status: string
-  run_count: number
 }
 
 const PAGE_SIZE = 20

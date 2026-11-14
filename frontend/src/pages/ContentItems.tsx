@@ -27,11 +27,9 @@ const STATUS_ORDER: Record<string, number> = {
 
 interface LedgerRow {
   id: number
-  day: string
   phase: string
   produced: string
   reason: string
-  ok: boolean
   anomaly?: boolean
 }
 

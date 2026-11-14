@@ -144,7 +144,6 @@ class CurrentUser:
     display_name: str = ""
     status: str = "active"
     must_change_password: bool = False
-    password_hash: str = ""
 
 
 
@@ -162,8 +161,7 @@ def _resolve_user(token: str) -> Optional[CurrentUser]:
             return None
         return CurrentUser(id=user.id, tenant_id=user.tenant_id, role=user.role,
                            username=user.username, display_name=user.display_name,
-                           status=user.status, must_change_password=user.must_change_password,
-                           password_hash=user.password_hash)
+                           status=user.status, must_change_password=user.must_change_password)
 
 
 def get_current_user(request: Request) -> Optional[CurrentUser]:

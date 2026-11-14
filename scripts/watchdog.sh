@@ -43,8 +43,10 @@ echo "$n" > "$STATE"
 # 策略：running>0 时连续 6 次（约 30 分钟）失败才强拉（任务自身硬超时最长 60min 会先自愈）；
 # running=0 或探测失败（sqlite 不可用）按原逻辑立即拉起。
 run_guard() {
-  for DB in "${CS_DATA_DIR:-}/studio.db" "/srv/content-studio/data/studio.db" \
-            "$HOME/Desktop/code/content-studio/data/studio.db"; do
+  set -- "/srv/content-studio/data/studio.db" \
+         "$HOME/Desktop/code/content-studio/data/studio.db"
+  [ -n "${CS_DATA_DIR:-}" ] && set -- "$CS_DATA_DIR/studio.db" "$@"
+  for DB in "$@"; do
     [ -f "$DB" ] || continue
     v=$(sqlite3 "$DB" "SELECT COUNT(*) FROM jobs WHERE status='running'" 2>/dev/null) || return 1
     echo "$v"

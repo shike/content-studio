@@ -20,16 +20,13 @@ interface SelfVideoRow {
   url: string
   analyzed: boolean
   analyzed_at?: string | null
-  scan_status?: string
   style_analysis: Record<string, any> | null
 }
 
 interface Overview {
   account: { id: number; name: string; enabled: boolean } | null
   profile: Profile | null
-  profile_history: Profile[]
-  videos: SelfVideoRow[]
-  stats: { total: number; analyzed: number; pending: number }
+  stats: { total: number; analyzed: number }
 }
 
 /** 风格画像区（2026-11-07 并入账号经营页，本组件不再自带页头）：
@@ -174,7 +171,7 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: SectionK
                 return (
                 <div key={v.id} className={exp ? 'bg-sky-50/40' : ''}>
                   <div
-                    onClick={() => { setExpandedId(exp ? null : v.id); if (!exp) setVoffset(voffset) }}
+                    onClick={() => setExpandedId(exp ? null : v.id)}
                     className="cursor-pointer px-4 py-2.5 transition hover:bg-slate-50"
                   >
                     <div className="flex items-center gap-2">

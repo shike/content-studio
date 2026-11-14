@@ -672,7 +672,6 @@ def _probe_leadgen_signal(video_id: str) -> dict:
 async def watch_discover(ctx, payload: dict) -> dict:
     keyword = (payload.get("keyword") or "").strip()
     direction = (payload.get("direction") or "").strip()
-    rank_by = str(payload.get("rank_by") or "followers")  # followers | comment（获客挖掘：评论数=转化意图）
     if not keyword:
         raise RuntimeError("keyword 不能为空")
     from ..search import web_search
@@ -741,9 +740,8 @@ async def watch_discover(ctx, payload: dict) -> dict:
     # ③ 粉丝数排序取 Top N → 候选表（已在清单自动标 added；已忽略的尊重「不做」不复活）
     ranked = sorted(found.values(),
                     key=lambda d: d["follower_count"], reverse=True)[:_DISCOVER_TOP_N]
-    # 获客信号：点赞 Top3 探评论区求带密度——高密度=高质量获客号（两类号策略 2026-10-28）
-    _rank_key = (lambda d: d["comment"]) if rank_by == "comment" else (lambda d: d["follower_count"])
-    for d in sorted(ranked, key=_rank_key, reverse=True)[:_LEADGEN_PROBE_CAP]:
+    # 获客信号：粉丝 Top N 探评论区求带密度——高密度=高质量获客号（两类号策略 2026-10-28）
+    for d in sorted(ranked, key=lambda d: d["follower_count"], reverse=True)[:_LEADGEN_PROBE_CAP]:
         try:
             sig = await asyncio.to_thread(_probe_leadgen_signal, d["video_id"])
             d["leadgen_density"] = sig["density"]
@@ -755,7 +753,7 @@ async def watch_discover(ctx, payload: dict) -> dict:
             notes.append(f"{d['name']}：获客信号探测跳过（{str(e)[:50]}）")
     ranked.sort(key=lambda d: (d.get("account_type") == "leadgen",
                                d.get("leadgen_density", 0),
-                               _rank_key(d)), reverse=True)
+                               d["follower_count"]), reverse=True)
     now = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC
     new_cnt = added_cnt = 0
     with Session(engine) as s:

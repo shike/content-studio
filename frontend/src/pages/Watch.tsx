@@ -25,7 +25,6 @@ interface WatchAccount {
 interface ScanJob {
   id: number
   status: string
-  progress: number
   message: string
   error: string | null
   created_at?: string
@@ -35,7 +34,6 @@ interface ScanJob {
 interface BenchmarkLite {
   id: number
   title: string
-  transcript: string
   analyzed: boolean
   created_at?: string
 }

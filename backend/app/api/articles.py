@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import func, or_, Session, select
 
@@ -355,21 +355,6 @@ def wechat_copy(article_id: int) -> dict:
     html = _LOCAL_IMG_SRC.sub(
         lambda m: f'src="/api/public/images/{m.group(1)}?t={sign_image(m.group(1))}"', html)
     return {"html": html}
-
-
-@router.get("/{article_id}/wechat.html")
-def wechat_html(article_id: int):
-    with Session(engine) as s:
-        article = s.get(Article, article_id)
-        if article is None:
-            raise HTTPException(status_code=404, detail="article not found")
-        if not article.html:
-            raise HTTPException(status_code=400, detail="尚未渲染，先调用 render")
-        # 双保险：白名单净化 + CSP（即便未来出现漏网标签也无法在本源执行脚本）
-        return HTMLResponse(sanitize_html(article.html), headers={
-            "Content-Security-Policy":
-                "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'",
-        })
 
 
 @router.delete("/{article_id}")

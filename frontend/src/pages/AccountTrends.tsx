@@ -19,10 +19,6 @@ interface MetricsRow {
 }
 
 interface MetricsSummary {
-  fans: number
-  new_fans_7d: number
-  profile_views_7d: number
-  play_7d: number
   days: number
 }
 

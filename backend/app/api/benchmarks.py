@@ -136,8 +136,6 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
             "todo": sum(1 for b in all_rows if b.scan_status == "approved" and not _analyzed(b)),
             "done": sum(1 for b in all_rows if _analyzed(b)),
             "ignored": sum(1 for b in all_rows if b.scan_status == "ignored"),
-            "online": sum(1 for b in all_rows if b.source != "local" and b.scan_status != "pending"),
-            "local": sum(1 for b in all_rows if b.source == "local"),
         }
         q = _typed(select(BenchmarkVideo))
         if author:

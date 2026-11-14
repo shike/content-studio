@@ -95,7 +95,7 @@ def _entity_title(row) -> str:
 
 
 def _revive_payload(job_type: str, row) -> dict:
-    if job_type in ("article_generate", "article_kb_write", "article_adapt", "article_deepread"):
+    if job_type in ("article_generate", "article_adapt", "article_deepread"):
         return {"article_id": row.id}
     if job_type in ("script_generate", "script_polish"):
         return {"script_id": row.id}

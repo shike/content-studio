@@ -142,7 +142,7 @@ def register_executor(job_type: str, on_fail: Optional[Callable[[dict, Exception
 
 
 def _lane_of(job_type: str) -> str:
-    """分道：并发旁路注册的轻任务=light，其余 heavy（scheduled/external 分道在 P2/P3 落地）。"""
+    """分道：并发旁路注册的轻任务=light，其余 heavy。"""
     return "light" if job_type in _CONCURRENT_TYPES else "heavy"
 
 
@@ -693,7 +693,7 @@ def _upsert_failure_pattern(s: Session, fp: str, fc: str, job_type: str,
     from .errors import fingerprint_label
     row = s.exec(select(FailurePattern).where(FailurePattern.fp == fp)).first()
     if row is None:
-        s.add(FailurePattern(fp=fp, kind="job", fail_class=fc,
+        s.add(FailurePattern(fp=fp, fail_class=fc,
                              label=fingerprint_label(fp), count=1,
                              sample_error=error[:2000], sample_job_id=job_id,
                              last_type=job_type))

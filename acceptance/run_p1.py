@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P1 内容核心验收：选题中心（idea深研/定审与否决）+ 脚本工场 + 公众号流水线 + LLM 台账。
+"""P1 内容核心验收：选题中心（idea深研/定审与否决）+ 脚本工场 + 公众号流水线。
 
 对应《docs/TDD.md》§13 P1。需 ZHIPU_API_KEY。
 运行：python3 acceptance/run_p1.py

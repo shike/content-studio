@@ -82,7 +82,7 @@ def upsert_metrics(tenant_id: int, rows: dict) -> int:
     return n
 
 
-def _self_cookie(tenant_id: int) -> str:
+def _self_cookie() -> str:
     with Session(engine) as s:
         row = s.exec(select(WatchAccount).where(
             WatchAccount.kind == "self",  # type: ignore[attr-defined]
@@ -95,7 +95,7 @@ def collect_for_tenant(tenant_id: int) -> tuple[int, str]:
     """抓取并入库一个租户自有账号的指标。返回 (写入天数, 说明)。"""
     if not settings.creator_data_enabled:
         return 0, "开关关闭"
-    cookie = _self_cookie(tenant_id)
+    cookie = _self_cookie()
     if not cookie:
         return 0, "未配置创作者中心 cookie"
     rows = fetch_account_overview(cookie)

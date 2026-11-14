@@ -293,7 +293,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                 "深研报告（深度素材，长文的主要原料）": "",
             }
         # 公众号独立风格画像（从已发长文提取，app_settings）：有就注入所有 prompt 的素材块
-        style_row = s.get(AppSetting, "article_style_note")
+        style_row = s.get(AppSetting, _ARTICLE_STYLE_KEY)
         if style_row is not None and (style_row.value or "").strip():
             material["公众号风格画像（从已发长文提取的表达习惯，行文必须贴合）"] = style_row.value[:1200]
 
@@ -547,13 +547,13 @@ def _insert_chart_after_section(md: str, sec_no: int, title: str, filename: str)
     return "\n".join(out)
 
 
-# ---- 公众号独立报题线（2026-11-02 三线定版）：独立热点报题 + 独立风格画像 ----
+# ---- 公众号直出线 + 风格画像 ----
 
 _ARTICLE_STYLE_KEY = "article_style_note"
 
 
-# 就绪/在途状态全集（待写→生成中→草稿→已编辑→已渲染）：同题查重与近义去重共用，
-# api/articles.py 的报题查重也调 find_pending_article，别再散落字面量列表。
+# 就绪/在途状态全集（待写→生成中→草稿→已编辑→已渲染）：同题查重与近义去重共用
+# （手动报题线拆除后唯一调用方=article_hotspots 直出链），别再散落字面量列表。
 ACTIVE_ARTICLE_STATUSES = ["pending", "generating", "draft", "edited", "rendered"]
 
 
@@ -572,13 +572,13 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     """公众号独立热点报题（2026-11-05 改每日一篇直出）：站外热点×画像 → 1 篇待写草稿，
     建稿后自动链发 article_generate 成文——早晨草稿箱里是一篇完整长文，改完即发。
 
-    与抖音选题提炼（trending_topics）完全独立——公众号线不进选题库，报题即草稿。"""
+    与抖音选题提炼（trending_topics）完全独立——公众号线不进选题库，直出链建稿。"""
     from ..tenant_brand import brand_of
     from ..topics.hotlist import fetch_baidu_hot, fetch_tech_news
 
     ctx.set_progress(10, "收集站外热点")
-    baidu, baidu_meta = await asyncio.to_thread(fetch_baidu_hot, 12)
-    news, news_meta = await asyncio.to_thread(fetch_tech_news, 6, 48)
+    baidu, _ = await asyncio.to_thread(fetch_baidu_hot, 12)
+    news, _ = await asyncio.to_thread(fetch_tech_news, 6, 48)
     items = []
     for h in baidu[:8]:
         items.append({"来源": "百度热搜", "标题": str(h.get("title") or "")[:40]})

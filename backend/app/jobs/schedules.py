@@ -26,7 +26,7 @@ class Schedule:
     run: Callable[[], Awaitable[str]]  # 执行体，返回一句话结果（提交任务或直接干活）
     daily_hour: Optional[int] = None       # 本地时区每日定点
     interval_hours: Optional[float] = None  # 或间隔式（小时）
-    hour_from_settings: bool = False       # 钟点取 settings.watch_scan_hour（三个扫描类）
+    hour_from_settings: bool = False       # 钟点取 settings.watch_scan_hour（watch_scan/self_scan）
     enabled_by: str = ""                   # settings 开关字段名（空=注册表常开）
 
 
@@ -186,10 +186,10 @@ register_schedule(Schedule(key="watch_scan", label="同行扫描（全部监控�
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_watch_scan))
 async def _run_article_hotspots() -> str:
-    """公众号独立热点报题：站外热点 → 3 篇待写长文草稿（2026-11-02 三线定版）。"""
+    """公众号每日直出：站外热点 × 画像 → 1 篇待写长文草稿，链发 article_generate 成文。"""
     from .runner import runner
 
-    job = await runner.submit("article_hotspots", {"tenant_id": 1},
+    job = await runner.submit("article_hotspots", {},
                               dedup_key=f"1:articlehotspots:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
     return f"job #{job.id}（站外热点 → 待写长文草稿）"

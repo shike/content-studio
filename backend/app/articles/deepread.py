@@ -60,7 +60,7 @@ def _save_cursor(s: Session, idx: int, pos: int) -> None:
     s.commit()
 
 
-async def _digest_doc(ctx: JobContext, cfg: dict, title: str, text: str,
+async def _digest_doc(ctx: JobContext, title: str, text: str,
                       no: int, total: int) -> dict | None:
     """逐篇消化：全文进，消化笔记出（主张+逐字原文资产+未回答的问题）。"""
     ctx.set_progress(10 + int(52 * no / max(1, total)), f"消化 {no}/{total}：《{title[:22]}》")
@@ -155,7 +155,7 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
         mid = str(d.get("media_id") or "")
         if mid not in fulltexts:
             continue
-        note = await _digest_doc(ctx, cfg, str(d.get("title") or f"文档{i}"),
+        note = await _digest_doc(ctx, str(d.get("title") or f"文档{i}"),
                                  fulltexts[mid], i, len(batch))
         if note is not None:
             notes.append(note)

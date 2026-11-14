@@ -42,7 +42,6 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     last: { status: string; detail?: string; at?: string } | null
     history: { status: string; at: string }[]
     label: string
-    recent_failures: number
   } | null>(null)
   const [crawlBusy, setCrawlBusy] = useState(false)
   const [model, setModel] = useState('')
@@ -60,7 +59,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
     const c = await api<AppSettings>('/settings')
     setConf(c)
     try {
-      const c = await api<{ last: { status: string; detail?: string; at?: string } | null; history: { status: string; at: string }[]; label: string; recent_failures: number }>('/crawl/status')
+      const c = await api<{ last: { status: string; detail?: string; at?: string } | null; history: { status: string; at: string }[]; label: string }>('/crawl/status')
       setCrawl(c)
     } catch {
       setCrawl(null)
@@ -218,7 +217,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
                   setCrawlBusy(true)
                   try {
                     await api('/crawl/probe', { method: 'POST' })
-                    const c = await api<{ last: { status: string; detail?: string; at?: string } | null; history: { status: string; at: string }[]; label: string; recent_failures: number }>('/crawl/status')
+                    const c = await api<{ last: { status: string; detail?: string; at?: string } | null; history: { status: string; at: string }[]; label: string }>('/crawl/status')
                     setCrawl(c)
                     setError('')
                   } catch (e) {

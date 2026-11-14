@@ -5,7 +5,6 @@ import { api } from './api'
 5 个孤儿字段已随后端 /stats/todos 同步删除，契约只剩下面这些。 */
 interface TodoStats {
   draftTopics: number // 待审选题（两线合计）
-  draftTopicsPersona: number // 待审选题·人设库
   draftTopicsLeadgen: number // 待审选题·获客库
   targetsPersona: number // 今日靶子·待备稿（2026-11-11 观点怼热点主轴，选题库叶子徽章口径）
   pendingScriptsPersona: number // 待定稿脚本·人设

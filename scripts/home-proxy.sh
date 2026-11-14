@@ -1,6 +1,6 @@
 #!/bin/bash
 # 住宅出口：本机 SOCKS5 + 到服务器的 SSH 反向隧道（自愈守护，常驻由 launchd 拉起）。
-# 用途=让服务器上的抖音抓取走本机家宽 IP（机房 IP 会被风控，见 scripts/home_proxy.py 注释）。
+# 用途=服务器抖音抓取的可选住宅出口兜底（2026-10-27 实测机房直连可用，见 scripts/home_proxy.py 注释）。
 # 用法：scripts/home-proxy.sh [install|uninstall|status]（install 装 launchd 常驻）
 set -uo pipefail
 

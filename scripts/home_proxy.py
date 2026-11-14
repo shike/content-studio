@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """住宅出口代理：极简 SOCKS5（仅 CONNECT），给服务器的抖音抓取当出口用。
 
-背景：抖音对机房 IP 的视频详情接口返回风控页（2026-09-27 实测），住宅 IP 正常。
+背景：机房 IP 直连 2026-10-27 实测可用（「机房必被风控」旧结论已被直连实验推翻）；本脚本保留作采集兜底出口（设置 scrape_proxy 即切回）。
 部署形态（见 scripts/home-proxy.sh）：
   本机  python3 scripts/home_proxy.py --port 11080      ← 出口（用自己的家宽 IP 直连）
   本机  ssh -N -R 11080:127.0.0.1:11080 <服务器>        ← 把该端口映射到服务器 localhost

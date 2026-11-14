@@ -63,10 +63,8 @@ export interface Topic {
   source_type: string
   source_ref?: string
   score: number | null
-  sharpness: number | null
   status: string
   evidence: Record<string, any>
-  score_breakdown?: Record<string, any>
   research_report?: string
   scripts?: { id: number; status: string }[]
   articles?: { id: number; status: string }[]
@@ -85,7 +83,6 @@ export interface Script {
   id: number
   topic_id: number | null
   versions: ScriptVersion[]
-  final_text: string
   teleprompter_text: string
   storyboard: { shot: string; broll_keywords: string[]; subtitle_hint: string }[]
   title_candidates: { platform: string; title: string }[]
@@ -96,10 +93,8 @@ export interface Script {
 
 export interface Article {
   title?: string
-  kb_sources?: { title: string; media_id: string; kb_id?: string }[] | null
+  kb_sources?: { title: string }[] | null
   id: number
-  topic_id: number | null
-  script_id: number | null
   note?: string
   md: string
   html: string
@@ -113,7 +108,6 @@ export interface Article {
 /** 内容清单项（2026-11-11 源文改编产线）：挖掘器评估入清单，改编器每日取项成文。 */
 export interface ContentItem {
   id: number
-  media_id: string
   folder_name: string
   title: string
   source_author: string

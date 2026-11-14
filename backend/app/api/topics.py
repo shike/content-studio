@@ -35,9 +35,9 @@ def _validate_line(line: str) -> str:
 
 @router.post("/trending", status_code=202)
 async def trending_topics(user: User = Depends(require_user)) -> dict:
-    """今日热点选题提炼（R1.4）：站内对标议题+联网今日热点 × 租户画像 → 3 个切角落选题库。
+    """今日热点提炼（R1.4）：站外热点 × 画像 → 0~6 个半句话判决靶子落选题库（空过合法）。
 
-    轻活走队列（LLM 一次调用），产出 source_type=trending 的 draft 选题，前端轮询展示。"""
+    走队列（多次 LLM+六路抓取+成色终审），产出 source_type=trending 的 draft 选题，前端轮询展示。"""
     job = await runner.submit("trending_topics", {"tenant_id": user.tenant_id},
                               dedup_key=f"{user.tenant_id}:trending_topics:daily")
     return {"job_id": job.id}

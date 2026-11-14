@@ -54,7 +54,8 @@ interrupted = _rows[0][0] if _rows else 0  # 空壳库（无表）视为 0
 
 print(f"[hygiene] 扫描 {DB}")
 print(f"  fixture 行: {'干净' if not issues or 'sample' not in str(issues) else '有'}"
-      f" | 演示链接: 干净 | 评分回流: 见下 | 中断任务: {interrupted} 条（提示）")
+      f" | 演示链接: {'干净' if not issues or '演示' not in str(issues) else '有'}"
+      f" | 评分回流: 见下 | 中断任务: {interrupted} 条（提示）")
 if issues:
     print("[hygiene] 发现残留：")
     for it in issues:

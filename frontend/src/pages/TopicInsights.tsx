@@ -8,8 +8,6 @@ interface HitVideo {
   desc: string
   author: string
   digg: number
-  followers?: number
-  ratio?: number
 }
 
 interface TopicRow {

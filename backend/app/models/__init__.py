@@ -33,7 +33,7 @@ class AppSetting(TimestampMixin, table=True):
     """平台级运行时配置（键值对，平台单例）。
 
     分工：`.env` 只留引导/部署项（host/port/data_dir、Cookie Secure、登录限流阈值）；
-    运行时可改项（LLM 通道与密钥、检索通道、ASR 模型、数字人凭证、扫描计划）存这里——
+    运行时可改项（LLM 通道与密钥、检索通道、ASR 模型、扫描计划）存这里——
     随数据库每日备份一起进快照，服务器上无需改文件。
     """
     __tablename__ = "app_settings"
@@ -75,7 +75,6 @@ class FailurePattern(TimestampMixin, table=True):
     __tablename__ = "failure_patterns"
     id: Optional[int] = Field(default=None, primary_key=True)
     fp: str = Field(unique=True)  # 归一化错误指纹，如 llm:empty-body / asr:vocab / code:bug
-    kind: str = Field(default="job", index=True)  # job=任务失败 | entity=实体孤儿（无在途任务的失败实体）
     fail_class: str = ""  # 最近一次的失败分类
     label: str = ""  # 人类可读类别名
     root_cause: str = ""  # 根因与修复说明（人工沉淀）
@@ -94,7 +93,7 @@ class Topic(TenantScoped, TimestampMixin, table=True):
     title: str = ""
     angle: str = ""
     audience: str = "both"  # boss | fde | both
-    source_type: str = "manual"  # idea | benchmark | manual
+    source_type: str = "manual"  # idea | benchmark | manual | trending | self_story
     source_ref: str = ""
     evidence: dict = Field(default_factory=dict, sa_column=Column(JSON))
     score: Optional[float] = None
@@ -140,23 +139,20 @@ class Tenant(TimestampMixin, table=True):
 
 
 class User(TimestampMixin, table=True):
-    """租户内用户。角色：platform_admin（平台）| tenant_admin（租户管理）| member。"""
+    """用户（单管理员定版 2026-10-27）：bootstrap 只建 platform_admin。"""
     __tablename__ = "users"
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: int = Field(index=True)
     username: str = Field(unique=True)
     password_hash: str = ""
-    role: str = Field(default="member", index=True)  # platform_admin | tenant_admin | member
+    role: str = Field(default="member", index=True)  # platform_admin（单管理员定版；tenant_admin/member 为多租户旧值，历史行兼容）
     display_name: str = ""
     status: str = Field(default="active", index=True)  # active | disabled
     must_change_password: bool = Field(default=False)
 
 
 class UserSession(TimestampMixin, table=True):
-    """服务端会话（HttpOnly Cookie 携带 token，库存哈希）。
-
-    tenant_id = 会话的**当前活跃租户**（一人多租户切换的落点，服务端存储制：
-    切换租户=改本行，cookie 不变；登录时填默认租户 users.tenant_id）。"""
+    """服务端会话（HttpOnly Cookie 携带 token，库存哈希）。tenant_id=用户所属工作室（单管理员恒 1）。"""
     __tablename__ = "user_sessions"
     id: Optional[int] = Field(default=None, primary_key=True)
     token_hash: str = Field(unique=True)
@@ -169,7 +165,7 @@ class RadarTopic(TenantScoped, TimestampMixin, table=True):
     """话题雷达：监控的抖音话题（泛 AI 类），按日巡检话题下新视频测热度。
 
     热度代理=新增视频速度（话题接口免登录 但无互动数字）；单次巡检新增
-    ≥5 条判为飙升，发 macOS 通知。seen_ids 记已见视频防重复计数。"""
+    ≥5 条判为飙升（通知仅 Mac 生效，服务器静默跳过）。seen_ids 记已见视频防重复计数。"""
     __tablename__ = "radar_topics"
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: int = Field(default=0, index=True)
@@ -217,8 +213,8 @@ class Article(TenantScoped, TimestampMixin, table=True):
     topic_id: Optional[int] = Field(default=None, foreign_key="topics.id")
     script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
     md: str = ""
-    title: str = ""  # 公众号主标题（报题即草稿：报题一句话就是初始标题）
-    note: str = ""  # 报题备注/参考链接（公众号独立报题线，2026-11-02）
+    title: str = ""  # 公众号主标题
+    note: str = ""  # 产线注记（热点：/改编：/深读： 来源标签 + 审校未过记录）
     kb_sources: list = Field(default_factory=list, sa_column=Column(JSON))  # ima 知识库素材来源（2026-11-08 取材写文）
     publish_url: str = ""  # 发布登记：公众号文章链接（发布永远人工，系统只记账，2026-11-11 源文改编产线）
     published_at: str = ""  # 发布登记时间
@@ -241,8 +237,6 @@ class ContentItem(TenantScoped, TimestampMixin, table=True):
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
     media_id: str = Field(default="", index=True)  # ima 源文 id（库内唯一，防重挖重入）
-    kb_id: str = ""
-    folder_id: str = Field(default="", index=True)
     folder_name: str = ""                 # 产出来源目录
     title: str = ""                       # 源文标题
     source_author: str = ""               # 来源号/作者

@@ -76,17 +76,12 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         if script is None:
             raise RuntimeError(f"script {script_id} 不存在")
         topic = s.get(Topic, script.topic_id) if script.topic_id else None
-        _tgt = ((topic.evidence or {}).get("target") or {}) if topic else {}
         topic_info = {
             "title": topic.title if topic else "",
             "angle": topic.angle if topic else "",
             "audience": topic.audience if topic else "both",
             "pain_points": (topic.evidence or {}).get("pain_points", []) if topic else [],
             "hooks": (topic.evidence or {}).get("hooks", []) if topic else [],
-            # 靶子产线（2026-11-11 观点怼热点主轴）：有靶子材料时稿子必须贴着事件写
-            "target_event": _tgt.get("event", ""),
-            "target_why": _tgt.get("why", ""),
-            "target_evidences": _tgt.get("evidences", []),
         }
     template_id = int(payload.get("template_id") or 0)
     template = None
@@ -99,13 +94,13 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     # 2026-09-27 的「静默失效待拍板」问题已在恢复注入时闭环，此注释 2026-11-13 更新）。
 
     length = payload.get("length", "short")
-    # 打法：指定（≤3 个，每版一种）或自动挑
+    # 打法：指定候选（≤3 个，单版直出取最贴合的一个）或自动挑（2026-11-05 一版精品定版）
     angles = [a for a in (payload.get("angles") or []) if a in SIX_ANGLES][:3]
     if angles:
-        angles_spec = ("三版必须**分别使用**以下打法，每版一种、label 直接用打法名，不得换用其他打法：\n"
+        angles_spec = ("本版主打打法：从下列指定打法里选**最贴合本选题的一个**，label 直接用打法名，不得换用其他打法：\n"
                        + "、".join(angles))
     else:
-        angles_spec = "从上面六个里挑 3 种最贴合这个选题的（每版一种）"
+        angles_spec = "从上面六个里挑一个最贴合这个选题的"
     # 2026-10-09 流量诊断定档：默认档锁定黄金带 240~320 字（见 _script_length_spec）
     length_spec = _script_length_spec(length)
     use_style = bool(payload.get("use_style", True))
@@ -145,12 +140,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     # 新契约（PRD R2.3）：生成后自动批判打磨一轮
     ctx.set_progress(60, "自动批判打磨一轮（约 3~8 分钟，慢是正常的）")
     versions = await _polish_core(versions, use_style=bool(payload.get("use_style", True)),
-                                  length=length,
-                                  cta_rule=("保留并强化获客引导（这是获客号内容，引导是核心交付；"
-                                            "但不得承诺收益/包就业等合规红线）")
-                                  if account_type == "leadgen"
-                                  else "允许结尾带一句自然的关注/合集引导（人设号软引导 2026-11-02 放开）；"
-                                       "仍禁评论区扣字/私信领取/卖课导流")
+                                  length=length, cta_rule=_cta_rule_of(account_type))
 
     with Session(engine) as s:
         script = s.get(Script, script_id)
@@ -169,8 +159,18 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     return {"script_id": script_id, "versions": len(versions)}
 
 
+def _cta_rule_of(account_type: str) -> str:
+    """CTA 政策单点定义（生成链与手动打磨共用）：人设号软引导（2026-11-02 放开），获客号强化引导。"""
+    return ("保留并强化获客引导（这是获客号内容，引导是核心交付；"
+            "但不得承诺收益/包就业等合规红线）"
+            if account_type == "leadgen"
+            else "允许结尾带一句自然的关注/合集引导（人设号软引导 2026-11-02 放开）；"
+                 "仍禁评论区扣字/私信领取/卖课导流")
+
+
 async def _polish_core(versions: list[dict], use_style: bool = True,
-                       length: str = "short", cta_rule: str = "全删，这是他的红线") -> list[dict]:
+                       length: str = "short",
+                       cta_rule: str = _cta_rule_of("persona")) -> list[dict]:
     """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。"""
     length_spec = _script_length_spec(length)
     data = await gateway.complete_json(
@@ -219,7 +219,8 @@ async def _script_polish(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(30, "批判打磨中")
     merged = await _polish_core(original, use_style=bool(payload.get("use_style", True)),
-                                length=payload.get("length", "short"))
+                                length=payload.get("length", "short"),
+                                cta_rule=_cta_rule_of(script.account_type or "persona"))
 
     with Session(engine) as s:
         script = s.get(Script, script_id)

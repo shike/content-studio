@@ -197,7 +197,7 @@ async def probe() -> dict:
     state["history"] = ([result] + state.get("history", []))[:HISTORY_MAX]
     _write_state(state)
 
-    if prev and prev != result["status"]:  # 状态翻转才推送，避免每 15 分钟轰炸
+    if prev and prev != result["status"]:  # 状态翻转才推送，避免重复轰炸
         label = CN_LABEL.get(result["status"], result["status"])
         _notify(f"抖音采集{'恢复' if result['status'] == 'ok' else '异常'}：{label}")
     return result

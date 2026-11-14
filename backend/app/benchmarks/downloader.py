@@ -30,7 +30,7 @@ def _ensure_disk_space(min_gb: int = 2) -> None:
     if free_gb < min_gb:
         raise RuntimeError(
             f"磁盘剩余空间不足（{free_gb:.1f}GB < {min_gb}GB），已暂停下载。"
-            "请清理磁盘后在任务页按指纹复活这批任务")
+            "请清理磁盘后对失败任务行内重试")
 
 
 def download_video(url: str, out_dir: Path, cookie: str = "") -> str:

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-/* 品牌与内容配置表单（共享组件）：管理后台与设置页共用同一份字段与保存逻辑，避免两处漂移。 */
+/* 品牌与内容配置表单：设置页品牌卡用。 */
 
 export interface BrandShape {
   label_line1: string

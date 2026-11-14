@@ -16,7 +16,7 @@ from ..models import AppSetting
 BASE = "https://ima.qq.com"
 CTX = "skill_version=content-studio-1.0.0"
 
-# 选题线默认遍历目录（水滴跃动 AI-FDE 库核心真货区；可用 ima_topic_folders 覆盖）
+# 挖掘器默认遍历目录（水滴跃动 AI-FDE 库核心真货区；可用 ima_topic_folders 覆盖）
 DEFAULT_TOPIC_FOLDERS = "folder_7520695068157353:案例-交付实战复盘,folder_7520695084935296:案例-案例集与行业标杆,folder_7520695080739753:案例-行业场景与趋势,folder_7520695063956771:案例-方法论与工作包,folder_7520695126877635:岗位认知与转型路径,folder_7520695613417012:接单报价与个人品牌,folder_7520695097516987:市场与人才数据,folder_7520695110094246:研究报告与白皮书,folder_7520695378529762:能力模型与角色认知,folder_7520695445637163:企业落地与组织,folder_7520695386917111:行业观察与源流,folder_7520695206571358:工程规范与工具箱"
 
 
@@ -26,7 +26,7 @@ def _setting(s: Session, key: str) -> str:
 
 
 def kb_config(s: Session) -> dict | None:
-    """读配置；未启用/未配齐返回 None（=走旧的纯素材链）。"""
+    """读配置；未启用/未配齐返回 None（调用方视为缺料，挖掘/改编/深读线直接报错）。"""
     if _setting(s, "ima_kb_enabled") != "1":
         return None
     client_id = _setting(s, "ima_client_id")
@@ -38,7 +38,7 @@ def kb_config(s: Session) -> dict | None:
 
 
 def topic_folders(s: Session) -> list[tuple[str, str]]:
-    """选题线遍历目录：[(folder_id, 名称)]。"""
+    """挖掘器遍历目录：[(folder_id, 名称)]。"""
     raw = _setting(s, "ima_topic_folders") or DEFAULT_TOPIC_FOLDERS
     out = []
     for item in raw.split(","):

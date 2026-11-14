@@ -34,15 +34,7 @@ def account_metrics(days: int = 30, user: User = Depends(require_user)) -> dict:
             "digg": r.digg, "comment": r.comment, "share": r.share,
             "account_search": r.account_search, "post_search": r.post_search,
         })
-    latest = items[-1] if items else None
-    week = items[-7:]
-    summary = {
-        "fans": latest["fans"] if latest else 0,
-        "new_fans_7d": sum(x["new_fans"] for x in week),
-        "profile_views_7d": sum(x["profile_views"] for x in week),
-        "play_7d": sum(x["play"] for x in week),
-        "days": len(items),
-    }
+    summary = {"days": len(items)}
     return {"items": items, "summary": summary}
 
 

@@ -17,7 +17,7 @@ class GenerateIn(BaseModel):
     topic_id: int
     use_style: bool = True  # 贴合我的风格（R9.4）
     length: str = "short"  # short=240~320字（50~70s 黄金档）| long=600~900字（PRD R2.1 两档，2026-10-09 定档）
-    angles: list[str] = []  # 指定三版打法（六打法子集 ≤3 个；空=自动挑）
+    angles: list[str] = []  # 主打打法候选（六打法子集 ≤3 个，取最贴合的一个；空=自动挑）
     template_id: int = 0  # 结构模板（0=不使用，走默认流程）
     account_type: str = ""  # persona(人设号) | leadgen(获客号)；空=读选题自带
 

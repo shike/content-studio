@@ -69,17 +69,11 @@ def list_videos(status: str = "", limit: int = 50, offset: int = 0) -> dict:
 def overview() -> dict:
     with Session(engine) as s:
         acc = _self_account(s)
-        videos = s.exec(
-            select(SelfVideo).order_by(SelfVideo.id.desc()).limit(100)  # type: ignore[attr-defined]
-        ).all()
-        # 全库统计口径（此前在最新 100 条窗口上统计，self 视频>100 后 total/pending 失真）
+        # 全库统计口径（此前在最新 100 条窗口上统计，self 视频>100 后 total 失真）
         from sqlmodel import func as _f
         total = s.exec(select(_f.count(SelfVideo.id))).one() or 0
         analyzed = s.exec(select(_f.count(SelfVideo.id)).where(
             SelfVideo.analyzed_at is not None)).one() or 0  # type: ignore[attr-defined]
-        awaiting = s.exec(select(_f.count(SelfVideo.id)).where(
-            SelfVideo.scan_status == "pending",  # type: ignore[attr-defined]
-            SelfVideo.analyzed_at is None)).one() or 0  # type: ignore[attr-defined]
         profile = s.exec(
             select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
         ).first()
@@ -87,12 +81,5 @@ def overview() -> dict:
         return {
             "account": acc.model_dump() if acc else None,
             "profile": _profile_dict(profile) if profile else None,
-            "videos": [{
-                "id": v.id, "title": v.title, "url": v.url,
-                "analyzed": v.analyzed_at is not None,
-                "analyzed_at": v.analyzed_at,
-                "scan_status": v.scan_status,
-                "style_analysis": v.style_analysis,
-            } for v in videos],
-            "stats": {"total": total, "analyzed": analyzed, "pending": awaiting},
+            "stats": {"total": total, "analyzed": analyzed},
         }

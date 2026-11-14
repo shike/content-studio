@@ -5,7 +5,7 @@ import { api } from '../api'
 /* 登录页（品牌化，参考 drop-harness moxt 语言）：左品牌区（墨绿渐变 + 粒子星尘 +
    衬线宣言）+ 右登录卡。窄屏（<lg）退化为单栏只留登录卡。 */
 
-export default function Login({ onLogin }: { onLogin: (username: string) => void }) {
+export default function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -17,7 +17,7 @@ export default function Login({ onLogin }: { onLogin: (username: string) => void
     setError('')
     try {
       await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: username.trim(), password }) })
-      onLogin(username)
+      onLogin()
     } catch (e) {
       setError(String(e))
     } finally {

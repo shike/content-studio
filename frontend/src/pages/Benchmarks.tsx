@@ -11,14 +11,11 @@ interface BenchCounts {
   todo: number
   done: number
   ignored: number
-  online: number
-  local: number
 }
 
 interface Benchmark {
   id: number
   scan_status?: string
-  url: string
   author: string
   title: string
   transcript: string
@@ -30,7 +27,6 @@ interface Benchmark {
   digg?: number | null
   quality_score?: number
   account_type?: string
-  notes?: string
 }
 
 const analyzed = (b: Benchmark) =>
@@ -44,7 +40,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
   const [showTranscript, setShowTranscript] = useState(false)
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<BenchCounts>({
-    all: 0, pending: 0, todo: 0, done: 0, ignored: 0, online: 0, local: 0,
+    all: 0, pending: 0, todo: 0, done: 0, ignored: 0,
   })
   const [page, setPage] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)

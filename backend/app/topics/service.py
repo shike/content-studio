@@ -44,11 +44,10 @@ async def idea_research(ctx: JobContext, payload: dict) -> dict:
             search_meta = {"query": "", "refs": 0, "status": f"error: {str(e)[:60]}"}
 
     ctx.set_progress(15, "深度研究中（报告生成）")
-    from ..models import Topic as _Topic
     from ..tenant_brand import audience_note_of, brand_of
 
     with Session(engine) as s:
-        t = s.get(_Topic, topic_id)
+        t = s.get(Topic, topic_id)
         _tenant = t.tenant_id if t else 1
         persona_text = brand_of(_tenant)["persona"]
         audience_note = audience_note_of(_tenant)
@@ -189,7 +188,6 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(36, "按画像生成今日检索词")
     queries: list[str] = []
-    q_status = "skipped"
     if search_enabled() and gateway.is_configured():
         try:
             pick = await gateway.complete_json(
@@ -204,9 +202,8 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 max_tokens=1024, thinking="disabled")
             queries = [str(q).strip() for q in (pick.get("queries") or [])
                        if str(q).strip()][:4]
-            q_status = "ok" if queries else "empty"
-        except Exception as e:  # noqa: BLE001 降级默认词，留痕
-            q_status = f"error: {type(e).__name__}: {str(e)[:60]}"
+        except Exception:  # noqa: BLE001 降级默认词（检索失败留痕见下方 search_metas）
+            pass
     if not queries:
         queries = ["AI 大模型 企业应用 最新消息 今天"]
 
@@ -402,7 +399,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
         items = [x for x in items if x["sentence"].strip() in keep]
         print(f"[trending] 成色终审：{before} 条进 → {len(items)} 条出")
 
-    # 三层硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 7 天去重 → 批内去重 → 对标变体拦截
+    # 四道硬校验（程序化兜底，宁缺毋滥凑数不如少出）：对标圈拦截 → 14 天判决句撞车 → 批内由头去重 → 对标变体拦截
     watch_norms = [_norm(x["title"]) for x in watch_items if len(_norm(x["title"])) >= 10]
     batch: list[dict] = []
     seen_norms: list[str] = []
@@ -472,11 +469,7 @@ async def trending_topics(ctx: JobContext, payload: dict) -> dict:
                 source_ref=str(x.get("context") or "")[:200],
                 line="persona",  # 站外热点提炼走人设线（获客号有独立挖号进料，2026-11-02）
                 evidence={
-                    "hotspot": x.get("context", ""),
                     "target": tgt,  # 半句话靶子（2026-11-12 三秒半句话方法论定版）
-                    "material": {"watch_count": len(watch_items), "news": news_meta,
-                                 "hot": hot_meta, "douyin": dy_meta, "zhihu": zh_meta,
-                                 "github": gh_meta, "aihot": ah_meta, "queries": q_status, "web": search_metas},
                 },
                 status="draft",
             )
@@ -608,12 +601,10 @@ async def self_story_targets(ctx: JobContext, payload: dict) -> dict:
                 source_ref=str(x.get("context") or "")[:200],
                 line="persona",
                 evidence={
-                    "hotspot": str(x.get("context") or ""),
                     "target": {"sentence": str(x["sentence"])[:20],
                                "context": str(x.get("context") or "")[:60],
                                "spice": x.get("spice") if x.get("spice") in ("low", "mid", "high") else "mid",
                                "heat": "一线交付"},
-                    "material": {"videos": len(ordered)},
                 },
                 status="draft",
             )

@@ -1,4 +1,4 @@
-"""文章图表渲染器：LLM 输出图表规格（[CHART]{json}[/CHART]），matplotlib 本地渲染。
+"""文章图表渲染器：LLM 经 article_charts.md 输出图表规格 JSON，matplotlib 本地渲染。
 
 数据类配图（对比/趋势/占比）的正确生产方式：免费、无限量、数字绝对准确——
 AI 文生图画不了带真实数字的图表，这是工具错配。
@@ -26,7 +26,6 @@ def _tenant_image_dir():
     d = settings.data_dir / "article_images" / str(tenant_id or 1)
     d.mkdir(parents=True, exist_ok=True)
     return d
-  # noqa: E402
 
 _BRAND = "#5E6AD2"
 _PALETTE = ["#5E6AD2", "#8B93E8", "#3D4577", "#B8BDF2", "#2B3160"]

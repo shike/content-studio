@@ -155,7 +155,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     ContentItem.media_id == mid)).first()  # type: ignore[attr-defined]
                 if again is None:  # 双保险：批内重复评估不重入
                     s.add(ContentItem(
-                        media_id=mid, kb_id=kb_id, folder_id=folders[idx][0],
+                        media_id=mid,
                         folder_name=folder_name, title=title[:120],
                         source_author=str((note or {}).get("source_author") or "")[:60],
                         quality_score=score, why_good=str((note or {}).get("why_good") or "")[:200],
@@ -170,7 +170,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     ContentItem.media_id == mid)).first()  # type: ignore[attr-defined]
                 if again is None:  # 低分也落行（status=low）：整库盘完回卷时不重复评估
                     s.add(ContentItem(
-                        media_id=mid, kb_id=kb_id, folder_id=folders[idx][0],
+                        media_id=mid,
                         folder_name=folder_name, title=title[:120],
                         quality_score=score, status="low",
                         note=f"评分 {score} 低于生成线 {line}，未入改编队列"))
