@@ -37,7 +37,7 @@ const NAVMAP: Record<string, NavTarget> = {
   l_scripts: { key: 'content', tab: 'scripts:leadgen' },
   p_own: { key: 'content', tab: 'own' },
   p_bench: { key: 'monitor', tab: 'bench:persona' },
-  l_bench: { key: 'content', tab: 'bench_leadgen' },
+  l_bench: { key: 'monitor', tab: 'bench:leadgen' },
   p_cand: { key: 'monitor', tab: 'cand:persona' },
   l_cand: { key: 'monitor', tab: 'cand:leadgen' },
   p_watch: { key: 'monitor', tab: 'watch:persona' },

@@ -10,10 +10,12 @@ interface ArtRow { id: number; title: string; status: string }
 
 interface TargetCard { id: number; hook: string; spine: string; created_at: string }
 
-const PIPELINES = ['article_hotspots_daily', 'hl_search_daily']
+const PIPELINES = ['watch_scan', 'card_line_daily', 'article_hotspots_daily', 'hl_search_daily']
 const PIPE_LABEL: Record<string, string> = {
+  watch_scan: '同行扫描',
+  card_line_daily: '选题工场',
   article_hotspots_daily: '公众号直出',
-  hl_search_daily: '组局号搜索',
+  hl_search_daily: '组局挖掘（获客）',
 }
 
 /** 迷你趋势条：纯 SVG，无依赖，数据=近 N 天数值。 */

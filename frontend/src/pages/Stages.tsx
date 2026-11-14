@@ -109,7 +109,7 @@ export function TopicStage(props: { tab: string; onTab: (t: string) => void; onN
   )
 }
 
-/** 内容（怎么拍+发+数据回流）：视频稿 / 公众号三视图 / 打法卡库 / 经营数据 */
+/** 内容（怎么拍+发+数据回流）：视频稿 / 公众号三视图 / 经营数据（获客拆解=监控·拆解库获客线，不再重复入口） */
 export function ContentStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
@@ -117,7 +117,6 @@ export function ContentStage(props: { tab: string; onTab: (t: string) => void; o
       { id: 'workshop', label: '公众号·工场' },
       { id: 'items', label: '公众号·清单' },
       { id: 'style', label: '公众号·画像' },
-      { id: 'bench_leadgen', label: '打法卡库' },
       { id: 'own', label: '经营数据' },
     ]}>
       {({ id, line }) => (
@@ -126,7 +125,6 @@ export function ContentStage(props: { tab: string; onTab: (t: string) => void; o
           {id === 'workshop' && <Workshop />}
           {id === 'items' && <ContentItems onNavigate={props.onNavigate} />}
           {id === 'style' && <ArticleStyle />}
-          {id === 'bench_leadgen' && <Benchmarks onNavigate={props.onNavigate} accountType="leadgen" />}
           {id === 'own' && <AccountTrends onNavigate={props.onNavigate} />}
         </>
       )}
