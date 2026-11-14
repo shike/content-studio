@@ -572,7 +572,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     """公众号独立热点报题（2026-11-05 改每日一篇直出）：站外热点×画像 → 1 篇待写草稿，
     建稿后自动链发 article_generate 成文——早晨草稿箱里是一篇完整长文，改完即发。
 
-    与抖音选题提炼（trending_topics）完全独立——公众号线不进选题库，直出链建稿。"""
+    与人设号选题工场（cards）完全独立——公众号线不进选题库，直出链建稿。"""
     from ..tenant_brand import brand_of
     from ..topics.hotlist import fetch_baidu_hot, fetch_tech_news
 

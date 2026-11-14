@@ -33,7 +33,7 @@ def _validate_line(line: str) -> str:
     return line
 
 
-@router.post("/trending", status_code=202)
+
 async def trending_topics(user: User = Depends(require_user)) -> dict:
     """今日热点提炼（R1.4）：站外热点 × 画像 → 0~6 个半句话判决靶子落选题库（空过合法）。
 

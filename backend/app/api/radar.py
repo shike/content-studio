@@ -1,5 +1,5 @@
 """热点雷达·话题洞察接口：查看 + 手动巡检 + 贴链提取话题 + 添加监测
-（并入每日热点原料路后，自动巡检由 trending_topics 执行器内联驱动）。"""
+（自动巡检由选题工场 card_daily 车间零内联驱动）。"""
 from fastapi import APIRouter, Depends
 
 from ..auth import require_user

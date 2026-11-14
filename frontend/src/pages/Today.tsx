@@ -135,11 +135,11 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   }
 
   const trending = () => {
-    setBusy('热点雷达运行中（话题飙升 + 站外热点，几分钟后自动入库）…')
+    setBusy('选题工场运行中（五段流水线：信号采集→池子→主线→钩子→法官）…')
     ;(async () => {
       try {
-        await api('/topics/trending', { method: 'POST' })
-        setBusy('热点提炼已排队，稍后刷新查看')
+        await api('/schedules/card_line_daily/run', { method: 'POST' })
+        setBusy('工场已排队，靶子卡稍后进「今日靶子」')
       } catch (e) {
         setError(String(e)); setBusy('')
       }
@@ -157,7 +157,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">今日工作台</h1>
           <p className="mt-1 text-[13px] text-slate-400">管线 02:00 自动运转 · 指标 04:00 回流 · 雷达 06:00 已跑</p>
         </div>
-        <button onClick={trending} className="rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-slate-700">热点雷达</button>
+        <button onClick={trending} className="rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-slate-700">选题工场</button>
       </div>
       {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
       {busy && <div className="mb-3 text-sm text-sky-700">{busy}</div>}

@@ -106,6 +106,8 @@ code, d = request("POST", f"/api/cards/{_jid}/revive")
 check("弃卡捞回（jail→draft，用户翻案盖过法官）", code == 200 and d.get("status") == "draft", f"code={code}")
 code, d = request("POST", f"/api/cards/{_jid}/discard")
 check("不做出口（draft→discarded）", code == 200 and d.get("status") == "discarded", f"code={code}")
+code, d = request("POST", "/api/topics/trending", body={})
+check("旧热点提炼端点已删 404（选题工场替代）", code == 404, f"code={code}")
 code, d = request("POST", "/api/cards/seed", body={"text": f"P8 投喂受理测试 {os.urandom(3).hex()}"})
 check("手动投喂受理 202（card_seed 任务）", code == 202 and bool(d.get("job_id")), f"code={code}")
 # 卡备稿→脚本全链（真实 LLM；投喂文案自带判词词根与大盘主语，降低被闸拦的概率；
@@ -265,9 +267,10 @@ check("改编原创度闸：≥14 字整句照搬被检出", _r_copy > 30 and le
 _r_ok, _ = _dr("把交付标准写进合同，是转型成败的胜负手，其余一切都要往后排", f"前奏。{_sen}。结尾。")
 check("改编原创度闸：换口径写法不误伤", _r_ok <= 30, f"ratio={_r_ok}")
 
-check("self_story/hl_search 硬超时已配（2026-11-13 补，heavy 唯一 worker 不再被无界占用）",
-      _policy_of("self_story_targets").task_timeout == 900
-      and _policy_of("hl_search_matrix").task_timeout == 3600)
+check("hl_search 硬超时已配（heavy 唯一 worker 不再被无界占用）",
+      _policy_of("hl_search_matrix").task_timeout == 3600)
+check("旧靶子产线执行器已删（2026-11-14 选题工场替代）",
+      "trending_topics" not in _executors and "self_story_targets" not in _executors)
 check("选题工场硬超时已配（card_daily 1800/card_seed 900）",
       _policy_of("card_daily").task_timeout == 1800 and _policy_of("card_seed").task_timeout == 900)
 check("选题工场调度在位（card_line_daily 替代 trending/self_story 两调度）",
@@ -313,6 +316,9 @@ try:
     check("关键 prompt 全部可加载（含选题工场四件）", True)
 except Exception as _e:  # noqa: BLE001
     check("关键 prompt 全部可加载（含选题工场四件）", False, str(_e)[:120])
+for _n in ("trending_target_industry", "trending_target_judge", "self_story_target"):
+    check(f"{_n}.md 已随旧链路删除",
+          not os.path.exists(os.path.join(_prompts_dir, f"{_n}.md")))
 
 
 # ---------- 租户自助品牌配置（R11.2） ----------
