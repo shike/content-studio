@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""数据卫生扫描器（AUDIT A4 的自动化）：一条命令扫生产库的测试残留与假数据。
+"""数据卫生扫描器（TDD §13.6 的自动化）：一条命令扫生产库的测试残留与假数据。
 
 用法：python3 acceptance/hygiene.py [data_dir]
-退出码：0 干净 / 1 发现残留。检查项（对齐 docs/AUDIT.md A4）：
+退出码：0 干净 / 1 发现残留。检查项（对齐 docs/TDD.md §13.6）：
   ① 拆解库 fixture 行（sample_speech）
   ② 演示/验收链接的发布记录（example.com / demo / acceptance）
   ③ 选题评分含 performance 回流残留（新契约已移除该字段）
@@ -59,7 +59,7 @@ if issues:
     print("[hygiene] 发现残留：")
     for it in issues:
         print("  ✗", it)
-    print("[hygiene] 结论：脏——按 docs/AUDIT.md A4 清理后重扫")
+    print("[hygiene] 结论：脏——按 docs/TDD.md §13.6 清理后重扫")
     sys.exit(1)
 print("[hygiene] 结论：干净")
 sys.exit(0)

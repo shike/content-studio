@@ -4,7 +4,7 @@
 而是**租户级配置**（tenants.brand JSON），让一套部署服务不同定位的客户。
 
 brand 字段（BRAND_KEYS）：
-- label_line1 / label_line2 : 数字人角标栏目名（两行，画进成片）
+- label_line1 / label_line2 : 角标栏目名（数字人已退役，字段随品牌九字段契约保留，成片不再画）
 - signature                 : 公众号头图署名
 - persona                   : 创作者人设描述（注入全部内容生成 prompt 的人设段）
 - accent / primary          : 点缀色 / 图表与头图主色（hex）
@@ -15,7 +15,6 @@ brand 字段（BRAND_KEYS）：
 默认策略（2026-10-02）：**未配置租户回落中性默认**（各行业客户拿到的都是中性话术）；
 创始租户（id=1）由 seed_founder_brand() 一次性写入一套填满九字段的**示例品牌**，
 用于演示各字段的实际效果，租户可在设置页/管理后台随时改掉。
-角标字体：按租户栏目名动态子集化 Noto Sans SC Bold（fontTools），缓存于 data/label_fonts/。
 """
 from __future__ import annotations
 
@@ -23,7 +22,6 @@ from sqlmodel import Session
 
 from .db import engine
 from .models import Tenant
-from .settings import settings
 
 # 中性默认（未配置租户的兜底）：任何行业的客户拿到都不会是"别人的业务话术"
 NEUTRAL_DEFAULT_BRAND: dict = {
@@ -65,8 +63,6 @@ FOUNDER_BRAND: dict = {
 
 BRAND_KEYS = ("label_line1", "label_line2", "signature", "asr_vocab", "accent", "primary",
               "persona", "cover_slogan", "audience_note")
-
-_SUBSET_DIR = settings.data_dir / "label_fonts"
 
 
 def _norm_brand(raw: dict | None) -> dict:
@@ -138,7 +134,7 @@ def save_brand(tenant_id: int, brand: dict) -> dict:
     """管理员保存租户品牌（校验在 API 层）。
 
     只持久化提供的覆盖键（空值不落默认值——默认在读取时解析），避免把兜底文案
-    写死进租户配置；保存后清该租户角标字体缓存。"""
+    写死进租户配置。"""
     norm = {k: str(v).strip() for k, v in (brand or {}).items()
             if k in BRAND_KEYS and str(v or "").strip()}
     with Session(engine) as s:
@@ -148,13 +144,4 @@ def save_brand(tenant_id: int, brand: dict) -> dict:
         t.brand = dict(norm)
         s.add(t)
         s.commit()
-    _clear_font_cache(tenant_id)
     return _norm_brand(norm)
-
-
-def _clear_font_cache(tenant_id: int) -> None:
-    for p in _SUBSET_DIR.glob(f"label_{tenant_id}_*.otf"):
-        try:
-            p.unlink()
-        except Exception:  # noqa: BLE001
-            pass

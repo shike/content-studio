@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E2E 端到端验收：Playwright 驱动真实浏览器，走用户旅程（AUDIT A3 界面冒烟的自动化版）。
+"""E2E 端到端验收：Playwright 驱动真实浏览器，走用户旅程（TDD §13 界面冒烟的自动化版）。
 
 前提：隔离实例已在 127.0.0.1:8200 运行（DATA_DIR=data-acceptance + CS_BOOTSTRAP_PASSWORD，
 流程同其他套件；LLM 配置可选——本套件不触发任何 LLM 调用）。
@@ -7,7 +7,7 @@
 
 覆盖：
 - 登录流程（错误密码拒/正确密码进）
-- 全站 16 页逐页打开（今天+产线树 13 叶+任务/设置），console error/pageerror 零异常，每页特征元素在位
+- 全站 17 页逐页打开（今天+产线树 13 叶+任务/设置），console error/pageerror 零异常，每页特征元素在位
 - 今天页快速记选题（无 LLM 的真实用户操作）→ 待拍清单出现
 - 内容工场：fixture 文章行展开 → md 编辑器 → 渲染公众号格式
 - 账号经营：品牌卡字段在位、改头图口号保存成功回显

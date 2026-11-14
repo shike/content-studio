@@ -1,58 +1,48 @@
 # 跃迁内容工作室 · Agent 工作规约
 
-单管理员内容生产流水线（登录门禁，PRD R11/TDD §15；多租户/积分体系已于 2026-10-27 拆除）：选题 → 口播脚本（一版精品直出）→ 公众号长文（报题直出/知识库挖掘→清单→改编）（发布永远人工；口播数字人功能已于 2026-10-29 整体退役）。
+单管理员流水线（登录门禁，PRD R11/TDD §15）：选题 → 口播脚本（一版精品直出）→ 公众号长文。发布永远人工；数字人成片/发布台/多租户不在系统范围。
+架构：FastAPI + SQLModel + SQLite（`backend/app/`，22 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。
+两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约+验收纪律（§13：套件清单/隔离实例/审计对账）。现状只看运行中的应用。
 
-- 架构：FastAPI + SQLModel + SQLite（`backend/app/`，22 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）
-- 五大文档（英文文件名，规格型：不含版本号、不含完成情况）：`docs/PRD.md`（需求总账，改需求先改它）· `docs/TDD.md`（技术契约）· `docs/TEST.md`（验收合同）· `docs/AUDIT.md`（审计规程）· `docs/MRD.md`（市场调研存档）。现状只看运行中的应用。
+## 启动与构建（CWD 必须是仓库根）
 
-## 启动与构建（CWD 必须是仓库根目录）
-
-- 后端（8100，绑 0.0.0.0）：正式 `scripts/launchd.sh install`（LaunchAgent 常驻 + 开机自启 + 看门狗）；临时 `scripts/start-absolute.sh`。Linux：`sudo scripts/deploy-linux.sh install`。
-- **发服务器唯一流程 `scripts/sync-server.sh`**（rsync + 重启 + 健康检查三步一体；裸 rsync 不重启 = 旧代码照跑；有在途任务拒发，`CS_FORCE_RESTART=1` 强发）。
-- 重启自愈：queued 重新入队、running 标 failed（须在 runner.start() 之后跑）。
-- 前端改完必须 `cd frontend && npx tsc --noEmit && npm run build`（后端服务 dist）。一键起 `scripts/dev.sh`。
+- 后端 8100：`scripts/launchd.sh install`（正式常驻+看门狗）/ `start-absolute.sh`（临时）；Linux `deploy-linux.sh install`；一键起 `dev.sh`。
+- 发服务器唯一流程 `scripts/sync-server.sh`（rsync+重启+健康检查；在途任务拒发，`CS_FORCE_RESTART=1` 强发；裸 rsync 不重启=旧代码照跑）。
+- 重启自愈（queued 回队/running 标 failed）须在 `runner.start()` 之后。前端改完必 `npx tsc --noEmit && npm run build`。
 
 ## 验收纪律（违反 = 白干）
 
-- `acceptance/` 实存 `run_p0/p1/p2/p6/p7/p8` + `e2e_run.py`（纯标准库；P3 已随视频生产线移除、run_p4 已随发布台砍除删除、run_p5 已随数字人退役删除；P6=任务 P7=认证与单管理员）。**任何后端改动后必须重跑受影响套件**。
-- 任务失败处置（2026-10-30 用户定版：**失败是异常不是工作流**）：瞬时/风控/额度类失败走退避梯子（30min→2h→6h→24h），梯子尽头转**每日慢巡**（24h 一试直到自愈，30 次硬上限后安静终态）；确定性失败不重试安静终态。界面无失败工作流（指纹聚类/标记已修复/复活整批已移除，后端 failures API 保留）：失败行=红徽章+错误+行内重试，侧栏徽章含失败数。任何失败要么自愈要么安静可见。
-- 隔离实例（别污染工作台）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`；跑套件 `CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 python3 acceptance/run_pX.py`（可加 `CS_REAPER_SEC=5` 加速快巡）。跑完删 `data-acceptance`。
-  - 复制后先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`——否则验收任务排在真实队列后面必然超时。
-  - 手拨/判读到期的任务一律按 UTC（runner 全线 naive-UTC，SQL 用 `datetime('now')`）。
-  - 本地跑 P2：软链 `data/asr-models` 进 `data-acceptance/` + `ASR_MODEL=small`（large-v3 在 Mac CPU 拖死 600s 超时）。
-- 在线拆解项需 `DOUYIN_TEST_URL`（向用户要真实分享链接）。验收产生的测试数据收尾必须清理（发布假数据会污染选题评分）。
+- 套件 `run_p0/p1/p2/p6/p7/p8` + `e2e_run.py`（P8/e2e 必须用 `backend/.venv/bin/python`）。**后端改动必重跑受影响套件**。
+- 隔离实例：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；跑完删 `data-acceptance`）。复制库先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`。
+- 全线 naive-UTC，SQL 用 `datetime('now')`。P2：软链 `data/asr-models` + `ASR_MODEL=small`；在线拆解向用户要 `DOUYIN_TEST_URL`。测试数据收尾必清（假数据污染选题评分）。
+- 失败是异常不是工作流：瞬时失败走退避梯子 30min→2h→6h→24h→每日慢巡（30 次上限）；确定性失败安静终态；界面只有红徽章+行内重试（后端 failures API 保留）。
 
-## LLM 硬规矩（思考型模型，Coding Plan 端点）
+## LLM 硬规矩（GLM Coding Plan，思考型）
 
-- **max_tokens = 实测输出 × 2**：贴上限 → JSON 截断 → 解析失败 → 修复循环 → 任务挂死。现行值（2026-11-13 对齐代码）：article 分段式（title 8192 / outline 8192 / section 12000/节 / editor 20000 / charts 4000，均 thinking disabled）· article_kb_write 单遍 8192 · article_kb_brief 4000 · article_kb_polish 8192 · article_kb_miner 2000 · article_deepread_digest 2000 / synth 4000 · article_adapt_write 20000（全库唯一 thinking=enabled）/ adapt_reduce 8192 / adapt_revise 8192 · article_review_facts/reader/title_score 各 1024 · article_quality_gate 1024 · article_hotspots 4000（+hotspot_keywords 1024 行内预筛）· article_style_extract 2000 · weekly_report 2048 · leadgen_judge 4000 · script_generate/polish 20000 · script_finalize 8000 · idea_research/benchmark_analyze 5000（idea_research_struct 未传走默认 4096）· self_style_extract 12000 · self_profile_update 16000 · research_queries 1024 · style_pick 1024 · trending_target（靶子生成 8000 + 法官闸 2000，purpose 同名）/ self_story_target 8000 · trending_queries 1024 · ping 1024。（discover_keywords 已不存在，2026-11-13 从台账移除。）
-- httpx 超时 600s；验收轮询常规 ≥600s、脚本生成（一版+自动打磨）≥900s。空正文（推理耗尽预算）必须显式报错，禁静默当成功。
-- Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定；密钥/模型/检索通道走设置页运行时改（存 app_settings，.env 只留引导项）。
-- 成本台账已拆除（2026-10-27 用户裁定 2B）：系统不再记录任何成本；要花销概算直接看服务商控制台。
+- max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_write/kb_polish/adapt_reduce/adapt_revise；8000=script_finalize/trending_target/self_story_target｜**5000**=idea_research/benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/kb_brief/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract｜**1024**=review_facts/reader/title_score/quality_gate/research_queries/style_pick/trending_queries/ping。
+- httpx 超时 600s；验收轮询 ≥600s、脚本生成 ≥900s。空正文必须显式报错，禁静默当成功。
+- Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定（按量余额不足报 1113）；密钥/模型/检索走设置页运行时改（存 app_settings，.env 只留引导项）。系统不记录成本，花销看服务商控制台。
 
 ## 前端规矩
 
-- 页面六段式：①页头带（图标+一句话+主操作 ≤2）②回显带（进度/结果/错误，全站此位置）③计数 chips ④紧凑行列表+点行展开（详情两栏：左内容右元信息）⑤空态 EmptyState。内容区 max-w-7xl。
-- UI 操作必有状态回显；降级必须可见（含原因）。禁 `prompt()`/`alert()`，用行内表单。
-- 审阅队列（一屏一件、A/S/X 键、审完自动下一条、有"不做"出口）一律**手动进入**，禁止打开页面自动劫持。共享组件 QueueBar/ChipRow/relTime 在 `frontend/src/components.tsx`。
-- 产线树侧栏（2026-11-07 用户从三方案原型拍板方案三，取代 11-03 版）：**每条线的页面直接摆在侧栏，可展开收起（localStorage `mx-tree-open` 记住展开态），目的地不藏在页内 tab**——今天 → 人设号（今日靶子=选题库（2026-11-12 三方向定版=「123都要」：①热点落饭碗（公司事件只当由头，判决主语=中层/老板/岗位等受众角色，骂公司的行业判决方向已废）②一线交付爆料（已发视频清单盘 franchise 三类靶，self_story_targets 06:00 挖掘）③实测打假（待实测清单，建设中）；首要目标=1980 线下实训营报名；承接哲学=人设优先不刻意承接；辣度不设限；半句话方法论=三秒点名+一句判词，三道程序闸（半句话/劝告开头/判词词根）+受众闸+争吵自检/内容看板/账号经营/对标拆解/候选定夺/监控清单——账号经营已并风格画像（2026-11-07 用户拍板））· 获客号（获客选题/脚本工场/纯获客候选/获客监控/打法卡库）· 公众号（内容清单=知识库挖出的高质量源文——挖掘器每日 04:00 逐篇评估 ≥7.5 入清单、低分落 low；改编器每日 05:00 取项改编成文：保源文骨架+逐字原话 ≤3 处引用、换我们判断口径，原创度 ≤30%→事实对源→读者弃读点→去AI味四审全过才进待发，二次不过计数退避落 low（2026-11-11 用户定版「从知识库挖掘高质量内容，形成清单，持续生成发布」=源文改编流；「系统做全部工作，用户只做最终决策」继续有效）/内容工场=决策页：复制去公众号后台发表→发布登记贴 URL→48h 回流阅读/在看/涨粉/进线（北极星=周私域进线数），「不用」移除 · 风格画像 ArticleStyle）→ 沉底（任务/设置）。产线 tab 容器（Persona/Leadgen/LineIntel）已删，叶子页直挂 section；旧 SectionKey 经 NAVMAP 兼容路由。徽章（counts.ts 同源，60s 刷新）=**落在每个叶子自身**：今日靶子=待备稿靶子（targetsPersona，2026-11-11）/获客选题=待审选题 · 内容看板/脚本工场=待定稿脚本 · 对标拆解/打法卡库=拆解待定夺 · 候选定夺/纯获客候选=候选待定夺 · 内容清单=待改编源文（2026-11-11） · 内容工场=待决策稿（排队写+待发） · 任务=在途（运行+排队+退避中/慢巡——2026-11-11 用户定版：退避中有自动重试排程不是失败，红警只在终态失败即 next_retry_at 为空时亮） · 今天=待审选题合计（两线求和）；组行徽章=子叶求和；生成中/排队/待拆等过程性数字不上菜单。
-- 主题 moxt 墨绿×白纸：页面纯白、侧栏 #0A2F24（选中金光条 #E8C97F→#C9A25C）、品牌绿主按钮药丸 #29C16A、卡片白+发丝线 #E8ECF0（16px 圆角）、文字 #171929。Tailwind v4 `@theme` 重映射 sky/blue 两套色阶实现全站换肤——**换色只改 index.css，别动组件类名**；语义色不变。**改页面前先给交互方案**。
-- icon=轨道环徽标（public/icon.svg），数字用 `.num-serif` 工具类；btn-primary=近黑药丸、btn-accent=品牌绿药丸。
+- 页面六段式：页头带（主操作 ≤2）→回显带（全站此位置）→计数 chips→紧凑行列表+点行展开→空态。UI 操作必有回显，降级必须可见（含原因）；禁 `prompt()`/`alert()`。审阅队列一律手动进入（交互契约=PRD R1.5）；共享组件 QueueBar/ChipRow/relTime 在 `components.tsx`。
+- 产线树侧栏：页面直挂侧栏可展开收起（`mx-tree-open`），目的地不藏页内 tab。叶子=今天→人设号（今日靶子/内容看板/账号经营/对标拆解/候选定夺/监控清单）·获客号（选题/脚本/候选/监控/打法卡库）·公众号（内容清单/内容工场/风格画像）→任务/设置；旧 SectionKey 经 NAVMAP 兼容路由。**业务口径唯一权威在 PRD（R1.4/R5.6b/R6），本文件不复述。**
+- 徽章（counts.ts 同源，60s 刷新）落叶子自身：靶子=待备稿/获客选题=待审/看板·工场=待定稿/对标·卡库=待定夺/候选=待定夺/清单=待改编源文/内容工场=待决策稿/任务=在途（红警只在终态失败亮）/今天=两线待审合计；组行=子叶求和，过程性数字不上菜单。
+- 主题 moxt（墨绿×白纸）：**换色只改 index.css 的 `@theme`，别动组件类名**；改页面前先给交互方案。icon=public/icon.svg，数字用 `.num-serif`。
 
 ## 抖音抓取事实（会过期，改前先实测）
 
-- **拦截跟"指纹一致性"走，不跟 IP 也不跟登录**：跨平台 UA 伪装（Mac UA 跑 Linux）才是数据被扣的原因；平台一致 + 匿名即可完整下载（2026-10-27 定论）。此前"被封禁/风控"全部是代码误报，四个人造源已修：跨平台伪装自造被扣、代理断连误标验证码、熔断级联放大、**等待窗太短（12s/5s < 隧道下 XHR 实际 22~23s，2026-10-28 定论，现已 60s 轮询）**；下载器失败按页面实际内容分类（毒视频→「视频已删除」/真验证码=标题命中/慢加载）。**下"平台拦截"结论的铁律：默认先怀疑自己代码，必须生产代码双出口实跑拿原始证据。**
-- 单视频页免登录可行：Playwright 拦页面自身 `aweme/detail`（自带签名），`_ROUTER_DATA` 兜底；用完整版 Chromium（`channel="chromium"`）非 headless-shell。主页作品列表被登录墙挡 → 同行扫描走**锚点视频路线**（贴作者任一视频链接，detail 定作者 + `mix/aweme` 合集反推近期作品）。
-- **互动数边界（2026-11-11 生产三视频实测）**：评论/赞/转/藏匿名 detail 可取；**播放数恒 0**——网页端只有作者自己在创作者后台可见，同行视频的播放数任何匿名通道都拿不到，闸线/评分只能落评论与赞。拆解闸=评论≥20 或 赞≥300 任一即拆（设置页 `dissect_comment_min`/`dissect_digg_min` 可调；11-08「全拆无闸」7 天灌入 222 篇低赞拆解+58 篇垃圾选题，次日撤销）；不过线标 ignored 保留行，手动批准可强制拆。契约详见 TDD「拆解质量闸」。
-- 搜索页/话题页/推荐流的登录墙口径（2026-11-13 实测修订）：`www.douyin.com/search/{词}` 移动 UA 上下文**并非登录墙**（双出口实锤：标题正常、无验证码、无登录标记，可截到 sec_uid）——但数据 XHR 到达慢且抖（同跑 direct 0 个/隧道 5 个），固定短窗会把可用路线跑成空手而归，必须 60s 轮询 + `_ROUTER_DATA` 兜底（hl_search_matrix 已升级）。PC 主页作品列表仍被登录墙挡 → 同行扫描主路走**锚点视频路线**（贴作者任一视频链接，detail 定作者 + `mix/aweme` 合集反推近期作品）；按昵称反查 sec_uid 仍无解——新对标号只能用户在 App 贴视频链接，或 DDG 挖具体 `/video/` 链接。
-- **出境分两条链路（2026-10-29 拆分）**：①**匿名采集（抓详情/下载直链/探针）走机房直连**——`scrape_proxy` 空=直连，实测可用（3/3，含此前隧道下弹验证码的视频）；曾被写为"机房 IP 直连 100% 被风控"的结论已被直连实验推翻（大概率是当时跨平台 UA 污染了实验）。住宅隧道（本机 `scripts/home-proxy.sh install`，服务器曾配 `socks5://127.0.0.1:11080`）高抖动（XHR 6~62s、传中断连）才是采集失败主因，隧道保留作采集兜底：设置 `scrape_proxy` 即切回。②**douyin_proxy 语义收窄**：只剩 DDG 搜索出海（直连必死）+ 创作者中心登录态采集（出口 IP 与账号日常环境一致性是刻意设计）。Mac 关机只影响这两条，匿名采集不受影响。**登录态红线：创作者中心 cookie 只用于自有账号数据回流，永不参与对他人内容的爬取。**
-- **DDG**：境内全断，唯一通路=经住宅隧道 + 本机 7890 出海；限流是 IP 级惩罚窗，每查询 ≤2 发（html 202 即换 lite）+ 调用方长周期重试；GLM 搜索不吃 site: 且不索引抖音（带限定符查询强制走 DDG），Bing 中国站无视 site: 不可作备胎。
-- 本地实例已退役（2026-10-27 用户裁定）：本机无 data/、无 .ms-playwright/，本地跑验收属临时行为——需要 Playwright 时 `PLAYWRIGHT_BROWSERS_PATH=$PWD/.ms-playwright backend/.venv/bin/playwright install chromium` 一键重建；ASR 模型同法重下（small 优先）。生产服务器浏览器在服务器自己的缓存，与本机无关。Python 依赖 av 钉 `<19`（19 移除 faster-whisper 在用的参数，会打断转写）。
-- 视频号无公开网页接口，只支持本地上传拆解。
+- **下"平台拦截"结论前先怀疑自己代码**，必须双出口实跑取证。拦截跟指纹一致性走（平台一致 UA+匿名即可），与 IP/登录无关；等待窗必须 60s 轮询+`_ROUTER_DATA` 兜底（短窗会把可用路线跑成空手）。下载失败按页面实际内容分类。
+- 单视频页免登录：拦 `aweme/detail`（自带签名）；主页列表有登录墙 → **锚点视频路线**（任一视频链接 detail 定作者+合集反推）。搜索页移动 UA 非登录墙但 XHR 慢抖。按昵称反查 sec_uid 无解。
+- 播放数匿名恒拿不到（只有作者后台可见），闸线/评分只落评论与赞；拆解闸=评论≥20 或赞≥300（设置页可调），不过线标 ignored。
+- 出口两条链路：`scrape_proxy`=匿名采集（空=机房直连，实测可用；隧道高抖动只作兜底）；`douyin_proxy`=DDG 出海+创作者中心登录态。**登录态红线：cookie 只用于自有账号数据回流，永不爬他人内容。**
+- DDG：境内全断，唯一通路=住宅隧道+本机 7890；限流=IP 级惩罚窗，每查询 ≤2 发；GLM 搜索不吃 site: 不索引抖音，Bing 中国站不可作备胎。
+- 本机无 data/ 与 .ms-playwright/（本地验收属临时）——重建：`PLAYWRIGHT_BROWSERS_PATH=$PWD/.ms-playwright backend/.venv/bin/playwright install chromium`；ASR 模型同法重下（small 优先）。依赖 av 钉 `<19`（19 断转写）。视频号无网页接口，只支持本地上传。
 
 ## 其他红线
 
-- **调研与内容数据源国内优先**（用户硬要求）：数据论据优先国内公开数据、行业报告、企业实践与媒体；国外机构数据仅在国内无同类时补充，不作主锚点；检索查询词同样中文源优先。
-- 发布动作永远人工。端口 8000 是用户别的项目，**永远不许杀**。
-- `data/` 混着用户真实内容，删任何行之前先确认归属，删库先备份；正式安全网=每日自动快照+迁移前快照（`data/backups/`），别动。
-- 看门狗副本装在 `~/Library/Application Support/content-studio/`（macOS TCC 禁 LaunchAgent 读 Desktop 仓库）——**改 `scripts/watchdog.sh` 后必须重跑 `launchd.sh install` 同步副本**，status 会提示漂移；探活策略=连续 2 次失败升级通知，有 running 任务时连续 6 次（约 30 分钟）才强拉。
-- 用户侧操作（智谱充值、控制台开通等）只能用户本人做，别当代码任务。
+- 数据源国内优先（硬约束）：论据/检索中文源优先，国外数据仅补位不作主锚。
+- 发布永远人工。端口 8000 是用户别的项目，**永远不许杀**。
+- `data/` 混真实内容：删行先确认归属，删库先备份；`data/backups/` 安全网别动。
+- 改 `watchdog.sh` 后必须重跑 `launchd.sh install` 同步副本（副本在 `~/Library/Application Support/content-studio/`）；探活=连续 2 次失败升级，有 running 连续 6 次才强拉。
+- 智谱充值/控制台开通等只能用户本人操作。
