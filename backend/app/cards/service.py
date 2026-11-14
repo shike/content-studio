@@ -55,7 +55,9 @@ _JUDGE_KW = ("就是", "全是", "纯", "垃圾", "收割", "智商税", "骗局
              "凉了", "烂", "难用", "复杂", "别碰", "高估", "低估", "幻觉", "伪需求",
              "套壳", "翻车", "接盘", "过时", "淘汰", "取代", "终结", "杀死", "白干", "白嫖",
              "白送", "硬刚", "落后", "耍猴", "当猴耍", "镰刀", "韭菜",
-             "干掉", "吃掉", "抢走", "饭碗", "消失", "出局", "上位", "没出路", "上岸")
+             "干掉", "吃掉", "抢走", "饭碗", "消失", "出局", "上位", "没出路", "上岸",
+             "白花钱", "砸", "坑", "骗", "糊弄", "白买", "白忙", "一场空", "冤",
+             "水分", "猫腻", "白交", "交学费", "买大祸", "打脸", "露馅", "不靠谱", "白费力", "白学")
 _CLAUSE_PUNCT = re.compile(r"[，,。？?：:；;、]")
 _PUNCT_STRIP = re.compile(r"[\s，,。.！!？?：:；;、「」『』《》\"'（）()·|…—\-+#]")
 _NORM_RE = re.compile(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]")
@@ -191,6 +193,39 @@ async def _llm_pick(menu_text: str, persona: str, audience_note: str) -> list[di
     return [x for x in (data.get("picks") or []) if isinstance(x, dict) and x.get("title")]
 
 
+def _spine_shots() -> str:
+    """用户自己发过的视频标题（三秒原则的活样本）——句式标尺 few-shot。"""
+    with Session(engine) as s:
+        vids = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
+            SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]
+        ranked = sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0), reverse=True)
+    shots = [f"- 「{(v.title or '').strip()[:30]}」" for v in ranked[:12] if v.title]
+    return chr(10).join(shots) or "（暂无已发标题）"
+
+
+def _spine_static_fail(spine: str, source: str) -> Optional[str]:
+    """主线静态死因（不含需查库的撞车/批内闸）——重锻循环的输入。"""
+    spine = spine.strip()
+    n = _pron_len(spine)
+    if not spine:
+        return "空"
+    if n > _max_chars():
+        return f"{n} 字超线（线 {_max_chars()}），砍「的/了/正在/被」这类虚词"
+    if _ADVICE_OPENER.match(spine):
+        return "劝告开头"
+    if _CLAUSE_PUNCT.search(spine):
+        return "复合句"
+    if any(k in spine for k in _PREDICT_KW):
+        return "预言腔"
+    if source not in ("self_story", "manual"):
+        # 判词=立场句式（是/只会/早该…）或罪名词根，二占一即过；
+        # 新闻复述（某厂发布了X）两者皆无，照样拦。品味层由总法官兜底。
+        stance = re.search(r"(是|就是|只会|早该|无非|本质|等于|不过是)", spine)
+        if not any(k in spine for k in _JUDGE_KW) and not stance:
+            return "无判词词根（新闻复述不算判决）"
+    return None
+
+
 async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
                      spines_hint: Optional[dict[int, dict]] = None) -> dict[int, dict]:
     pool_inputs = []
@@ -206,7 +241,8 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
     data = await gateway.complete_json(
         [{"role": "system", "content": render(
             "spine_forge", PERSONA=persona, AUDIENCE_NOTE=audience_note,
-            MAX_CHARS=str(_max_chars()), POOLS=json.dumps(pool_inputs, ensure_ascii=False))}],
+            MAX_CHARS=str(_max_chars()), SPINE_SHOTS=_spine_shots(),
+            POOLS=json.dumps(pool_inputs, ensure_ascii=False))}],
         max_tokens=2000, thinking="disabled")
     return {int(x["i"]): x for x in (data.get("cards") or [])
             if isinstance(x, dict) and str(x.get("i") or "").isdigit()
@@ -215,21 +251,19 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
 
 async def _forge_with_retry(pools: list[dict], persona: str, audience_note: str,
                             meta: Optional[dict] = None) -> dict[int, dict]:
-    """锻主线 + 修复循环 ×1：字数线是最高频死因（模型半句话天然 16~18 字），
-    超线的带原句与死因重锻一次——法律不放宽，逼模型砍虚词。"""
+    """锻主线 + 修复循环 ×1：静态死因（超线/劝告/复合句/预言腔/无判词词根）的
+    带原句与死因重锻一次——法律不放宽，逼模型砍虚词补判词。"""
     forged = await _llm_forge(pools, persona, audience_note)
     redo_hint: dict[int, dict] = {}
     for i, p in enumerate(pools, 1):
         f = forged.get(i)
         if not f:
             continue
-        sp = str(f.get("spine") or "").strip()
-        n = _pron_len(sp)
-        if n > _max_chars():
-            redo_hint[i] = {"spine": sp,
-                            "last_fail": f"{n} 字超线（线 {_max_chars()}），必须砍到 {_max_chars()} 字以内"}
+        fail = _spine_static_fail(str(f.get("spine") or ""), p["source"])
+        if fail:
+            redo_hint[i] = {"spine": str(f.get("spine") or "").strip(), "last_fail": fail}
     if redo_hint:
-        print(f"[cards] 车间二修复循环：{len(redo_hint)} 条超线重锻")
+        print(f"[cards] 车间二修复循环：{len(redo_hint)} 条重锻")
         forged2 = await _llm_forge(pools, persona, audience_note, spines_hint=redo_hint)
         for k, v in forged2.items():
             if k in redo_hint:
