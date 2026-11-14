@@ -213,6 +213,8 @@ def _spine_static_fail(spine: str, source: str) -> Optional[str]:
         return f"{n} 字超线（线 {_max_chars()}），砍「的/了/正在/被」这类虚词"
     if _ADVICE_OPENER.match(spine):
         return "劝告开头"
+    if "某" in spine:
+        return "匿名（某X）= 没点名（点名纪律）"
     if _CLAUSE_PUNCT.search(spine):
         return "复合句"
     if any(k in spine for k in _PREDICT_KW):
@@ -356,6 +358,8 @@ def _hook_gate(hook: str, gates: list, spine: str = "") -> bool:
     hit = next((w for w in banned if hook.startswith(w)), "")
     if not _gate(gates, "开头词根闸", not hit, f"{hook[:24]}" + (f"（命中「{hit}」）" if hit else "")):
         return False
+    if "某" in hook:
+        return _gate(gates, "点名纪律", False, f"{hook[:24]}（匿名「某X」= 没点名）")
     hn, sn = _norm(hook), _norm(spine or "")
     same = bool(sn) and (hn == sn or (len(sn) >= 8 and (sn in hn or hn in sn)))
     return _gate(gates, "钩子≠主线", not same, f"{hook[:24]}" + ("（照抄主线）" if same else ""))
