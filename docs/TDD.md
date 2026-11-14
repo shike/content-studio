@@ -313,6 +313,11 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - `POST /api/radar/topics` `{name, ch_id}` → 添加监测话题（ch_id 必须数字；重复 409）
 - `POST /api/radar/topics/extract` `{url}` → 贴抖音视频链接免登录提取话题标签（name+ch_id，供添加监测）
 - `POST /api/radar/topics/{topic_id}/check` → 单话题即时巡检（免登录拉内容样本，新出现低粉高赞照旧自动拆解）
+- `POST /api/radar/topics/backfill` → 202 `{job_id}`（话题 30 天存量回填，执行器 `topic_backfill`，2026-11-14）：
+  逐启用话题把精选集全部探测（detail 拿发布时间/评论/赞）→ 发布时间 ≤30 天 + 拆解闸同口径
+  （评论≥20 或赞≥300，不过闸不建行不耗拆解）→ 未入库的建行（notes=雷达回填）走 auto_dissect_rows
+  自动拆解（自动采高赞评论+分型路由）。免登录话题接口为固定精选集（翻页参数被无视，2026-11-02 实测），
+  回填深度=精选集全量；命中登记进 hits（夜间探测不重复探）。在途去重 dedup_key=1:topic_backfill。
 
 ### 风格画像（自我研究，R9）
 - `GET /api/style/overview` → `{account: WatchAccount|null, profile: 最新画像|null, stats:{total, analyzed}}`（视频列表走 /style/videos 分页）

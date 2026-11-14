@@ -7,14 +7,15 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlmodel import Session, select
 
 from ..db import engine
 from ..jobs.errors import TransientError
-from ..models import RadarTopic
+from ..jobs.runner import JobContext, register_concurrent, register_executor
+from ..models import BenchmarkVideo, RadarTopic
 
 _UA_M = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
@@ -118,10 +119,15 @@ def _probe_video(vid: str) -> dict:
     ad = detail.get("aweme_detail") or {}
     a = ad.get("author") or {}
     st = ad.get("statistics") or {}
+    ct = int(ad.get("create_time") or 0)
     out = {
         "digg": int(st.get("digg_count") or 0),
+        "comment": int(st.get("comment_count") or 0),
         "followers": int(a.get("follower_count") or 0),
         "author": (a.get("nickname") or "").strip()[:24],
+        # 发布时间（naive-UTC）：30 天存量回填的过滤依据
+        "create_time": (datetime.fromtimestamp(ct, tz=timezone.utc).replace(tzinfo=None)
+                        if ct else None),
     }
     return out
 
@@ -179,6 +185,88 @@ def _extract_hashtags(vid: str) -> list[dict]:
             seen.add(hid)
             out.append({"ch_id": hid, "name": hname})
     return out
+
+
+register_concurrent("topic_backfill")
+
+
+@register_executor("topic_backfill")
+async def topic_backfill(ctx: JobContext, payload: dict) -> dict:
+    """话题 30 天存量回填（2026-11-14）：逐启用话题把精选集全部探一遍——发布时间过滤 30 天
+    + 拆解闸同口径（评论≥20 或赞≥300）→ 未入库的建行自动拆解（拆解自动采高赞评论+分型路由）。
+    免登录话题接口为固定精选集（2026-11-02 实测：翻页/排序参数被无视），回填深度=精选集全量；
+    已在拆解库的跳过；命中登记进 hits（夜间探测不再重复探同一条）。"""
+    from ..benchmarks import service as bms
+    from ..settings import settings
+
+    cmin = max(1, int(settings.dissect_comment_min or 20))
+    dmin = max(1, int(settings.dissect_digg_min or 300))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+    with Session(engine) as s:
+        topics = s.exec(select(RadarTopic).where(  # type: ignore[attr-defined]
+            RadarTopic.enabled == True)).all()  # noqa: E712
+    if not topics:
+        ctx.set_progress(100, "无启用话题，诚实空过")
+        return {"topics": 0, "probed": 0, "created": 0, "queued": 0, "notes": []}
+    probed = created_n = queued = 0
+    notes: list[str] = []
+    for i, trow in enumerate(topics, 1):
+        ctx.set_progress(int(90 * (i - 1) / max(len(topics), 1)), f"回填 #{trow.name}（{i}/{len(topics)}）")
+        try:
+            vids = await asyncio.to_thread(fetch_topic_videos, trow.ch_id, 20)
+        except Exception as e:  # noqa: BLE001 单话题失败不拖垮整体
+            notes.append(f"#{trow.name} 拉取失败：{type(e).__name__}: {str(e)[:50]}")
+            continue
+        created_rows: list = []
+        probed_local = 0
+        for v in vids:
+            url = f"https://www.douyin.com/video/{v['id']}"
+            with Session(engine) as s:
+                if s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
+                        BenchmarkVideo.url == url)).first() is not None:
+                    continue  # 已在拆解库（日常增量/此前回填），跳过
+            try:
+                info = await asyncio.to_thread(_probe_video, v["id"])
+            except Exception:  # noqa: BLE001 单条探测失败跳过
+                continue
+            probed += 1
+            probed_local += 1
+            if not info.get("create_time") or info["create_time"] < cutoff:
+                continue  # 超 30 天（精选集里也可能混旧内容）
+            c, dg = int(info.get("comment") or 0), int(info.get("digg") or 0)
+            followers = int(info.get("followers") or 0)
+            if c < cmin and dg < dmin:
+                continue  # 不过拆解闸（R3.7 同口径）——不建行不耗拆解
+            with Session(engine) as s:
+                row = s.merge(trow)
+                b = BenchmarkVideo(tenant_id=row.tenant_id or 1, url=url,
+                                   author=str(info.get("author") or "")[:60],
+                                   title=str(v.get("desc") or "")[:80],
+                                   stats={"comment": c, "digg": dg, "followers": followers},
+                                   source="douyin", account_type="persona",
+                                   scan_status="pending", notes="雷达回填（30 天存量）")
+                s.add(b)
+                s.commit()
+                s.refresh(b)
+                created_rows.append(b)
+            created_n += 1
+            with Session(engine) as s:  # 命中登记：夜间低粉高赞探测不再重复探同一条
+                row = s.merge(trow)
+                hits, _added = _merge_hits(row.hits, [{"id": v["id"], "desc": v.get("desc", ""),
+                                                       "author": info.get("author", ""),
+                                                       "digg": dg, "followers": followers,
+                                                       "ratio": round(dg / max(followers, 1), 1)}])
+                row.hits = hits
+                s.add(row)
+                s.commit()
+        if created_rows:
+            n = await bms.auto_dissect_rows(created_rows, f"话题回填#{trow.name}")
+            queued += n
+        notes.append(f"#{trow.name}：精选 {len(vids)}，探 {probed_local}，过闸建行 {len(created_rows)}")
+        await asyncio.sleep(2)
+    ctx.set_progress(100, f"回填完成：{len(topics)} 话题 / 探 {probed} / 过闸建行 {created_n} / 排队拆解 {queued}")
+    return {"topics": len(topics), "probed": probed, "created": created_n,
+            "queued": queued, "notes": notes[:20]}
 
 
 async def check_topic(row: RadarTopic) -> dict:

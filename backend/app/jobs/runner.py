@@ -99,6 +99,7 @@ _POLICIES: dict[str, RetryPolicy] = {
     "article_adapt": RetryPolicy(task_timeout=3600),  # 改编器：拉源文全文+成文+原创度闸+机检
     "article_hotspots": RetryPolicy(task_timeout=1200),  # 报题：热点抓取+双 LLM（预筛+提炼）
     "article_style_extract": RetryPolicy(task_timeout=900),
+    "topic_backfill": RetryPolicy(task_timeout=3600),  # 话题回填：话题数×精选集逐条探测（每条 ~10s）
     "card_daily": RetryPolicy(task_timeout=1800),   # 选题工场：雷达巡检+4 次 LLM（pick/forge/cast/judge）
     "card_seed": RetryPolicy(task_timeout=900),     # 手动投喂：单池子走主线→钩子→法官（3 次 LLM）
     "hl_search_matrix": RetryPolicy(task_timeout=3600),    # 同城搜索矩阵：预算 12 组搜索+取证（2026-11-13 补硬超时）

@@ -30,6 +30,17 @@ def list_topics(user: User = Depends(require_user)) -> dict:
         } for r in rows]}
 
 
+@router.post("/topics/backfill")
+async def backfill_topics(user: User = Depends(require_user)) -> dict:
+    """话题 30 天存量回填：精选集全部探测→过闸建行→自动拆解（采评论分型）。在途去重。"""
+    from datetime import datetime
+    from ..jobs.runner import runner
+    job = await runner.submit("topic_backfill", {"auto": True},
+                              dedup_key="1:topic_backfill",
+                              actor=(user.tenant_id, user.id, user.role))
+    return {"job_id": job.id, "submitted_at": datetime.now().isoformat(timespec="seconds")}
+
+
 @router.post("/topics/{topic_id}/check")
 async def check_topic_now(topic_id: int, user: User = Depends(require_user)) -> dict:
     """立即拉取该话题内容样本（免登录），样本中新出现的低粉高赞照旧自动拆解。"""
