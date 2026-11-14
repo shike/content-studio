@@ -308,8 +308,9 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             page.goto(f"https://www.douyin.com/video/{rid}",
                       timeout=45000, wait_until="domcontentloaded")
             # 评论面板不保证随页面自动加载（2026-11-02 服务器实测：需一次滚动才触发
-            # comment/list）；首屏只有几条——矿脉要采够：持续轮询收集，直到 40 条
-            # 或 12s 无新增（静默窗）或 60s 截止；一直为空才反复滚动唤醒。
+            # comment/list）；首屏只有几条——矿脉要采够：持续轮询收集，采深轮滚动
+            # 评论容器本身翻页（主页面滚动无效，评论列表在自己的滚动容器里），
+            # 直到 40 条或 12s 无新增（静默窗）或 60s 截止；一直为空才反复滚动唤醒。
             deadline = _time.monotonic() + 60
             last_n, quiet = 0, 0
             while _time.monotonic() < deadline:
@@ -324,6 +325,15 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
                     continue
                 if len(comments) >= 40:
                     break
+                try:  # 采深驱动：滚最深的几个滚动容器到触底，触发评论翻页 XHR
+                    page.evaluate("""() => {
+                      const els = [...document.querySelectorAll('div')]
+                        .filter(e => e.scrollHeight > e.clientHeight + 80);
+                      els.sort((a, b) => b.scrollHeight - a.scrollHeight);
+                      for (const e of els.slice(0, 3)) e.scrollTop = e.scrollHeight;
+                    }""")
+                except Exception:  # noqa: BLE001
+                    pass
                 quiet = quiet + 1 if len(comments) <= last_n else 0
                 last_n = len(comments)
                 if quiet >= 4:
