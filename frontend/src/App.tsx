@@ -42,12 +42,12 @@ const NAVMAP: Record<string, NavTarget> = {
   l_cand: { key: 'monitor', tab: 'cand:leadgen' },
   p_watch: { key: 'monitor', tab: 'watch:persona' },
   l_watch: { key: 'monitor', tab: 'watch:leadgen' },
-  c_items: { key: 'content', tab: 'items' },
-  article: { key: 'content', tab: 'workshop' },
-  a_style: { key: 'content', tab: 'style' },
+  c_items: { key: 'content', tab: 'article:items' },
+  article: { key: 'content', tab: 'article:workshop' },
+  a_style: { key: 'content', tab: 'article:style' },
   benchmarks: { key: 'monitor', tab: 'bench:persona' },
   scripts: { key: 'content', tab: 'scripts:persona' },
-  articles: { key: 'content', tab: 'workshop' },
+  articles: { key: 'content', tab: 'article:workshop' },
   topics: { key: 'topics', tab: 'persona' },
 }
 

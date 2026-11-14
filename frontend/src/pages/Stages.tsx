@@ -22,21 +22,26 @@ interface TabDef {
   id: string
   label: string
   line?: boolean  // 带线切换（人设|获客）
+  subs?: { id: string; label: string }[]  // 组内子切换（如 公众号：工场|清单|画像）
 }
 
-function parseTab(tab: string, tabs: TabDef[]): { id: string; line: Line } {
-  const [rawId, rawLine] = tab.split(':')
+function parseTab(tab: string, tabs: TabDef[]): { id: string; line: Line; sub: string } {
+  const [rawId, rest] = tab.split(':')
   const def = tabs.find((t) => t.id === rawId) ?? tabs[0]
-  return { id: def.id, line: rawLine === 'leadgen' ? 'leadgen' : 'persona' }
+  return {
+    id: def.id,
+    line: rest === 'leadgen' ? 'leadgen' : 'persona',
+    sub: def.subs ? (rest && def.subs.some((x) => x.id === rest) ? rest : def.subs[0].id) : '',
+  }
 }
 
 function StageShell(props: {
   tabs: TabDef[]
   tab: string
   onTab: (t: string) => void
-  children: (c: { id: string; line: Line }) => React.ReactNode
+  children: (c: { id: string; line: Line; sub: string }) => React.ReactNode
 }) {
-  const { id, line } = parseTab(props.tab, props.tabs)
+  const { id, line, sub } = parseTab(props.tab, props.tabs)
   const active = props.tabs.find((t) => t.id === id) ?? props.tabs[0]
   return (
     <div>
@@ -44,7 +49,7 @@ function StageShell(props: {
         <div className="flex flex-1 flex-wrap items-center gap-1.5">
           {props.tabs.map((t) => (
             <button key={t.id}
-              onClick={() => props.onTab(t.line ? `${t.id}:${line}` : t.id)}
+              onClick={() => props.onTab(t.line ? `${t.id}:${line}` : t.subs ? `${t.id}:${t.subs[0].id}` : t.id)}
               className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${
                 id === t.id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
               }`}>
@@ -65,8 +70,21 @@ function StageShell(props: {
             ))}
           </div>
         )}
+        {(active.subs || []).length > 0 && (
+          <div className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 p-0.5">
+            {active.subs!.map((x) => (
+              <button key={x.id}
+                onClick={() => props.onTab(`${id}:${x.id}`)}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-medium transition ${
+                  sub === x.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}>
+                {x.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {props.children({ id, line })}
+      {props.children({ id, line, sub })}
     </div>
   )
 }
@@ -109,22 +127,24 @@ export function TopicStage(props: { tab: string; onTab: (t: string) => void; onN
   )
 }
 
-/** 内容（怎么拍+发+数据回流）：视频稿 / 公众号三视图 / 经营数据（获客拆解=监控·拆解库获客线，不再重复入口） */
+/** 内容（怎么拍+发+数据回流）：视频稿 / 公众号（工场|清单|画像）/ 经营（获客拆解=监控·拆解库获客线） */
 export function ContentStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
       { id: 'scripts', label: '视频稿', line: true },
-      { id: 'workshop', label: '公众号·工场' },
-      { id: 'items', label: '公众号·清单' },
-      { id: 'style', label: '公众号·画像' },
-      { id: 'own', label: '经营数据' },
+      { id: 'article', label: '公众号', subs: [
+        { id: 'workshop', label: '工场' },
+        { id: 'items', label: '清单' },
+        { id: 'style', label: '画像' },
+      ] },
+      { id: 'own', label: '经营' },
     ]}>
-      {({ id, line }) => (
+      {({ id, line, sub }) => (
         <>
           {id === 'scripts' && <Scripts onNavigate={props.onNavigate} accountType={line} />}
-          {id === 'workshop' && <Workshop />}
-          {id === 'items' && <ContentItems onNavigate={props.onNavigate} />}
-          {id === 'style' && <ArticleStyle />}
+          {id === 'article' && sub === 'workshop' && <Workshop />}
+          {id === 'article' && sub === 'items' && <ContentItems onNavigate={props.onNavigate} />}
+          {id === 'article' && sub === 'style' && <ArticleStyle />}
           {id === 'own' && <AccountTrends onNavigate={props.onNavigate} />}
         </>
       )}
