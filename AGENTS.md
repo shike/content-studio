@@ -12,7 +12,7 @@
 
 ## 验收纪律（违反 = 白干）
 
-- 套件 `run_p0/p1/p6/p7/p8` + `e2e_run.py`（P8/e2e 必须用 `backend/.venv/bin/python`）。**后端改动必重跑受影响套件**。
+- 套件 `run_p0/p1/p6/p7/p8` + `e2e_run.py`（P8/e2e 必须用 `backend/.venv/bin/python`）。**套件=回归门，只在用户明确要求时执行（2026-11-14 用户铁律）；日常验证=功能冒烟实跑**（真实链路把新功能本身跑通，冒烟先行）——未经要求擅跑套件=违规。
 - 隔离实例：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；跑完删 `data-acceptance`）。跑套件同环境变量三件套：`CS_API_BASE`/`CS_BOOTSTRAP_PASSWORD`/`DATA_DIR`（p0/p6/p7/e2e 直读库文件，漏 DATA_DIR 会摸到默认 data/）。复制库先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`。
 - 全线 naive-UTC，SQL 用 `datetime('now')`。测试数据收尾必清（假数据污染选题评分）。
 - 失败是异常不是工作流：瞬时失败走退避梯子 30min→2h→6h→24h→每日慢巡（30 次上限）；确定性失败安静终态；界面只有红徽章+行内重试（后端 failures API 保留）。
