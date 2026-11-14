@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import (articles, auth_api as auth_routes, benchmarks, cards, stats, crawl, falsify, health, jobs, llm, metrics, tenant_api,
                   public_media, radar, schedules, scripts, settings as settings_api, style,
-                  topics, watch)
+                  watch)
 from .db import engine, init_db
 from sqlmodel import Session, select
 from .jobs.runner import recover_interrupted_jobs, runner
@@ -26,7 +26,6 @@ from .cards import service as _card_service  # noqa: F401
 from .falsify import service as _falsify_service  # noqa: F401
 from .radar import service as _radar_service  # noqa: F401
 from .scripts import service as _script_service  # noqa: F401
-from .topics import service as _topic_service  # noqa: F401
 from .watch import service as _watch_service  # noqa: F401
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -115,7 +114,6 @@ app.include_router(public_media.router)
 app.include_router(jobs.router, dependencies=[Depends(require_ready_user)])
 app.include_router(llm.router, dependencies=[Depends(require_ready_user)])
 app.include_router(settings_api.router, dependencies=[Depends(require_admin_dep)])
-app.include_router(topics.router, dependencies=[Depends(require_ready_user)])
 app.include_router(cards.router, dependencies=[Depends(require_ready_user)])
 app.include_router(falsify.router, dependencies=[Depends(require_ready_user)])
 app.include_router(scripts.router, dependencies=[Depends(require_ready_user)])

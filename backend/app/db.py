@@ -257,6 +257,14 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text("ALTER TABLE scripts ADD COLUMN card_id INTEGER"))
         if scolsc and "falsify_item_id" not in scolsc:  # 实测打假备稿（R1.4③，2026-11-14）
             conn.execute(sqlalchemy.text("ALTER TABLE scripts ADD COLUMN falsify_item_id INTEGER"))
+        if scolsc and "ore_id" not in scolsc:  # 获客矿建稿锚（分型路由消费面，2026-11-14）
+            conn.execute(sqlalchemy.text("ALTER TABLE scripts ADD COLUMN ore_id INTEGER"))
+        if scolsc and "title_hint" not in scolsc:  # 生成来源标题快照（topics 退役后列表显示不再 join）
+            conn.execute(sqlalchemy.text("ALTER TABLE scripts ADD COLUMN title_hint VARCHAR DEFAULT ''"))
+            # 一次性回填：老脚本从 topics 表快照标题（表原地保留，此后不再读写增量）
+            conn.execute(sqlalchemy.text(
+                "UPDATE scripts SET title_hint=(SELECT title FROM topics WHERE topics.id=scripts.topic_id) "
+                "WHERE (title_hint IS NULL OR title_hint='') AND topic_id IS NOT NULL"))
         # 引擎统一（2026-10-12）：parked 状态退役 → failed（next_retry_at 保留，沿退避梯子继续）
         jcols2 = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(jobs)"))]
         if jcols2 and "next_retry_at" in jcols2:

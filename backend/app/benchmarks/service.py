@@ -15,7 +15,7 @@ from ..db import engine
 from ..settings import settings
 from ..jobs.runner import _DEAD_ERROR_MARKERS, JobContext, register_executor, register_owed, runner
 from ..llm import gateway
-from ..models import BenchmarkVideo, Topic, WatchAccount
+from ..models import BenchmarkVideo, TopicCard, WatchAccount
 from ..prompts import render
 from ..jobs.errors import CaptchaError
 from . import downloader
@@ -357,6 +357,15 @@ _STUDY_KEYWORDS = ("求带", "带带我", "求资料", "求教程", "求文档",
                    "学习", "打卡", "扣1", "扣个1")
 
 
+def _recent_card_titles(days: int = 14, limit: int = 24) -> list[str]:
+    """拆解 prompt 的「近 14 天出题记录」上下文（topics 退役后换源：靶子卡主线）。"""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    with Session(engine) as s:
+        rows = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
+            TopicCard.created_at >= cutoff)).all()  # type: ignore[attr-defined]
+    return [c.spine for c in rows if c.spine][:limit]
+
+
 def _classify_comments(comments: list) -> tuple[str, float]:
     """求学密度 → 分型（persona_ore 人设矿 | leadgen_ore 获客矿；空评论=('' ,0)）。
     阈值=comment_leadgen_route_min（百分比，默认 60%）。词根漏判的风险方向是
@@ -410,7 +419,6 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         stats = b.stats or {}
         tenant_id = b.tenant_id
         from ..tenant_brand import brand_of
-        from ..topics.service import is_similar_title, recent_topic_titles
 
         persona_text = brand_of(tenant_id)["persona"]
         account_type = b.account_type or "persona"
@@ -517,8 +525,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             # 2026-11-13 修复：模板里的 {{AUDIENCE_NOTE}} 此前无人传，占位符字面量
             # 原样进了每一条拆解的 system prompt
             AUDIENCE_NOTE=audience_note_of(tenant_id),
-            RECENT_TITLES="\n".join(f"- {t}" for t in recent_topic_titles(
-                14, line=account_type if account_type in ("persona", "leadgen") else ""))
+            RECENT_TITLES="\n".join(f"- {t}" for t in _recent_card_titles(14))
             or "（近 14 天无出题记录）")},
          {"role": "user", "content": llm_input}],
         max_tokens=5000)
@@ -532,45 +539,8 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         if not b.title and analysis.get("summary"):
             b.title = analysis["summary"][:80]
         s.add(b)
-        # 沉淀选题候选（source=benchmark，draft 状态待人工定审）；标题撞车直接不入库——
-        # 不同同行视频产出同一角度是选题趋同的主通道（2026-10-10 用户裁定拦截）
-        candidate = (analysis.get("topic_candidate") or {})
+        s.commit()  # 选题候选沉淀已退役（2026-11-14 分型路由定版：人设=靶子卡线、获客=获客矿线）
         topic_id = None
-        judge_line = (analysis.get("content_type") or account_type) or ""
-        dup_of = (is_similar_title(str(candidate.get("title") or ""),
-                                   line=judge_line if judge_line in ("persona", "leadgen") else "")
-                  if candidate.get("title") else None)
-        if dup_of is not None:
-            analysis["topic_candidate_suppressed"] = f"与近期选题 #{dup_of} 撞车，候选未入库"
-        if candidate.get("title") and dup_of is None:
-            audience = candidate.get("audience")
-            judged_line = "leadgen" if judged == "leadgen" else "persona"
-            topic = Topic(
-                title=str(candidate["title"])[:60],
-                angle=candidate.get("angle", ""),
-                audience=audience if audience in ("boss", "fde", "both") else "both",
-                source_type="benchmark",
-                source_ref=f"benchmark:{benchmark_id}",
-                line=judged_line,  # 三库独立：按判定分流（2026-11-02）
-                score=_safe_score(analysis.get("score")),
-                evidence={
-                    "summary": analysis.get("summary", ""),
-                    "replicable_points": analysis.get("replicable_points") or [],
-                    "hook": analysis.get("hook") or {},
-                    "account_type": analysis.get("content_type") or account_type,
-                    "benchmark_quality_score": b.quality_score or 0,
-                },
-            )
-            if (topic.score or 0) < 7.0:
-                topic.status = "rejected"  # 自动拒：低于 7.0 不进待审队列
-            s.add(topic)
-            s.flush()  # 拿 id 即可（commit+refresh 在 WAL 并发下偶发 refresh 找不到行——错误类消灭）
-            from ..topics.service import mark_similar
-            mark_similar(topic.title, topic.id, s, line=judged_line)
-            s.commit()
-            topic_id = topic.id
-        else:
-            s.commit()
 
     # 媒体即用即弃（磁盘防线）：拆解成功后删除视频文件——转写/拆解已入库，
     # 重拆解会重新下载；失败不删（重试还要用）

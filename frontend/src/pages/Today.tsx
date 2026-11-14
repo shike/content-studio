@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, Topic } from '../api'
+import { api } from '../api'
 import { fetchMenuStats } from '../counts'
 
 interface MetricsResp {
@@ -8,7 +8,7 @@ interface MetricsResp {
 interface SchedRow { key: string; label: string; last_status: string; last_run_at: string; enabled: boolean }
 interface ArtRow { id: number; title: string; status: string }
 
-type CandType = 'persona' | 'leadgen'
+interface TargetCard { id: number; hook: string; spine: string; created_at: string }
 
 const PIPELINES = ['article_hotspots_daily', 'hl_search_daily']
 const PIPE_LABEL: Record<string, string> = {
@@ -38,8 +38,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   const [playHist, setPlayHist] = useState<number[]>([])
   const [todos, setTodos] = useState({ failed: 0, active: 0 })
   const [cands, setCands] = useState({ persona: 0, leadgen: 0 })
-  const [drafts, setDrafts] = useState<Topic[]>([])
-  const [filter, setFilter] = useState<'all' | CandType>('all')
+  const [targets, setTargets] = useState<TargetCard[]>([])
   const [quick, setQuick] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -49,17 +48,14 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   const reload = useCallback(async () => {
     setError('')
     try {
-      const [tp, tl] = await Promise.all([
-        api<{ items: Topic[] }>('/topics?status=draft&limit=200&line=persona'),
-        api<{ items: Topic[] }>('/topics?status=draft&limit=200&line=leadgen'),
+      const [cards, s] = await Promise.all([
+        api<{ items: TargetCard[] }>('/cards?status=draft&limit=8'),
+        fetchMenuStats(),
       ])
-      const t = { items: [...(tp.items || []), ...(tl.items || [])] } as { items: Topic[] }
-      const s = await fetchMenuStats()
       setTodos({ failed: s.failed, active: s.tasks }) // tasks=在途、failed=终态（2026-11-11 口径分离，不再相减）
       // 候选待定夺两线真实数字：p_cand/l_cand 即 TodoStats.openCandidatesPersona/Leadgen 的透传
       setCands({ persona: s.p_cand, leadgen: s.l_cand })
-      const ranked = (t.items || []).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
-      setDrafts(ranked)
+      setTargets((cards.items || []).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0)))
       try {
         const sch = await api<{ items?: SchedRow[] } | SchedRow[]>('/schedules')
         const list = Array.isArray(sch) ? sch : (sch.items || [])
@@ -92,43 +88,13 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
 
   useEffect(() => { reload() }, [reload])
 
-  const act = async (t: Topic, action: 'approve' | 'reject') => {
-    setBusy('处理中…')
-    try {
-      await api(`/topics/${t.id}/${action}`, { method: 'POST' })
-      setDrafts((l) => l.filter((x) => x.id !== t.id))
-      setBusy('')
-    } catch (e) {
-      setError(String(e)); setBusy('')
-    }
-  }
-
-  const approveAndGenerate = async (t: Topic) => {
-    const type: CandType = (t.evidence?.account_type === 'leadgen' ? 'leadgen' : 'persona')
-    setBusy('批准并排队生成…')
-    try {
-      await api(`/topics/${t.id}/approve`, { method: 'POST' })
-      await api('/scripts/generate', {
-        method: 'POST',
-        body: JSON.stringify({ topic_id: t.id, length: 'short', account_type: type }),
-      })
-      setDrafts((l) => l.filter((x) => x.id !== t.id))
-      onNavigate(type === 'leadgen' ? 'l_topics' : 'p_topics')
-      setBusy('')
-    } catch (e) {
-      setError(String(e)); setBusy('')
-    }
-  }
-
   const quickAdd = async () => {
     if (!quick.trim()) return
-    setBusy('入库中…')
+    setBusy('投喂已排队（锻主线→铸钩子→法官，几分钟）…')
     try {
-      await api('/topics/quick', { method: 'POST', body: JSON.stringify({ title: quick.trim(), audience: 'both', line: 'persona' }) })
+      await api('/cards/seed', { method: 'POST', body: JSON.stringify({ text: quick.trim() }) })
       setQuick('')
-      setBusy('已入库（draft）')
-      await reload()
-      setTimeout(() => setBusy(''), 1500)
+      setBusy('投喂已排队，靶子卡稍后进「选题」页')
     } catch (e) {
       setError(String(e)); setBusy('')
     }
@@ -145,10 +111,6 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       }
     })()
   }
-
-  const shown = drafts.filter((t) => filter === 'all' || (t.evidence?.account_type ?? 'persona') === filter)
-  const nPersona = drafts.filter((t) => (t.evidence?.account_type ?? 'persona') === 'persona').length
-  const nLeadgen = drafts.length - nPersona
 
   return (
     <div>
@@ -194,15 +156,8 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
       <div className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-12">
         <div className="lg:col-span-8">
           <div className="flex items-center justify-between">
-            <h2 className="text-[15px] font-semibold text-slate-900">今天要拍</h2>
-            <div className="flex items-center gap-1">
-              {(['all', 'persona', 'leadgen'] as const).map((k) => (
-                <button key={k} onClick={() => setFilter(k)}
-                  className={`rounded-md px-2.5 py-1 text-[12px] ${filter === k ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
-                  {k === 'all' ? `全部 ${drafts.length}` : k === 'persona' ? `人设 ${nPersona}` : `获客 ${nLeadgen}`}
-                </button>
-              ))}
-            </div>
+            <h2 className="text-[15px] font-semibold text-slate-900">待备稿靶子卡</h2>
+            <button onClick={() => onNavigate('p_topics')} className="text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去选题 →</button>
           </div>
 
           <div className="mt-3 flex gap-2">
@@ -210,41 +165,31 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
               value={quick}
               onChange={(e) => setQuick(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') quickAdd() }}
-              placeholder="快速记选题，回车入库…"
+              placeholder="一句话投喂选题（锻完进「选题」页待备稿）…"
               className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm outline-none placeholder:text-slate-300 focus:border-slate-400"
             />
-            <button onClick={quickAdd} disabled={!quick.trim()} className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">入库</button>
+            <button onClick={quickAdd} disabled={!quick.trim()} className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">投喂</button>
           </div>
 
           <div className="mt-3">
-            {shown.length === 0 ? (
-              <div className="py-10 text-center text-sm text-slate-300">待拍清单已清零——明晨管线会带来新一批</div>
+            {targets.length === 0 ? (
+              <div className="py-10 text-center text-sm text-slate-300">待备稿已清零——明晨管线会带来新一批靶子卡</div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {shown.map((t) => {
-                  const type: CandType = (t.evidence?.account_type === 'leadgen' ? 'leadgen' : 'persona')
-                                  return (
-                    <div key={t.id} className="group flex items-center gap-3 py-2.5">
-                      <span className={`w-8 shrink-0 text-[11px] ${type === 'leadgen' ? 'text-amber-600' : 'text-slate-400'}`}>{LINE_TAG_ZH[type]}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[13.5px] font-medium text-slate-800">{t.title}</div>
-                      </div>
-                      <span className="shrink-0 text-[11px] text-slate-300">{(t.created_at || '').slice(5, 10)}</span>
-                      <button onClick={() => approveAndGenerate(t)}
-                        className="shrink-0 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[12px] text-slate-600 opacity-0 transition group-hover:opacity-100 hover:border-slate-400 hover:text-slate-900">
-                        生成脚本
-                      </button>
-                      <button onClick={() => act(t, 'reject')}
-                        className="shrink-0 rounded-md px-1.5 py-1 text-[12px] text-slate-300 opacity-0 transition group-hover:opacity-100 hover:text-slate-600">
-                        ✕
-                      </button>
+                {targets.map((c) => (
+                  <div key={c.id} className="group flex cursor-pointer items-center gap-3 py-2.5"
+                    onClick={() => onNavigate('p_topics')}>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13.5px] font-medium text-slate-800">{c.hook || '（钩子未铸）'}</div>
+                      <div className="mt-0.5 truncate text-[12px] text-slate-400">主线：{c.spine}</div>
                     </div>
-                  )
-                })}
+                    <span className="shrink-0 text-[11px] text-slate-300">{(c.created_at || '').slice(5, 10)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
-          <div className="mt-2 text-[11px] text-slate-300">行悬停出操作</div>
+          <div className="mt-2 text-[11px] text-slate-300">备稿（出稿/不做）在「选题」页操作</div>
         </div>
 
         {/* 右侧栏 */}
@@ -298,4 +243,3 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   )
 }
 
-const LINE_TAG_ZH: Record<CandType, string> = { persona: '人设', leadgen: '获客' }

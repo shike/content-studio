@@ -113,7 +113,8 @@ async def compose_falsify(*, item_id: int, user=None, length: str = "short") -> 
             Script.status.in_(["generating", "polishing"]))).first()  # type: ignore[attr-defined]
         if dup is not None:
             raise RuntimeError(f"该条目正在成稿（脚本 #{dup.id}），等完成或删除后再试")
-        script = Script(falsify_item_id=item_id, account_type="persona", status="generating")
+        script = Script(falsify_item_id=item_id, account_type="persona",
+                        title_hint=(item.claim or "")[:60], status="generating")
         s.add(script)
         s.flush()
         item.status = "scripted"

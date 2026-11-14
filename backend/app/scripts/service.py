@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import FalsifyItem, Script, ScriptTemplate, Topic, TopicCard
+from ..models import BenchmarkVideo, FalsifyItem, Script, ScriptTemplate, Topic, TopicCard
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
@@ -83,6 +83,10 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                    if payload.get("falsify_item_id") else None)
         if payload.get("falsify_item_id") and falsify is None:
             raise RuntimeError(f"falsify item {payload['falsify_item_id']} 不存在")
+        ore = (s.get(BenchmarkVideo, int(payload["ore_id"]))
+               if payload.get("ore_id") else None)
+        if payload.get("ore_id") and ore is None:
+            raise RuntimeError(f"获客矿样本 {payload['ore_id']} 不存在")
         if falsify is not None:
             # 实测打假稿（R1.4③）：result_note=唯一事实来源，没实测的环节一个字不许编
             topic_info = {
@@ -95,6 +99,21 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                 "target": falsify.target,
                 "evidence": (falsify.result_note or "")[:1500],
                 "spice": "high",
+            }
+        elif ore is not None:
+            # 获客矿建稿（分型路由消费面 2026-11-14）：求学评论区=需求清单，稿子必须接住需求+完成获客引导
+            demands = [str(c.get("t") or "").strip()[:60]
+                       for c in (ore.top_comments or []) if isinstance(c, dict) and str(c.get("t") or "").strip()][:10]
+            share = int(round(float(ore.comment_leadgen_share or 0) * 100))
+            topic_info = {
+                "title": f"获客需求：{(ore.title or '')[:50]}",
+                "angle": "",
+                "audience": "both",
+                "pain_points": demands,
+                "hooks": [],
+                "demand_note": (f"这条视频的评论区 {share}% 在求资料/学习（上面 pain_points=赞数最高的求学评论原文）。"
+                                "稿子要面向这些需求做获客内容：接住需求、给出具体可上手的方案，结尾按获客引导完成转化动作；"
+                                f"视频背景供参考：{(ore.analysis or {}).get('summary', '')[:160]}"),
             }
         elif card is not None:
             # 靶子卡备稿（选题工场 R1.4）：钩子/主线由卡带（备稿时可被用户改写），spice 辣度入通道
@@ -148,6 +167,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     # 2026-11-13 修复：原三元式在 topic 有但 evidence 无 account_type 时 str(None)="None"
     # 落库脏值，列表按 persona/leadgen 筛选两边都不中
     _raw_at = payload.get("account_type") \
+        or ("leadgen" if ore is not None else "") \
         or ((topic.evidence or {}).get("account_type") if topic is not None else "")
     account_type = str(_raw_at or "") or "persona"
     account_mode = ("。本条面向【获客号】：结尾必须切获客引导——评论区扣指定词/私信关键词/主页入口，引导要具体"

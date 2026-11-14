@@ -29,8 +29,7 @@ def _count(s: Session, tid: int, table: str, **eq) -> int:
 def todo_stats(user: User = Depends(require_user)) -> dict:
     tid = user.tenant_id
     with Session(engine) as s:
-        draft_persona = _count(s, tid, "topics", status="draft", line="persona")
-        draft_leadgen = _count(s, tid, "topics", status="draft", line="leadgen")
+        # 选题库候选计数已退役（2026-11-14 分型路由：人设=靶子卡、获客=获客矿，topics 表只留历史）
         pending_scripts_persona = _count(s, tid, "scripts",
                                          status="generated", account_type="persona")
         pending_scripts_leadgen = _count(s, tid, "scripts",
@@ -48,9 +47,7 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
                                    status="open", account_type="leadgen")
         # 今日靶子（2026-11-14 选题工场 R1.4）：靶子卡待备稿数——叶子徽章口径
         targets_persona = _count(s, tid, "topic_cards", status="draft")
-    return {"draftTopics": draft_persona + draft_leadgen,
-            "draftTopicsLeadgen": draft_leadgen,
-            "targetsPersona": targets_persona,
+    return {"targetsPersona": targets_persona,
             "pendingScriptsPersona": pending_scripts_persona,
             "pendingScriptsLeadgen": pending_scripts_leadgen,
             "pendingArticles": pending_articles,

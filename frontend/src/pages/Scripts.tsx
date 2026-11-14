@@ -9,13 +9,12 @@ import {
   SkipForward,
   Wand2,
 } from 'lucide-react'
-import { api, apiErrText, AUDIENCE_LABELS, Script, SOURCE_LABELS, Topic, waitJob } from '../api'
+import { api, apiErrText, Script, waitJob } from '../api'
 import {
   Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, QueueBar, relTime,
   sumCounts, Pager,
 } from '../components'
 import { useJobProgress, usePageGuard } from '../hooks'
-import { DetailBody } from '../topicDetail'
 
 const STATUS_BADGE: Record<string, string> = {
   generating: 'bg-sky-100 text-sky-700',
@@ -42,14 +41,10 @@ interface Template {
 export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: string) => void; accountType?: 'persona' | 'leadgen' }) {
   const [scripts, setScripts] = useState<Script[]>([])
   const [allScripts, setAllScripts] = useState<Script[]>([])
+  const [oreTitles, setOreTitles] = useState<Record<number, string>>({}) // 获客矿建稿脚本的标题映射
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
-  const [topics, setTopics] = useState<Topic[]>([])
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [tplName, setTplName] = useState('')
-  const [tplStructure, setTplStructure] = useState('')
-  const [topicId, setTopicId] = useState<number | null>(null)
   const [length, setLength] = useState<'short' | 'long'>('short')
   const [view, setView] = useState<'queue' | 'table'>('table')
   const [booted, setBooted] = useState(false)
@@ -58,18 +53,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const [idx, setIdx] = useState(0)
   const [session, setSession] = useState({ final: 0, skipped: 0 })
   const [status, setStatus] = useState('')
-  const [writingFilter, setWritingFilter] = useState(false)
-  const [topicOrder, setTopicOrder] = useState<'score' | 'new'>('score')
-  const [expandedTopicId, setExpandedTopicId] = useState<number | null>(null)
-  const [topicDetail, setTopicDetail] = useState<Record<number, Topic>>({})
-  const [topicGen, setTopicGen] = useState<Record<number, { p: number; m: string }>>({})
-  const [topicGenErr, setTopicGenErr] = useState<Record<number, string>>({})
   const [expandedId, setExpandedId] = useState<number | null>(null)
-  const [useStyle, setUseStyle] = useState(true)
-  const [templateId, setTemplateId] = useState(0) // 0=不使用结构模板
-  const [selAngles, setSelAngles] = useState<string[]>([]) // 指定打法（空=自动挑 3 种）
-  const [genAccountType, setGenAccountType] = useState<'persona' | 'leadgen'>(accountType ?? 'persona') // 本次投放账号类型（两类号策略；跟随所在产线默认）
-  const [anglesOpen, setAnglesOpen] = useState(false)
   const [finalizedView, setFinalizedView] = useState<{ id: number; titles: { platform: string; title: string }[]; teleLen: number } | null>(null)
 
   // 页面守卫（hooks.ts）：错误统一 apiErrText 人话，busy 由 hook 持有并 finally 复位
@@ -80,54 +64,26 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
     if (status) params.set('status', status)
     if (accountType) params.set('account_type', accountType) // 产线分视图：各看各的类型（服务端筛选）
-    const [s, allS, t, tpl] = await Promise.all([
+    const [s, allS] = await Promise.all([
       api<{ items: Script[]; total: number; counts?: Record<string, number> }>(`/scripts?${params}`),
-      api<{ items: Script[] }>('/scripts?limit=500'), // 队列与"待写选题"派生用全量
-      api<{ items: Topic[] }>(`/topics?limit=200${accountType ? `&line=${accountType}` : '&line=persona'}`),
-      api<{ items: Template[] }>('/scripts/templates'),
+      api<{ items: Script[] }>('/scripts?limit=500'), // 定稿队列派生用全量
     ])
     setScripts(s.items)
     setAllScripts(allS.items)
     setTotal(s.total)
     if (s.counts) setCounts(s.counts)
-    setTopics(t.items)
-    setTemplates(tpl.items)
+    if (accountType === 'leadgen') {
+      // 获客矿建稿脚本的标题映射（topics 退役后标题走 title_hint/ore 快照）
+      api<{ items: { id: number; title: string }[] }>('/benchmarks?comment_kind=leadgen_ore&scan_status=all&limit=100')
+        .then((d) => setOreTitles(Object.fromEntries((d.items || []).map((b) => [b.id, b.title]))))
+        .catch(() => {})
+    }
     return allS.items
   }, [offset, status, accountType])
 
   const deleteScript = (id: number) =>
     guard(async () => {
       await api(`/scripts/${id}`, { method: 'DELETE' })
-      await reload()
-    })
-
-  const createTemplate = () =>
-    guard(async () => {
-      const structure = tplStructure
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const m = line.split(/[：:]/)
-          return { step: (m[0] || '').trim(), requirement: (m.slice(1).join('：') || '').trim() }
-        })
-        .filter((x) => x.step)
-      if (!tplName.trim() || structure.length === 0) {
-        setError('模板名和至少一行「步骤：要求」都要填')
-        return
-      }
-      await api('/scripts/templates', {
-        method: 'POST',
-        body: JSON.stringify({ name: tplName.trim(), structure }),
-      })
-      setTplName('')
-      setTplStructure('')
-      await reload()
-    })
-
-  const deleteTemplate = (id: number) =>
-    guard(async () => {
-      await api(`/scripts/templates/${id}`, { method: 'DELETE' })
       await reload()
     })
 
@@ -140,13 +96,12 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
       })
   }, [reload])
 
-  const topicMap = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics])
-
   const hasGenerating = scripts.some((s) => s.status === 'generating' || s.status === 'polishing')
   // 生成/打磨/定稿进度轮询（hooks.ts，5s 一轮，静默失败）
   const genProg = useJobProgress(['script_generate', 'script_polish', 'script_finalize'], 'script_id', hasGenerating)
-  const topicTitle = (script: Script) =>
-    (script.topic_id ? topicMap.get(script.topic_id)?.title : '') || `脚本 #${script.id}`
+  // 脚本标题：title_hint 快照（新链路）→ 获客矿映射（leadgen）→ 兜底编号
+  const scriptTitle = (script: Script) =>
+    script.title_hint || (script.ore_id ? (oreTitles[script.ore_id] ? `获客：${oreTitles[script.ore_id]}` : '') : '') || `脚本 #${script.id}`
 
   const pendingScripts = useMemo(
     () => allScripts
@@ -162,78 +117,9 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
   const totalAtStart = session.final + session.skipped + queue.length
   const doneCount = session.final + session.skipped
 
-  const pendingWriteTopics = useMemo(() => {
-    const started = new Set(allScripts.map((x) => x.topic_id))
-    return topics.filter((t) => t.status === 'approved' && !started.has(t.id))
-      .filter((t) => !accountType || (t.evidence?.account_type ?? 'persona') === accountType)
-  }, [topics, allScripts, accountType])
-  const sortedWriteTopics = useMemo(() => {
-    const list = [...pendingWriteTopics]
-    if (topicOrder === 'score') {
-      list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || b.id - a.id)
-    } else {
-      list.sort((a, b) => b.id - a.id)
-    }
-    return list
-  }, [pendingWriteTopics, topicOrder])
-
-  const regenTopics = useMemo(() => {
-    const started = new Set(allScripts.map((x) => x.topic_id))
-    return topics.filter((t) => started.has(t.id))
-      .filter((t) => !accountType || (t.evidence?.account_type ?? 'persona') === accountType)
-  }, [topics, allScripts, accountType])
-
   useEffect(() => {
     setSelVersion(0)
   }, [current?.id])
-
-  // 生成三版：行内按钮与顶部「重新生成」共用。进度就地回显（行内 + 顶部回显带各一份），
-  // 失败落行内红字可原地重试；成功后沿用既有流程：直接进三版对比队列
-  const generate = async (tid: number) => {
-    setTopicGenErr((m) => { const n = { ...m }; delete n[tid]; return n })
-    setTopicGen((m) => ({ ...m, [tid]: { p: 0, m: '提交中…' } }))
-    try {
-      const r = await api<{ script_id: number; job_id: number }>('/scripts/generate', {
-        method: 'POST',
-        body: JSON.stringify({
-          topic_id: tid, length, use_style: useStyle,
-          ...(selAngles.length >= 2 ? { angles: selAngles } : {}),
-          ...(templateId > 0 ? { template_id: templateId } : {}),
-          account_type: genAccountType,
-        }),
-      })
-      await waitJob(r.job_id, (j) => {
-        setTopicGen((m) => ({ ...m, [tid]: { p: j.progress, m: j.message || '' } }))
-        setBusy(`脚本生成：${j.progress}% ${j.message}`)
-      })
-      setTopicGen((m) => { const n = { ...m }; delete n[tid]; return n })
-      setBusy('')
-      await reload()
-      setTopicId(null)
-      // 新脚本 id 最大，排在队列最前
-      setView('queue')
-      setIdx(0)
-      setSkipped(new Set())
-      setSession({ final: 0, skipped: 0 })
-    } catch (e) {
-      setTopicGen((m) => { const n = { ...m }; delete n[tid]; return n })
-      setBusy('')
-      setTopicGenErr((m) => ({ ...m, [tid]: apiErrText(e) }))
-    }
-  }
-
-  // 点行展开详情：详情（含深研报告）按需取一次并缓存
-  const toggleTopicDetail = async (t: Topic) => {
-    const next = expandedTopicId === t.id ? null : t.id
-    setExpandedTopicId(next)
-    if (next === null || topicDetail[t.id]) return
-    try {
-      const full = await api<Topic>(`/topics/${t.id}`)
-      setTopicDetail((m) => ({ ...m, [t.id]: full }))
-    } catch (e) {
-      setError(apiErrText(e))
-    }
-  }
 
   const polish = useCallback(
     (id: number) =>
@@ -349,7 +235,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
           </div>
         ) : finalizedView && current && finalizedView.id === current.id ? (
           <div className="card p-8 text-center">
-            <div className="text-lg font-semibold text-emerald-600">已定稿 ✓ {topicTitle(current)}</div>
+            <div className="text-lg font-semibold text-emerald-600">已定稿 ✓ {scriptTitle(current)}</div>
             <div className="mt-3 space-y-1.5 text-sm text-slate-600">
               {finalizedView.titles.length > 0 && (
                 <div>
@@ -370,7 +256,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
             <div className="card p-6">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`badge ${STATUS_BADGE.generated}`}>三版对比</span>
-                <span className="text-base font-bold text-slate-900">{topicTitle(current)}</span>
+                <span className="text-base font-bold text-slate-900">{scriptTitle(current)}</span>
                 <span className="ml-auto text-xs text-slate-400">脚本 #{current.id}</span>
               </div>
               {current.versions?.length ? (
@@ -479,98 +365,15 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
         }
       />
 
-      {/* 生成配置 + 重新生成入口（待写选题一律在下方清单里行内生成） */}
-      <div className="card border-sky-200/70 bg-gradient-to-br from-sky-50/80 to-white p-4">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <select
-            value={topicId ?? ''}
-            onChange={(e) => setTopicId(e.target.value ? Number(e.target.value) : null)}
-            className="input flex-1 border-sky-200"
-          >
-            <option value="">— 重新生成：选一个已有脚本的选题 —</option>
-            {regenTopics.map((t) => (
-              <option key={t.id} value={t.id}>[{t.id}] {t.title}</option>
-            ))}
-          </select>
-          <div className="segment shrink-0">
-            <button onClick={() => setLength('short')} className={`segment-item ${length === 'short' ? 'segment-item-active' : ''}`}>黄金档 50~70s</button>
-            <button onClick={() => setLength('long')} className={`segment-item ${length === 'long' ? 'segment-item-active' : ''}`}>长版 2~3min</button>
-          </div>
-          <button
-            onClick={() => setAnglesOpen((v) => !v)}
-            title="三版开场打法：默认自动挑 3 种；点开可指定 2~3 种"
-            className={`badge shrink-0 h-9 cursor-pointer px-3 ${selAngles.length > 0 ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-400'}`}
-          >
-            {selAngles.length > 0 ? `打法：指定 ${selAngles.length}` : '打法：自动'}
-          </button>
-          <select
-            value={templateId}
-            onChange={(e) => setTemplateId(Number(e.target.value))}
-            title="口播结构模板：段落推进步骤（可选；不使用=默认流程）"
-            className="input max-w-40 shrink-0 border-sky-200 text-xs"
-          >
-            <option value={0}>结构模板：不使用</option>
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}（{t.structure.length} 步）</option>
-            ))}
-          </select>
-          <button
-            onClick={() => setGenAccountType((v) => (v === 'persona' ? 'leadgen' : 'persona'))}
-            title="投放账号：人设号内容不带引导；获客号内容自带获客引导设计"
-            className={`badge shrink-0 h-9 cursor-pointer px-3 ${genAccountType === 'leadgen' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-700'}`}
-          >
-            {genAccountType === 'leadgen' ? '投放：获客号' : '投放：人设号'}
-          </button>
-          <button
-            onClick={() => setUseStyle((v) => !v)}
-            title="开启后生成会注入「我的风格画像」，使脚本贴近本人说话方式（画像在「我的风格」页）"
-            className={`badge shrink-0 h-9 cursor-pointer px-3 ${useStyle ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-400'}`}
-          >
-            {useStyle ? '风格贴合：开' : '风格贴合：关'}
-          </button>
-          <button onClick={() => topicId && generate(topicId)} disabled={!topicId} className="btn-accent justify-center disabled:opacity-40 sm:w-36">
-            生成三版
-          </button>
-        </div>
-        {anglesOpen && (
-          <div className="mt-3 rounded-xl border border-sky-100 bg-white p-3">
-            <div className="text-xs font-semibold text-slate-500">指定三版开场打法（选 2~3 个；留空=自动挑最贴的 3 种）</div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {['反常识判断', '身份定位喊话', '行动指令', '提问式', '对比打假', '数字落差'].map((a) => {
-                const on = selAngles.includes(a)
-                return (
-                  <button
-                    key={a}
-                    onClick={() => setSelAngles((cur) => on ? cur.filter((x) => x !== a) : (cur.length >= 3 ? cur : [...cur, a]))}
-                    className={`badge cursor-pointer px-3 py-1.5 ${on ? 'bg-sky-100 text-sky-700' : 'bg-slate-50 text-slate-500'}`}
-                  >
-                    {a}
-                  </button>
-                )
-              })}
-              {selAngles.length > 0 && (
-                <button onClick={() => setSelAngles([])} className="btn-ghost btn-xs">清除（回到自动）</button>
-              )}
-            </div>
-            <div className="mt-2 text-[11px] text-slate-400">打法=开场风格；结构模板=段落推进（hook→pain→proof→cta），两者叠加生效</div>
-          </div>
-        )}
-        <div className="mt-2 text-[11px] text-slate-400">长度/风格贴合两处同源（此处与清单头条都能改）；待写选题在下方清单里点行内「生成三版」，生成约 1~2 分钟、完成后直接进入三版对比定稿</div>
-      </div>
-
       <div className="mt-4">
         <ChipRow
-          active={writingFilter ? 'pending_write' : status}
-          onChange={(k) => {
-            if (k === 'pending_write') { setWritingFilter(true); setStatus(''); setOffset(0) }
-            else { setWritingFilter(false); setStatus(k); setOffset(0) }
-          }}
+          active={status}
+          onChange={(k) => { setStatus(k); setOffset(0) }}
           chips={[
             { key: '', label: '全部', count: sumCounts(counts) },
             { key: 'generated', label: '待定稿', count: sumCounts(counts, 'generated') },
             { key: 'final', label: '已定稿', count: sumCounts(counts, 'final') },
             { key: 'failed', label: '生成失败', count: sumCounts(counts, 'failed') },
-            { key: 'pending_write', label: '待写选题', count: pendingWriteTopics.length },
           ]}
         />
       </div>
@@ -578,85 +381,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
 
-      {writingFilter ? (
-        <div className="card mt-4 overflow-hidden p-0">
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-            <span>已定审但还没有脚本的选题，点行看详情，行尾按钮直接生成三版</span>
-            <div className="segment ml-auto shrink-0">
-              <button onClick={() => setLength('short')} className={`segment-item ${length === 'short' ? 'segment-item-active' : ''}`}>黄金档 50~70s</button>
-              <button onClick={() => setLength('long')} className={`segment-item ${length === 'long' ? 'segment-item-active' : ''}`}>长版 2~3min</button>
-            </div>
-            <div className="segment shrink-0">
-              <button onClick={() => setTopicOrder('score')} className={`segment-item ${topicOrder === 'score' ? 'segment-item-active' : ''}`}>评分 ↓</button>
-              <button onClick={() => setTopicOrder('new')} className={`segment-item ${topicOrder === 'new' ? 'segment-item-active' : ''}`}>最新</button>
-            </div>
-          </div>
-          {sortedWriteTopics.length === 0 ? (
-            <div className="p-6">
-              <EmptyState icon={Inbox} title="没有待写的选题" desc="已定审选题都有脚本了。去选题库定审新选题；已有脚本的选题可在顶部下拉「重新生成」里再生成。" />
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {sortedWriteTopics.map((t) => {
-                const exp = expandedTopicId === t.id
-                const prog = topicGen[t.id]
-                const terr = topicGenErr[t.id]
-                const full = topicDetail[t.id] || t
-                return (
-                  <div key={t.id} className={exp ? 'bg-sky-50/40' : ''}>
-                    <div
-                      onClick={() => toggleTopicDetail(t)}
-                      className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-slate-50"
-                    >
-                      <span className={`w-10 shrink-0 text-right text-base font-bold tabular-nums ${t.score != null && t.score >= 8 ? 'text-emerald-600' : t.score != null ? 'text-sky-600' : 'text-slate-300'}`}>
-                        {t.score != null ? t.score.toFixed(1) : '—'}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
-                        <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-400">
-                          <span className="badge shrink-0 bg-slate-100 text-slate-500">{SOURCE_LABELS[t.source_type] || t.source_type || '未知来源'}</span>
-                          <span className="shrink-0">{AUDIENCE_LABELS[t.audience] || t.audience}</span>
-                          {t.angle && <span className="truncate">· {t.angle}</span>}
-                        </div>
-                      </div>
-                      {terr && <span className="max-w-56 shrink-0 truncate text-xs text-red-500" title={terr}>生成失败：{terr}</span>}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); generate(t.id) }}
-                        disabled={!!prog}
-                        className="btn-accent btn-xs shrink-0 disabled:opacity-60"
-                      >
-                        {prog ? `生成中 ${prog.p}%` : terr ? '重试' : `生成三版 · ${length === 'long' ? '长版' : '短版'}`}
-                      </button>
-                    </div>
-                    {exp && (
-                      <div className="space-y-3 border-t border-sky-100 px-5 py-4">
-                        {prog && <Busy text={`脚本生成：${prog.p}% ${prog.m}`} />}
-                        {terr && <ErrorLine text={`生成失败：${terr}`} />}
-                        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[1.6fr_1fr]">
-                          {topicDetail[t.id] ? (
-                            <DetailBody t={full} />
-                          ) : (
-                            <div className="text-xs text-slate-400">加载详情…</div>
-                          )}
-                          <div className="space-y-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-                            <div className="flex justify-between"><span className="text-slate-400">选题</span><span>#{t.id}</span></div>
-                            <div className="flex justify-between"><span className="text-slate-400">受众</span><span>{AUDIENCE_LABELS[t.audience] || t.audience}</span></div>
-                            <div className="flex justify-between"><span className="text-slate-400">评分</span><span>{t.score != null ? t.score.toFixed(1) : '—'}</span></div>
-                            <div className="flex justify-between"><span className="text-slate-400">来源</span><span>{SOURCE_LABELS[t.source_type] || t.source_type || '—'}</span></div>
-                            <button onClick={(e) => { e.stopPropagation(); onNavigate?.(accountType === 'leadgen' ? 'l_topics' : 'p_topics') }} className="btn-ghost btn-xs w-full justify-center">
-                              去选题库看全量
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      ) : (
+
       <div className="card mt-4 overflow-hidden p-0">
         {scripts.length === 0 ? (
           <div className="p-6">
@@ -664,8 +389,8 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
               icon={Inbox}
               title={accountType === 'leadgen' ? '还没有获客脚本' : accountType === 'persona' ? '还没有人设脚本' : '还没有脚本'}
               desc={accountType === 'leadgen'
-                ? '获客脚本来自「获客打法」类型的选题（选题行上有类型徽章，点击可切换）——先在选题库把选题定为获客类型，再回到这里生成。'
-                : '先在「选题库」定审选题，再回到这里选择它，一键生成三版口播脚本。'}
+                ? '获客脚本从「选题 · 获客选题」的获客矿行上点「建稿」生成——获客矿=分型路由判定的需求素材。'
+                : '人设脚本从「选题 · 人设靶子」的靶子卡上备稿生成（出稿=一版精品+自动打磨）。'}
             />
           </div>
         ) : (
@@ -680,7 +405,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
                   >
                     <span className="w-14 shrink-0 text-xs tabular-nums text-slate-400">#{s.id}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-slate-900">{topicTitle(s)}</div>
+                      <div className="truncate text-sm font-medium text-slate-900">{scriptTitle(s)}</div>
                       <div className="mt-0.5 truncate text-xs text-slate-400">
                         {s.versions?.map((v) => v.label).join(' · ') || '生成中…'}
                       </div>
@@ -802,67 +527,7 @@ export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: 
           </div>
         )}
       </div>
-      )}
 
-      {/* 口播结构模板（折叠）：生成时自动选用使用次数最多的模板 */}
-      <details className="card mt-6 p-0">
-        <summary className="flex cursor-pointer items-center gap-2 px-5 py-3.5 text-sm font-semibold text-zinc-800">
-          口播结构模板
-          <span className="font-normal text-slate-400">
-            {templates.length} 个 · 生成时在上方「结构模板」下拉选择使用（不选=默认流程）
-          </span>
-          <span className="ml-auto text-xs font-normal text-slate-400">展开/收起</span>
-        </summary>
-        <div className="space-y-4 border-t border-slate-100 px-5 py-4">
-          <div className="space-y-2">
-            {templates.map((t) => (
-              <div key={t.id} className="flex items-start gap-3 rounded-xl border border-slate-200 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="font-semibold text-slate-800">{t.name}</span>
-                    <span className="badge bg-slate-100 text-slate-500">{t.structure.length} 步</span>
-                    {typeof t.usage_count === 'number' && t.usage_count > 0 && (
-                      <span className="badge bg-sky-50 text-sky-600">已用 {t.usage_count} 次</span>
-                    )}
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {t.structure.map((st, i) => (
-                      <span key={i} className="badge bg-slate-50 text-slate-500" title={st.requirement}>
-                        {i + 1}. {st.step}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {templates.length > 1 && (
-                  <button onClick={() => deleteTemplate(t.id)} className="btn-ghost btn-xs shrink-0 text-slate-400 hover:text-red-500">
-                    删除
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="space-y-2 border-t border-dashed border-slate-200 pt-4">
-            <div className="text-xs font-semibold text-slate-500">新建模板（每行一步：「步骤：要求」）</div>
-            <input
-              value={tplName}
-              onChange={(e) => setTplName(e.target.value)}
-              placeholder="模板名（如：痛点暴击式）"
-              className="input max-w-64"
-            />
-            <textarea
-              value={tplStructure}
-              onChange={(e) => setTplStructure(e.target.value)}
-              placeholder={'hook：前3秒点名受众+痛点，制造看下去的理由\npain：把痛点讲透，让观众对号入座\nsolution：抛出解法，先给结论\nproof：案例/数字/交付物证明\ncta：明确的行动指令'}
-              className="input min-h-28 font-mono text-xs"
-            />
-            <div>
-              <button onClick={createTemplate} disabled={!tplName.trim() || !tplStructure.trim()} className="btn-ghost btn-xs disabled:opacity-40">
-                保存模板
-              </button>
-            </div>
-          </div>
-        </div>
-      </details>
     </div>
   )
 }

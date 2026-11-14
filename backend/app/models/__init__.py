@@ -228,6 +228,8 @@ class Script(TenantScoped, TimestampMixin, table=True):
     topic_id: Optional[int] = Field(default=None, foreign_key="topics.id", index=True)
     card_id: Optional[int] = Field(default=None, foreign_key="topic_cards.id", index=True)  # 靶子卡备稿（选题工场 R1.4）
     falsify_item_id: Optional[int] = Field(default=None, foreign_key="falsify_items.id", index=True)  # 实测稿备稿（R1.4③）
+    ore_id: Optional[int] = Field(default=None, foreign_key="benchmark_videos.id", index=True)  # 获客矿建稿锚（分型路由消费面，2026-11-14）
+    title_hint: str = Field(default="")  # 生成来源标题快照（列表显示用；topics 退役后不再 join）
     versions: list = Field(default_factory=list, sa_column=Column(JSON))
     final_text: str = ""
     teleprompter_text: str = ""

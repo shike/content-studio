@@ -102,7 +102,7 @@ export function TopicStage(props: { tab: string; onTab: (t: string) => void; onN
       {({ id }) => (
         <>
           {id === 'persona' && <HotTargets onNavigate={props.onNavigate} />}
-          {id === 'leadgen' && <LeadgenOre />}
+          {id === 'leadgen' && <LeadgenOre onNavigate={props.onNavigate} />}
         </>
       )}
     </StageShell>

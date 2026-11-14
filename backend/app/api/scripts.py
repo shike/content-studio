@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/scripts")
 class GenerateIn(BaseModel):
     topic_id: int = 0
     card_id: int = 0  # 靶子卡备稿（选题工场 R1.4；与 topic_id 二选一）
+    ore_id: int = 0  # 获客矿建稿（分型路由消费面 2026-11-14；与 topic_id/card_id 三选一）
     hook: str = ""    # 卡备稿可改写钩子（空=用卡上钩子）
     spine: str = ""   # 卡备稿可改写主线（空=用卡上主线）
     use_style: bool = True  # 贴合我的风格（R9.4）
@@ -52,6 +53,36 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
             raise HTTPException(status_code=400, detail=str(e)) from None
         except RuntimeError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
+    if body.ore_id:  # 获客矿建稿（2026-11-14）：获客矿视频+求学需求评论直接进获客脚本生成
+        with Session(engine) as s:
+            from ..models import BenchmarkVideo
+            ore = s.get(BenchmarkVideo, body.ore_id)
+            if ore is None:
+                raise HTTPException(status_code=404, detail="获客矿样本不存在")
+            dup = s.exec(select(Script).where(
+                Script.ore_id == body.ore_id,  # type: ignore[attr-defined]
+                Script.status.in_(["generating", "polishing"]),  # type: ignore[attr-defined]
+            )).first()  # type: ignore[attr-defined]
+            if dup is not None:
+                raise HTTPException(status_code=409,
+                                    detail=f"该获客矿正在生成脚本（脚本 #{dup.id}），请等完成或删除后再试")
+            script = Script(ore_id=body.ore_id, account_type="leadgen",
+                            title_hint=f"获客：{(ore.title or '')[:50]}", status="generating")
+            s.add(script)
+            s.commit()
+            s.refresh(script)
+            script_id = script.id
+        angles = [a.strip() for a in body.angles if a.strip()][:3]
+        known = script_service.SIX_ANGLES
+        bad = [a for a in angles if a not in known]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"未知打法：{'、'.join(bad)}")
+        job = await runner.submit("script_generate",
+                                  {"script_id": script_id, "ore_id": body.ore_id,
+                                   "length": body.length, "use_style": body.use_style,
+                                   "angles": angles, "template_id": body.template_id},
+                                  dedup_key=f"ore:{body.ore_id}", actor=(user.tenant_id, user.id, user.role))
+        return {"script_id": script_id, "job_id": job.id}
     with Session(engine) as s:
         topic = s.get(Topic, body.topic_id)
         if topic is None:

@@ -4,9 +4,7 @@ import { api } from './api'
 2026-11-10 清理：pendingScripts/unwrittenTopics/unwrittenPersona/unwrittenLeadgen/finalScripts
 5 个孤儿字段已随后端 /stats/todos 同步删除，契约只剩下面这些。 */
 interface TodoStats {
-  draftTopics: number // 待审选题（两线合计）
-  draftTopicsLeadgen: number // 待审选题·获客库
-  targetsPersona: number // 今日靶子·待备稿（2026-11-11 观点怼热点主轴，选题库叶子徽章口径）
+  targetsPersona: number // 今日靶子·待备稿（选题工场 R1.4）
   pendingScriptsPersona: number // 待定稿脚本·人设
   pendingScriptsLeadgen: number // 待定稿脚本·获客
   pendingArticles: number // 内容工场待决策稿（排队写+待发；2026-11-10 系统全干定版）
@@ -28,7 +26,6 @@ interface MenuStats {
   p_content: number // 内容看板=待定稿脚本·人设
   p_bench: number // 对标拆解=拆解待定夺·人设
   p_cand: number // 候选定夺=候选待定夺·人设
-  l_topics: number // 获客选题=待审选题·获客
   l_scripts: number // 脚本工场=待定稿脚本·获客
   l_cand: number // 纯获客候选=候选待定夺·获客
   l_bench: number // 打法卡库=拆解待定夺·获客
@@ -48,12 +45,11 @@ export async function fetchMenuStats(): Promise<MenuStats> {
     api<{ total: number }>('/articles/content-items?status=pending&limit=1'),
   ])
   return {
-    today: todo.draftTopics,
+    today: todo.targetsPersona,
     p_topics: todo.targetsPersona ?? 0,
     p_content: todo.pendingScriptsPersona,
     p_cand: todo.openCandidatesPersona,
     p_bench: bmP.counts.pending,
-    l_topics: todo.draftTopicsLeadgen,
     l_scripts: todo.pendingScriptsLeadgen,
     l_cand: todo.openCandidatesLeadgen,
     l_bench: bmL.counts.pending,
@@ -74,7 +70,7 @@ export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
   return {
     today: s.today,
     monitor: s.p_cand + s.l_cand + s.p_bench + s.l_bench,
-    topics: s.p_topics + s.l_topics,
+    topics: s.p_topics,
     content: s.p_content + s.l_scripts + s.article + s.c_items,
     tasks: s.tasks,
     failed: s.failed,

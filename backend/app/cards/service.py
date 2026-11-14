@@ -786,7 +786,8 @@ async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
         if not hook_v or not spine_v:
             raise RuntimeError("卡上没有钩子/主线，不可备稿")
         spice_v = card.spice if card.spice in ("low", "mid", "high") else "mid"
-        script = Script(card_id=card_id, account_type="persona", status="generating")
+        script = Script(card_id=card_id, account_type="persona",
+                        title_hint=(str(payload.get("hook") or card.hook) or "")[:60], status="generating")
         s.add(script)
         s.flush()
         card.status = "approved"
