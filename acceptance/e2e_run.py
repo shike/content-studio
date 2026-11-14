@@ -12,6 +12,7 @@
 - 内容工场：fixture 文章行展开 → md 编辑器 → 渲染公众号格式
 - 账号经营：品牌卡字段在位、改头图口号保存成功回显
 """
+import json
 import os
 import sys
 import time
@@ -67,6 +68,23 @@ def main() -> int:
         "quality_score, account_type, notes, source, scan_status, created_at, updated_at) "
         "VALUES (1, 'https://www.douyin.com/video/e2e001', 'E2E测试作者', "
         "'E2E 同行视频样例 #企业AI落地', '', '', 0.0, 'persona', '', 'douyin', 'pending', datetime('now'), datetime('now'))")
+    # 选题工场夹具（R1.4）：一张 draft 靶子卡（今日靶子页四面渲染断言用）
+    conn.execute(
+        "INSERT INTO topic_cards (tenant_id, batch_date, source, pool, spine, hook, spice, judge, gates, status, created_at, updated_at) "
+        "VALUES (1, date('now'), 'douyin_peer', ?, ?, ?, 'high', ?, ?, 'draft', datetime('now'), datetime('now'))",
+        (json.dumps({
+            "domain_evidence": "监控对标号 E2E测试作者（AI 落地赛道）",
+            "heat_evidence": "E2E测试作者《E2E 同行视频样例》评论 55",
+            "heat_level": "高", "role": "中小企业老板", "coverage": "boss",
+            "douyin_evidence": {"kind": "peer_video", "ref": "https://www.douyin.com/video/e2e001",
+                                "comments": 55, "diggs": 320},
+            "peer_covered": True,
+        }, ensure_ascii=False),
+         "小老板学AI先砍培训预算",
+         "老板砍AI培训预算，砍的是自己的交付",
+         json.dumps({"hook_pull": 8, "spine_single": 8, "traffic_potential": 9,
+                     "verdict": "pass", "reason": "一手评论实数 55，三维过线"}, ensure_ascii=False),
+         json.dumps([{"gate": "主线字数线", "pass": True, "detail": "12 字"}], ensure_ascii=False)))
     conn.execute(
         "INSERT INTO topics (tenant_id, line, title, angle, audience, source_type, source_ref, status, "
         "score, created_at, updated_at) "
@@ -158,6 +176,22 @@ def main() -> int:
             else:
                 check(f"页面打开：{label}", want in page.inner_text("main"),
                       f"页内未见签名 {want!r}（该页无页级标题）")
+
+        # ---------- 今日靶子卡（选题工场 R1.4） ----------
+        section("E2E · 今日靶子卡四面渲染")
+        goto_page("今日靶子")
+        page.wait_for_timeout(800)
+        body = page.inner_text("main")
+        check("靶子卡：钩子第一行+主线第二行",
+              "老板砍AI培训预算，砍的是自己的交付" in body and "小老板学AI先砍培训预算" in body)
+        check("靶子卡：一手实数/同行已发/法官徽章",
+              "评论 55" in body and "同行已发" in body and "法官 8/8/9" in body)
+        page.click("text=老板砍AI培训预算，砍的是自己的交付")
+        page.wait_for_timeout(500)
+        body2 = page.inner_text("main")
+        check("靶子卡：裁决面（备稿表单+打法+法官判词）",
+              "开场钩子（说给观众听的第一句，可改）" in body2 and "反常识判断" in body2
+              and "一手评论实数 55" in body2)
 
         # ---------- 今天页快速记选题 ----------
         section("E2E · 今天页快速记选题")
