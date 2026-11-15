@@ -231,6 +231,28 @@ def _migrate(engine) -> None:
         tccols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(topic_cards)"))]
         if tccols and "takeaways" not in tccols:  # 评论要点留痕（主线原料，2026-11-14）
             conn.execute(sqlalchemy.text("ALTER TABLE topic_cards ADD COLUMN takeaways JSON DEFAULT '[]'"))
+        # failure_patterns schema 漂移修复（2026-11-15）：旧部署残留 kind NOT NULL 列（模型已退役）——
+        # 新指纹建档 INSERT 必炸并打死轻道失败登记。重建表去列，数据保留。
+        fpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(failure_patterns)"))]
+        if fpcols and "kind" in fpcols:
+            conn.execute(sqlalchemy.text("ALTER TABLE failure_patterns RENAME TO failure_patterns_legacy"))
+            conn.execute(sqlalchemy.text(
+                "CREATE TABLE failure_patterns ("
+                "created_at DATETIME, updated_at DATETIME, id INTEGER PRIMARY KEY,"
+                " fp VARCHAR NOT NULL UNIQUE, fail_class VARCHAR NOT NULL DEFAULT '',"
+                " label VARCHAR NOT NULL DEFAULT '', root_cause VARCHAR NOT NULL DEFAULT '',"
+                " status VARCHAR NOT NULL DEFAULT 'open', count INTEGER NOT NULL DEFAULT 0,"
+                " sample_error VARCHAR NOT NULL DEFAULT '', sample_job_id INTEGER NOT NULL DEFAULT 0,"
+                " last_type VARCHAR NOT NULL DEFAULT '')"))
+            conn.execute(sqlalchemy.text(
+                "INSERT INTO failure_patterns (created_at, updated_at, id, fp, fail_class, label,"
+                " root_cause, status, count, sample_error, sample_job_id, last_type) "
+                "SELECT created_at, updated_at, id, fp, COALESCE(fail_class,''), COALESCE(label,''),"
+                " COALESCE(root_cause,''), COALESCE(status,'open'), COALESCE(count,0),"
+                " COALESCE(sample_error,''), COALESCE(sample_job_id,0), COALESCE(last_type,'')"
+                " FROM failure_patterns_legacy"))
+            conn.execute(sqlalchemy.text("DROP TABLE failure_patterns_legacy"))
+            print("[migrate] failure_patterns 重建：去 legacy kind 列（数据保留）")
         wacols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_accounts)"))]
         if wacols and "account_type" not in wacols:
             conn.execute(sqlalchemy.text(

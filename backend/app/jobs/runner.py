@@ -621,7 +621,10 @@ class JobRunner:
                         "quota": "平台额度"}.get(fc, "故障")
                 job.message = (f"{_why}慢巡 {count} 次仍未恢复，安静终态——"
                                "如确认环境已恢复可在任务列表手动重试")
-            _upsert_failure_pattern(s, fp, fc, job_type, str(e), job_id)
+            try:
+                _upsert_failure_pattern(s, fp, fc, job_type, str(e), job_id)
+            except Exception as fe:  # noqa: BLE001 指纹登记是记账不是处置——库表漂移不杀分道
+                print(f"[jobs] 失败指纹登记失败: {type(fe).__name__}: {str(fe)[:80]}")
             s.add(job)
             s.commit()
         # 实体状态回退钩子：失败时把关联实体拉回稳定态（不掩盖异常，只兜底）
