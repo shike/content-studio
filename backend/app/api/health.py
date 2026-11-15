@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/api/debug/tasks")
-def debug_tasks(user: User = Depends(require_user)) -> dict:
+async def debug_tasks(user: User = Depends(require_user)) -> dict:
     """诊断端点（管理员）：转储全部 asyncio 任务栈——定位挂死任务的卡点。"""
     import asyncio
     out = []
