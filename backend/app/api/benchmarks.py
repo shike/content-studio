@@ -125,6 +125,8 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
     def _typed(q):
         if account_type in ("persona", "leadgen"):
             q = q.where(BenchmarkVideo.account_type == account_type)  # type: ignore[attr-defined]
+        if comment_kind in ("persona_ore", "leadgen_ore"):
+            q = q.where(BenchmarkVideo.comment_kind == comment_kind)  # type: ignore[attr-defined]
         return q
 
     with Session(engine) as s:

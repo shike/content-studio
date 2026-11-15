@@ -39,6 +39,7 @@ export function Busy({ text }: { text: string }) {
 }
 
 export function ErrorLine({ text }: { text: string }) {
+  if (!String(text || '').trim()) return null  // 空文本不画空红条（降级必须可见≠空壳可见）
   return (
     <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
       <AlertCircle size={14} className="mt-0.5 shrink-0" />
