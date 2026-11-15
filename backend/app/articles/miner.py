@@ -20,6 +20,9 @@ from ..models import AppSetting, ContentItem, DailyLedger
 from ..prompts import render
 
 _PER_DAY_DOCS = 18   # 每日评估篇数（游标续读，453 篇编目约 25 天盘完）
+_BATCH_DEADLINE = 45 * 60   # 整批硬 deadline（秒）：未知挂死源转 TransientError 走梯子（2026-11-15 卡死复发）
+_DOC_WAIT = 120   # 单篇全文拉取兜底（ima 客户端自带 30/40s 超时，此处再兜一层未知挂死）
+_EVAL_WAIT = 600  # 单篇评估兜底（gateway 自带 600s httpx 超时，此处防连接级停滞）
 _DOC_CAP = 30000     # 单篇全文上限（防异常大文件）
 _READ_SLEEP = 0.8    # ima 限流退避（密集调用 403 教训）
 _EVAL_SLEEP = 0.4    # 评估调用间隔
@@ -110,16 +113,21 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
 
     # ── 逐篇：拉全文 → 评估 → 达线入清单 ──
     ctx.set_progress(4, f"目录「{folder_name}」第 {pos + 1}~{pos + len(batch)} 篇，逐篇评估")
+    deadline = asyncio.get_event_loop().time() + _BATCH_DEADLINE
     evaluated = added = skipped_low = failed = already = 0
     for i, d in enumerate(batch, 1):
+        if asyncio.get_event_loop().time() > deadline:
+            raise TransientError(
+                f"本批评估超过 {_BATCH_DEADLINE // 60} 分钟仍未完成（疑似挂死），游标未推进，稍后自动重试")
         mid = str(d.get("media_id") or "")
         title = str(d.get("title") or f"文档{i}")
         if not mid or mid in existing:
             already += 1
             continue
         try:
-            text = await fetch_full_doc(client_id, api_key, mid, cap=_DOC_CAP)
-        except Exception as e:  # noqa: BLE001 单篇拉取失败跳过（当日缺席，不阻塞整批）
+            text = await asyncio.wait_for(
+                fetch_full_doc(client_id, api_key, mid, cap=_DOC_CAP), timeout=_DOC_WAIT)
+        except Exception as e:  # noqa: BLE001 单篇拉取失败跳过（含超时——挂死也转跳过，2026-11-15 卡死复发）
             print(f"[kb-miner] 全文拉取失败（{title[:24]}）: {type(e).__name__}: {str(e)[:80]}")
             text = ""
         if not text.strip():
@@ -127,14 +135,16 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
             await asyncio.sleep(_READ_SLEEP)
             continue
         try:
-            note = await gateway.complete_json(
-                [{"role": "user", "content": render("article_kb_miner_eval",
-                                                    DOC=f"《{title}》\n\n{text}",
-                                                    # 2026-11-13：评分线可被 AppSetting.adapt_gen_line
-                                                    # 覆盖，prompt 内同步注入真实线（原写死 7.5）
-                                                    GEN_LINE=f"{line:g}")}],
-                max_tokens=2000, thinking="disabled")
-        except Exception as e:  # noqa: BLE001 单篇评估失败按跳过计（不阻塞整批）
+            note = await asyncio.wait_for(
+                gateway.complete_json(
+                    [{"role": "user", "content": render("article_kb_miner_eval",
+                                                        DOC=f"《{title}》\n\n{text}",
+                                                        # 2026-11-13：评分线可被 AppSetting.adapt_gen_line
+                                                        # 覆盖，prompt 内同步注入真实线（原写死 7.5）
+                                                        GEN_LINE=f"{line:g}")}],
+                    max_tokens=2000, thinking="disabled"),
+                timeout=_EVAL_WAIT)
+        except Exception as e:  # noqa: BLE001 单篇评估失败按跳过计（含超时——挂死也转跳过）
             print(f"[kb-miner] 评估失败（{title[:24]}）: {type(e).__name__}: {str(e)[:80]}")
             failed += 1
             await asyncio.sleep(_EVAL_SLEEP)

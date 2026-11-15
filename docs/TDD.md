@@ -313,6 +313,9 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - `POST /api/radar/topics` `{name, ch_id}` → 添加监测话题（ch_id 必须数字；重复 409）
 - `POST /api/radar/topics/extract` `{url}` → 贴抖音视频链接免登录提取话题标签（name+ch_id，供添加监测）
 - `POST /api/radar/topics/{topic_id}/check` → 单话题即时巡检（免登录拉内容样本，新出现低粉高赞照旧自动拆解）
+- `article_kb_miner` 挂死兜底（2026-11-15）：卡死复发两连（同批 4% 停 9.5h）——逐篇
+  asyncio.wait_for（全文 120s/评估 600s，未知挂死转跳过）+ 整批 45min deadline
+  （超时 TransientError 游标不推进走梯子）；reaper 看门狗 stuck_after=7200 实测有效（06:30 杀过一次）。
 - `POST /api/watch/backfill` → 202 `{job_id}`（监控号 30 天存量回填，执行器 `watch_backfill`，2026-11-14）：
   逐启用对标账号锚点路线列近期作品 → 发布时间 ≤30 天 + 拆解闸同口径 → 未入库的建行
   （notes=监控号存量回填）自动拆解（采高赞评论+分型路由）。单次建行上限 100（可重复跑续扫）。
