@@ -17,12 +17,25 @@ router = APIRouter()
 async def debug_tasks(user: User = Depends(require_user)) -> dict:
     """诊断端点（管理员）：转储全部 asyncio 任务栈——定位挂死任务的卡点。"""
     import asyncio
+
+    def _fmt(frames) -> str:
+        lines = []
+        for f in frames[-8:]:
+            try:
+                lines.append(f"{f.f_code.co_filename}:{f.f_lineno} in {f.f_code.co_name}")
+            except Exception:  # noqa: BLE001
+                continue
+        return "\n".join(lines)
+
     out = []
     for t in asyncio.all_tasks():
-        stack = "".join(traceback.format_list(t.get_stack(limit=8))) if t.get_stack() else ""
+        try:
+            stack = _fmt(t.get_stack(limit=8)) if not t.done() else ""
+        except Exception:  # noqa: BLE001 单任务取栈失败不炸端点
+            stack = "?"
         coro = getattr(t.get_coro(), "__qualname__", "?")
         out.append({"name": t.get_name(), "coro": coro, "done": t.done(),
-                    "stack": stack[-1200:] if stack else ""})
+                    "stack": stack[-1200:]})
     return {"tasks": out}
 
 
