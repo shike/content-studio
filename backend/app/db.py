@@ -233,6 +233,61 @@ def _migrate(engine) -> None:
             conn.execute(sqlalchemy.text("ALTER TABLE topic_cards ADD COLUMN takeaways JSON DEFAULT '[]'"))
         # failure_patterns schema 漂移修复（2026-11-15）：旧部署残留 kind NOT NULL 列（模型已退役）——
         # 新指纹建档 INSERT 必炸并打死轻道失败登记。重建表去列，数据保留。
+        # schema 漂移通用重建：生产表残留模型已退役的 NOT NULL 无默认列 → INSERT 必炸
+        # （2026-11-15 连出两起：failure_patterns.kind、content_items.kb_id/folder_id——
+        #   第三轮减负删模型字段时未查生产表约束）。重建表对齐当前模型，数据保留，索引搬运。
+        def _rebuild_drop_legacy(conn, table: str, create_sql: str, copy_select: str) -> None:
+            conn.execute(sqlalchemy.text(f"ALTER TABLE {table} RENAME TO {table}_legacy"))
+            conn.execute(sqlalchemy.text(create_sql))
+            conn.execute(sqlalchemy.text(copy_select))
+            for (isql,) in conn.execute(sqlalchemy.text(
+                    f"SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='{table}_legacy' "
+                    "AND sql IS NOT NULL")):
+                conn.execute(sqlalchemy.text(isql.replace(f"{table}_legacy", table)))
+            conn.execute(sqlalchemy.text(f"DROP TABLE {table}_legacy"))
+            print(f"[migrate] {table} 重建：去模型外 NOT NULL 列（数据保留）")
+
+        def _has_legacy_col(conn, table: str, col: str) -> bool:
+            cols = [r[1] for r in conn.execute(sqlalchemy.text(f"PRAGMA table_info({table})"))]
+            return col in cols
+
+        if _has_legacy_col(conn, "content_items", "kb_id"):
+            _rebuild_drop_legacy(conn, "content_items",
+                "CREATE TABLE content_items ("
+                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
+                " id INTEGER PRIMARY KEY, media_id VARCHAR DEFAULT '',"
+                " folder_name VARCHAR DEFAULT '', title VARCHAR DEFAULT '',"
+                " source_author VARCHAR DEFAULT '', quality_score REAL DEFAULT 0,"
+                " why_good VARCHAR DEFAULT '', adapt_angle VARCHAR DEFAULT '',"
+                " best_quotes TEXT, category VARCHAR DEFAULT '', priority INTEGER DEFAULT 0,"
+                " status VARCHAR DEFAULT 'pending', article_id INTEGER, note VARCHAR DEFAULT '')",
+                "INSERT INTO content_items (created_at, updated_at, tenant_id, id, media_id,"
+                " folder_name, title, source_author, quality_score, why_good, adapt_angle,"
+                " best_quotes, category, priority, status, article_id, note) "
+                "SELECT created_at, updated_at, tenant_id, id, media_id, folder_name, title,"
+                " source_author, quality_score, why_good, adapt_angle, best_quotes, category,"
+                " priority, status, article_id, note FROM content_items_legacy")
+        if _has_legacy_col(conn, "radar_topics", "new_since_last"):
+            _rebuild_drop_legacy(conn, "radar_topics",
+                "CREATE TABLE radar_topics ("
+                "created_at DATETIME, updated_at DATETIME, id INTEGER PRIMARY KEY,"
+                " tenant_id INTEGER DEFAULT 0, ch_id VARCHAR NOT NULL UNIQUE,"
+                " name VARCHAR DEFAULT '', enabled BOOLEAN DEFAULT 1, notify BOOLEAN DEFAULT 1,"
+                " seen_ids TEXT, hits TEXT, last_checked_at DATETIME)",
+                "INSERT INTO radar_topics (created_at, updated_at, id, tenant_id, ch_id, name,"
+                " enabled, notify, seen_ids, hits, last_checked_at) "
+                "SELECT created_at, updated_at, id, tenant_id, ch_id, name, enabled, notify,"
+                " seen_ids, hits, last_checked_at FROM radar_topics_legacy")
+        if _has_legacy_col(conn, "research_reports", "tokens_in"):
+            _rebuild_drop_legacy(conn, "research_reports",
+                "CREATE TABLE research_reports ("
+                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
+                " id INTEGER PRIMARY KEY, topic_id INTEGER, content VARCHAR DEFAULT '',"
+                " model VARCHAR DEFAULT '')",
+                "INSERT INTO research_reports (created_at, updated_at, tenant_id, id, topic_id,"
+                " content, model) SELECT created_at, updated_at, tenant_id, id, topic_id,"
+                " content, model FROM research_reports_legacy")
+
         fpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(failure_patterns)"))]
         if fpcols and "kind" in fpcols:
             conn.execute(sqlalchemy.text("ALTER TABLE failure_patterns RENAME TO failure_patterns_legacy"))
