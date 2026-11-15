@@ -1,12 +1,29 @@
 """GET /api/health：服务、数据库、LLM 与本地浏览器依赖健康。"""
-from fastapi import APIRouter
+import traceback
+
+from fastapi import APIRouter, Depends
 from sqlmodel import Session, text
 
+from ..auth import require_user
 from ..db import engine
 from ..llm import gateway
+from ..models import User
 from ..version import APP_VERSION
 
 router = APIRouter()
+
+
+@router.get("/api/debug/tasks")
+def debug_tasks(user: User = Depends(require_user)) -> dict:
+    """诊断端点（管理员）：转储全部 asyncio 任务栈——定位挂死任务的卡点。"""
+    import asyncio
+    out = []
+    for t in asyncio.all_tasks():
+        stack = "".join(traceback.format_stack(t.get_stack(limit=8))) if t.get_stack() else ""
+        coro = getattr(t.get_coro(), "__qualname__", "?")
+        out.append({"name": t.get_name(), "coro": coro, "done": t.done(),
+                    "stack": stack[-1200:] if stack else ""})
+    return {"tasks": out}
 
 
 @router.get("/api/health")
