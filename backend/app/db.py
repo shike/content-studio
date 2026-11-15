@@ -243,7 +243,10 @@ def _migrate(engine) -> None:
             for (isql,) in conn.execute(sqlalchemy.text(
                     f"SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='{table}_legacy' "
                     "AND sql IS NOT NULL")):
-                conn.execute(sqlalchemy.text(isql.replace(f"{table}_legacy", table)))
+                # IF NOT EXISTS：RENAME 后旧索引随表带走保留原名，同名重建必撞（2026-11-15 实测）
+                conn.execute(sqlalchemy.text(
+                    isql.replace(f"{table}_legacy", table).replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS")
+                    .replace("CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX IF NOT EXISTS")))
             conn.execute(sqlalchemy.text(f"DROP TABLE {table}_legacy"))
             print(f"[migrate] {table} 重建：去模型外 NOT NULL 列（数据保留）")
 
