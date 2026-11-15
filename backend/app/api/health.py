@@ -19,7 +19,7 @@ async def debug_tasks(user: User = Depends(require_user)) -> dict:
     import asyncio
     out = []
     for t in asyncio.all_tasks():
-        stack = "".join(traceback.format_stack(t.get_stack(limit=8))) if t.get_stack() else ""
+        stack = "".join(traceback.format_list(t.get_stack(limit=8))) if t.get_stack() else ""
         coro = getattr(t.get_coro(), "__qualname__", "?")
         out.append({"name": t.get_name(), "coro": coro, "done": t.done(),
                     "stack": stack[-1200:] if stack else ""})
