@@ -11,7 +11,7 @@ from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import Article, Job, Script, SelfVideo
+from ..models import Article, Job, Script
 
 # job_type → (实体模型, payload 主键字段, 在途状态)
 ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
@@ -22,8 +22,6 @@ ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
     # _article_generate_fail（2026-11-13 补映射：此前它们的失败文章不在复活/孤儿射程）
     "article_adapt": (Article, "article_id", "generating"),
     "article_deepread": (Article, "article_id", "generating"),
-    # SelfVideo 无失败态（分析失败行保持 approved），coverage/孤儿判定需要它的映射
-    "self_analyze": (SelfVideo, "video_id", "approved"),
 }
 
 

@@ -89,8 +89,6 @@ async def compose(item_id: int, user: User = Depends(require_user)) -> dict:
         return await falsify_service.compose_falsify(item_id=item_id, user=user)
     except KeyError:
         raise HTTPException(status_code=404, detail="falsify item not found") from None
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 

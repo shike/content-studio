@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   CircleAlert, ExternalLink, Pencil, Play, Plus, Power, Radar, Scissors, Wand2,
 } from 'lucide-react'
+import { analyzed } from './Benchmarks'
 import { api, apiErrText, waitJob } from '../api'
 import {
   Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime, safeHref } from '../components'
@@ -200,8 +201,7 @@ export default function Watch({ onNavigate, accountType }: { onNavigate?: (k: st
               .map((b) => ({
                 id: b.id,
                 title: b.title || `样本 #${b.id}`,
-                transcript: b.transcript || '',
-                analyzed: Boolean(b.analysis && (b.analysis.hook || b.analysis.structure || b.analysis.score != null)),
+                analyzed: analyzed(b),
                 created_at: b.created_at,
               })),
           ),

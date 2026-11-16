@@ -25,7 +25,6 @@ class ChangePasswordIn(BaseModel):
 def _me_payload(cu: CurrentUser, tenant_name: str = "") -> dict:
     return {"user_id": cu.id, "username": cu.username, "role": cu.role,
             "display_name": cu.display_name or cu.username,
-            "must_change_password": cu.must_change_password,
             "tenant_id": cu.tenant_id,
             "tenant_name": tenant_name}
 
@@ -58,8 +57,7 @@ def login(body: LoginIn, request: Request, response: Response):
                         httponly=True, samesite="lax",
                         secure=settings.cookie_secure)  # HTTPS 部署置 COOKIE_SECURE=1
     return _me_payload(CurrentUser(id=user.id, tenant_id=user.tenant_id, role=user.role,
-                                   username=user.username, display_name=user.display_name,
-                                   must_change_password=user.must_change_password),
+                                   username=user.username, display_name=user.display_name),
                        tenant_name)
 
 
@@ -90,7 +88,6 @@ def change_password(body: ChangePasswordIn, request: Request, response: Response
         if u is None or not verify_password(body.old_password, u.password_hash):
             raise HTTPException(status_code=400, detail="原密码错误")
         u.password_hash = hash_password(body.new_password)
-        u.must_change_password = False
         s.add(u)
         # 改密即全端重登：作废该用户全部会话（含当前），随后补发一枚新会话
         for row in s.exec(select(UserSession).where(UserSession.user_id == u.id)).all():

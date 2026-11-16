@@ -1,18 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, apiErrText } from './api'
 
 /**
  * 页面级守卫：清错误 → 执行 → 失败 setError(apiErrText 人话) → finally 复位 busy。
- * 九页（Topics/Scripts/Watch/Benchmarks/Settings/Workshop/ContentItems/HotTargets/
- * DiscoveredAccounts）的本地 guard 副本统一起来；
- * onReset 供各页复位自有的局部 busy——Workshop 版 finally 还清 rowBusy/syncBusy 等，
- * 那是 2026-10-29 卡死 bug 修复的一部分，任何路径下局部 busy 必须复位，不可丢。
+ * 多页（Scripts/Watch/Benchmarks/Settings/Workshop/ContentItems/HotTargets/
+ * DiscoveredAccounts）的本地 guard 副本统一起来。
  */
-export function usePageGuard(onReset?: () => void) {
+export function usePageGuard() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-  const resetRef = useRef(onReset)
-  resetRef.current = onReset
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError('')
     try {
@@ -21,7 +17,6 @@ export function usePageGuard(onReset?: () => void) {
       setError(apiErrText(e))
     } finally {
       setBusy('')
-      resetRef.current?.()
     }
   }, [])
   return { guard, busy, setBusy, error, setError }

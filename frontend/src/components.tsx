@@ -103,12 +103,10 @@ export function ChipRow({
   chips,
   active,
   onChange,
-  right,
 }: {
   chips: { key: string; label: string; count?: number }[]
   active: string
   onChange: (k: string) => void
-  right?: React.ReactNode
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -126,7 +124,6 @@ export function ChipRow({
           {typeof c.count === 'number' ? ` ${c.count}` : ''}
         </button>
       ))}
-      {right && <div className="ml-auto flex items-center gap-1.5">{right}</div>}
     </div>
   )
 }

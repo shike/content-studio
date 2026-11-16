@@ -64,7 +64,6 @@ interface ScriptVersion {
 
 export interface Script {
   id: number
-  topic_id: number | null
   ore_id?: number | null   // 获客矿建稿锚（分型路由消费面，2026-11-14）
   title_hint?: string      // 生成来源标题快照
   versions: ScriptVersion[]

@@ -322,6 +322,37 @@ def _migrate(engine) -> None:
                 " md, title, note, kb_sources, publish_url, published_at, stats, html, status) "
                 "SELECT created_at, updated_at, tenant_id, id, topic_id, script_id,"
                 " md, title, note, kb_sources, publish_url, published_at, stats, html, status FROM articles_legacy")
+        if _has_legacy_col(conn, "users", "must_change_password"):
+            # R11.2 首登强制改密流程 2026-11-16 全链退役（bootstrap 从不置位，403 分支不可达）
+            _rebuild_drop_legacy(conn, "users",
+                "CREATE TABLE users ("
+                "created_at DATETIME, updated_at DATETIME, id INTEGER PRIMARY KEY,"
+                " tenant_id INTEGER NOT NULL, username VARCHAR NOT NULL,"
+                " password_hash VARCHAR DEFAULT '', role VARCHAR NOT NULL DEFAULT 'member',"
+                " display_name VARCHAR DEFAULT '', status VARCHAR NOT NULL DEFAULT 'active')",
+                "INSERT INTO users (created_at, updated_at, id, tenant_id, username,"
+                " password_hash, role, display_name, status) "
+                "SELECT created_at, updated_at, id, tenant_id, username,"
+                " password_hash, role, display_name, status FROM users_legacy")
+            print("[migrate] users 重建：去 must_change_password（流程退役）")
+        if _has_legacy_col(conn, "scripts", "topic_id"):
+            # 老选题库 topics 退役 2026-11-16 划线：scripts.topic_id 列清退（数据保留）
+            _rebuild_drop_legacy(conn, "scripts",
+                "CREATE TABLE scripts ("
+                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
+                " id INTEGER PRIMARY KEY, card_id INTEGER, falsify_item_id INTEGER,"
+                " ore_id INTEGER, title_hint VARCHAR DEFAULT '', versions JSON,"
+                " final_text VARCHAR DEFAULT '', teleprompter_text VARCHAR DEFAULT '',"
+                " storyboard JSON, title_candidates JSON,"
+                " status VARCHAR DEFAULT 'generating',"
+                " account_type VARCHAR NOT NULL DEFAULT 'persona')",
+                "INSERT INTO scripts (created_at, updated_at, tenant_id, id, card_id,"
+                " falsify_item_id, ore_id, title_hint, versions, final_text,"
+                " teleprompter_text, storyboard, title_candidates, status, account_type) "
+                "SELECT created_at, updated_at, tenant_id, id, card_id, falsify_item_id,"
+                " ore_id, title_hint, versions, final_text, teleprompter_text,"
+                " storyboard, title_candidates, status, account_type FROM scripts_legacy")
+            print("[migrate] scripts 重建：去 topic_id（topics 退役划线）")
         if _has_legacy_col(conn, "watch_candidates", "leadgen_comments") or _has_legacy_col(conn, "watch_candidates", "recent_same"):
             # 重建前先把模型列补进老表（老库可能还没有 account_type/leadgen_density，
             # 由后置 ADD COLUMN 兜底的列不在此刻）——copy_select 引用的列必须先存在
@@ -349,25 +380,21 @@ def _migrate(engine) -> None:
                 " COALESCE(status,'open') FROM watch_candidates_legacy")
 
         fpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(failure_patterns)"))]
-        if fpcols and "kind" in fpcols:
-            conn.execute(sqlalchemy.text("ALTER TABLE failure_patterns RENAME TO failure_patterns_legacy"))
-            conn.execute(sqlalchemy.text(
+        if fpcols and any(c in fpcols for c in ("kind", "last_type", "sample_job_id")):
+            # 2026-11-16 改走 _rebuild_drop_legacy（原手工块同构）+ 并入两死列清算（写而不读）
+            _rebuild_drop_legacy(conn, "failure_patterns",
                 "CREATE TABLE failure_patterns ("
                 "created_at DATETIME, updated_at DATETIME, id INTEGER PRIMARY KEY,"
                 " fp VARCHAR NOT NULL UNIQUE, fail_class VARCHAR NOT NULL DEFAULT '',"
                 " label VARCHAR NOT NULL DEFAULT '', root_cause VARCHAR NOT NULL DEFAULT '',"
                 " status VARCHAR NOT NULL DEFAULT 'open', count INTEGER NOT NULL DEFAULT 0,"
-                " sample_error VARCHAR NOT NULL DEFAULT '', sample_job_id INTEGER NOT NULL DEFAULT 0,"
-                " last_type VARCHAR NOT NULL DEFAULT '')"))
-            conn.execute(sqlalchemy.text(
+                " sample_error VARCHAR NOT NULL DEFAULT '')",
                 "INSERT INTO failure_patterns (created_at, updated_at, id, fp, fail_class, label,"
-                " root_cause, status, count, sample_error, sample_job_id, last_type) "
+                " root_cause, status, count, sample_error) "
                 "SELECT created_at, updated_at, id, fp, COALESCE(fail_class,''), COALESCE(label,''),"
                 " COALESCE(root_cause,''), COALESCE(status,'open'), COALESCE(count,0),"
-                " COALESCE(sample_error,''), COALESCE(sample_job_id,0), COALESCE(last_type,'')"
-                " FROM failure_patterns_legacy"))
-            conn.execute(sqlalchemy.text("DROP TABLE failure_patterns_legacy"))
-            print("[migrate] failure_patterns 重建：去 legacy kind 列（数据保留）")
+                " COALESCE(sample_error,'') FROM failure_patterns_legacy")
+            print("[migrate] failure_patterns 重建：去 kind/last_type/sample_job_id（数据保留）")
         wacols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_accounts)"))]
         if wacols and "account_type" not in wacols:
             conn.execute(sqlalchemy.text(

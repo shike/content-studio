@@ -21,7 +21,6 @@ MANAGED: dict[str, str] = {
     "zhipu_api_key": "secret",
     "zhipu_base_url": "str",
     "search_provider": "str",
-    "search_enabled": "bool",
     "zhipu_search_base_url": "str",
     "asr_model": "str",
     "douyin_proxy": "str",

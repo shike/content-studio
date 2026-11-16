@@ -34,7 +34,7 @@ def kb_config(s: Session) -> dict | None:
     kb_ids = [x for x in _setting(s, "ima_kb_ids").split(",") if x]
     if not (client_id and api_key and kb_ids):
         return None
-    return {"client_id": client_id, "api_key": api_key, "kb_ids": kb_ids}
+    return {"client_id": client_id, "api_key": api_key}
 
 
 def topic_folders(s: Session) -> list[tuple[str, str]]:

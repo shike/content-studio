@@ -91,7 +91,6 @@ def revive(card_id: int, user: User = Depends(require_user)) -> dict:
 
 class SeedIn(BaseModel):
     text: str
-    url: str = ""
 
 
 @router.post("/seed", status_code=202)
@@ -101,7 +100,7 @@ async def seed(body: SeedIn, user: User = Depends(require_user)) -> dict:
     if not text:
         raise HTTPException(status_code=400, detail="投喂内容不能为空")
     dedup = hashlib.md5(text.encode()).hexdigest()[:12]
-    job = await runner.submit("card_seed", {"text": text[:300], "url": body.url.strip()[:200]},
+    job = await runner.submit("card_seed", {"text": text[:300]},
                               dedup_key=f"1:cardseed:{dedup}",
                               actor=(user.tenant_id, user.id, user.role))
     return {"job_id": job.id}

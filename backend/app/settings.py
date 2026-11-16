@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     # （只有作者后台可见），闸线只能落评论/赞。
     dissect_comment_min: int = 20   # 拆解闸：评论 ≥ 此值自动拆解
     dissect_digg_min: int = 300     # 拆解闸：赞 ≥ 此值自动拆解（与评论线任一满足即可）
-    search_enabled: bool = True  # idea 深研的 DDG 联网检索增强（失败自动降级）
     # 选题工场（PRD R1.4 三原则定版 2026-11-14；三原则=三秒钩子/半句话主线/广度×热度）
     pool_peer_min_comments: int = 50   # 监控号一手池子线：评论 ≥ 此值直产池子卡（用户拍板，替代拆解闸 OR 线）
     hook_speed_cps: int = 5            # 三秒口径语速（字/秒）→ 钩子/主线字数线 = 3×此值 = 15（时长是法律，字数是代理）

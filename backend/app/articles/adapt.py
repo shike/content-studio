@@ -59,14 +59,6 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _strip_fence(body: str) -> str:
-    body = (body or "").strip()
-    if body.startswith("```"):
-        body = re.sub(r"^```[a-z]*\n?", "", body)
-        body = re.sub(r"\n?```$", "", body).strip()
-    return body
-
-
 @register_executor("article_adapt", on_fail=_article_generate_fail)
 async def article_adapt(ctx: JobContext, payload: dict) -> dict:
     """每日改编：清单取项（CAS）→ 拉源文全文 → 保骨架保原话换口径成文 → 原创度闸 → 机检 → 排版。"""
@@ -163,9 +155,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             raise TransientError("改编输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
         title = lines[0].lstrip()[2:].strip() or title_from_call or src_title[:30]
         md_text = "\n".join(lines[1:]).strip()
-        n_chars = len(re.sub(r"\s", "", md_text))
-        if n_chars < _MIN_CHARS:
-            raise TransientError(f"改编稿仅 {n_chars} 字（规格 1900~2200、下限 1500），疑似截断，稍后自动重试")
+        min_chars_or_raise(md_text, "改编稿")
 
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
         ctx.set_progress(55, "原创度检测（与源文比对）")

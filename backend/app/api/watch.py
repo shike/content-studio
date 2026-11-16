@@ -202,7 +202,6 @@ def delete_account(account_id: int) -> dict:
 
 @router.post("/scan", status_code=202)
 async def scan(user: User = Depends(require_user)) -> dict:
-    from datetime import datetime
     # dedup 用本地日期（与调度中心 watch_scan 同口径，防 0~8 点窗口双跑）
     job = await runner.submit("watch_scan", {"auto": True},
                               dedup_key=f"{user.tenant_id}:scan:all:{datetime.now():%Y%m%d}")
@@ -223,7 +222,6 @@ async def scan_account(account_id: int, user: User = Depends(require_user)) -> d
     with Session(engine) as s:
         if s.get(WatchAccount, account_id) is None:
             raise HTTPException(status_code=404, detail="account not found")
-    from datetime import datetime
     job = await runner.submit("watch_scan", {"account_id": account_id},
                               dedup_key=f"{user.tenant_id}:scan:{account_id}:{datetime.now():%Y%m%d}")
     return {"job_id": job.id}

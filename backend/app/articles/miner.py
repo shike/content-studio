@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
@@ -18,6 +17,7 @@ from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
 from ..models import AppSetting, ContentItem, DailyLedger
 from ..prompts import render
+from .quality import load_cursor, save_cursor
 
 _PER_DAY_DOCS = 18   # 每日评估篇数（游标续读，453 篇编目约 25 天盘完）
 _BATCH_DEADLINE = 45 * 60   # 整批硬 deadline（秒）：未知挂死源转 TransientError 走梯子（2026-11-15 卡死复发）
@@ -50,21 +50,11 @@ def _gen_line(s: Session) -> float:
 
 
 def _load_cursor(s: Session) -> tuple[int, int]:
-    row = s.get(AppSetting, "adapt_cursor")
-    raw = (row.value or "").strip() if row is not None else ""
-    m = re.match(r"^(\d+):(\d+)$", raw)
-    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    return load_cursor(s, "adapt_cursor")
 
 
 def _save_cursor(s: Session, idx: int, pos: int) -> None:
-    row = s.get(AppSetting, "adapt_cursor")
-    val = f"{idx}:{pos}"
-    if row is None:
-        s.add(AppSetting(key="adapt_cursor", value=val))
-    else:
-        row.value = val
-        s.add(row)
-    s.commit()
+    save_cursor(s, "adapt_cursor", idx, pos)
 
 
 def _today() -> str:

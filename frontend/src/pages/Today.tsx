@@ -5,7 +5,7 @@ import { fetchMenuStats } from '../counts'
 interface MetricsResp {
   items: { date: string; fans?: number; play?: number; profile_views?: number }[]
 }
-interface SchedRow { key: string; label: string; last_status: string; last_run_at: string; enabled: boolean }
+interface SchedRow { key: string; label: string; last_status: string; last_run_at: string }
 interface ArtRow { id: number; title: string; status: string }
 
 interface TargetCard { id: number; hook: string; spine: string; created_at: string }

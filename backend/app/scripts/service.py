@@ -1,4 +1,4 @@
-"""脚本工场：3 版生成 / 批判打磨 / 终稿三产物。"""
+"""脚本工场：一版精品直出（2026-11-05 定版）/ 批判打磨 / 定稿三产物。"""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import BenchmarkVideo, FalsifyItem, Script, ScriptTemplate, Topic, TopicCard
+from ..models import BenchmarkVideo, FalsifyItem, Script, ScriptTemplate, TopicCard
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
@@ -75,7 +75,6 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         script = s.get(Script, script_id)
         if script is None:
             raise RuntimeError(f"script {script_id} 不存在")
-        topic = s.get(Topic, script.topic_id) if script.topic_id else None
         card = s.get(TopicCard, int(payload["card_id"])) if payload.get("card_id") else None
         if payload.get("card_id") and card is None:
             raise RuntimeError(f"card {payload['card_id']} 不存在")
@@ -126,14 +125,6 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                 "spine": str(payload.get("spine") or card.spine)[:60],
                 "spice": payload.get("spice") or card.spice or "mid",
             }
-        else:
-            topic_info = {
-                "title": topic.title if topic else "",
-                "angle": topic.angle if topic else "",
-                "audience": topic.audience if topic else "both",
-                "pain_points": (topic.evidence or {}).get("pain_points", []) if topic else [],
-                "hooks": (topic.evidence or {}).get("hooks", []) if topic else [],
-            }
     template_id = int(payload.get("template_id") or 0)
     template = None
     if template_id:
@@ -164,11 +155,9 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     else:
         structure_text = "（未选用结构模板：按上方「口播结构」硬规则组织——判断开场、单判断推进、可转述判断收尾）"
     # 两类号策略（2026-10-28）：账号模式决定内容风格——人设号禁引导，获客号要求获客引导
-    # 2026-11-13 修复：原三元式在 topic 有但 evidence 无 account_type 时 str(None)="None"
-    # 落库脏值，列表按 persona/leadgen 筛选两边都不中
+    # 2026-11-13 修复：account_type 必须显式落值，不能 str(None)="None" 污染筛选
     _raw_at = payload.get("account_type") \
-        or ("leadgen" if ore is not None else "") \
-        or ((topic.evidence or {}).get("account_type") if topic is not None else "")
+        or ("leadgen" if ore is not None else "")
     account_type = str(_raw_at or "") or "persona"
     account_mode = ("。本条面向【获客号】：结尾必须切获客引导——评论区扣指定词/私信关键词/主页入口，引导要具体"
                     if account_type == "leadgen"
@@ -186,7 +175,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         )
         prompt = render("falsify_script", LENGTH=length_spec,
                         MY_STYLE=build_my_style(use_style),
-                        PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
+                        PERSONA=brand_of(1)["persona"],
                         DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline,
                         EVIDENCE=json.dumps(topic_info, ensure_ascii=False))
     else:
@@ -206,7 +195,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         prompt = render("script_generate", LENGTH=length_spec,
                         MY_STYLE=build_my_style(use_style),
                         ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
-                        PERSONA=brand_of(topic.tenant_id if topic else 1)["persona"],
+                        PERSONA=brand_of(1)["persona"],
                         ACCOUNT_MODE=account_mode,
                         DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline)
     # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
@@ -250,9 +239,8 @@ def _cta_rule_of(account_type: str) -> str:
                  "仍禁评论区扣字/私信领取/卖课导流")
 
 
-async def _polish_core(versions: list[dict], use_style: bool = True,
-                       length: str = "short",
-                       cta_rule: str = _cta_rule_of("persona")) -> list[dict]:
+async def _polish_core(versions: list[dict], cta_rule: str,
+                       use_style: bool = True, length: str = "short") -> list[dict]:
     """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。"""
     length_spec = _script_length_spec(length)
     data = await gateway.complete_json(
@@ -349,11 +337,6 @@ async def finalize_script(script_id: int, version_index: int = 0) -> Script:
         script.storyboard = data.get("storyboard") or []
         script.title_candidates = data.get("title_candidates") or []
         script.status = "final"
-        if script.topic_id:
-            topic = s.get(Topic, script.topic_id)
-            if topic is not None:
-                topic.status = "produced"
-                s.add(topic)
         s.add(script)
         s.commit()
         s.refresh(script)

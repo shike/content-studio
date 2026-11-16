@@ -218,8 +218,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
         s.refresh(article)
         article_id = article.id
     job = await runner.submit("article_generate",
-                              {"article_id": article_id, "style": body.style,
-                               "length": "deep"})  # 深度版唯一档位
+                              {"article_id": article_id, "style": body.style})
     return {"article_id": article_id, "job_id": job.id}
 
 
@@ -228,7 +227,6 @@ def list_articles(status: str = "", limit: int = 50, offset: int = 0,
                   source: str = "") -> dict:
     """source='trending'：只看热点切角来源的文章（按选题来源 join 过滤，服务端计数）。"""
     from ..models import Topic as _Topic
-    from sqlmodel import func
 
     with Session(engine) as s:
         q = select(Article).order_by(Article.id.desc())  # type: ignore[arg-type]

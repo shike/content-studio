@@ -88,8 +88,9 @@ def _wait_detail(page, detail: dict, deadline_s: float = 60.0) -> None:
             pass
 
 
-def _probe_video(vid: str) -> dict:
-    """免登录 探测单视频：点赞数 + 作者粉丝数（PC web detail 双字段齐备）。"""
+def _fetch_aweme_detail(vid: str) -> dict:
+    """免登录拉单视频 detail（PC web detail XHR 拦截 + _ROUTER_DATA 兜底）。
+    _probe_video / _extract_hashtags 共用通道（2026-11-16 合并重复实现）。"""
     from playwright.sync_api import sync_playwright
 
     from ..browser import launch, ua
@@ -116,7 +117,12 @@ def _probe_video(vid: str) -> dict:
         finally:
             browser.close()
 
-    ad = detail.get("aweme_detail") or {}
+    return detail.get("aweme_detail") or {}
+
+
+def _probe_video(vid: str) -> dict:
+    """免登录 探测单视频：点赞数 + 作者粉丝数（PC web detail 双字段齐备）。"""
+    ad = _fetch_aweme_detail(vid)
     a = ad.get("author") or {}
     st = ad.get("statistics") or {}
     ct = int(ad.get("create_time") or 0)
@@ -149,33 +155,7 @@ def _extract_hashtags(vid: str) -> list[dict]:
     """免登录：从视频 detail 的 text_extra 提取话题（ch_id + 名称）。
 
     这是"添加监控话题免输 ch_id"的正解——贴一条带该话题的视频即可。"""
-    from playwright.sync_api import sync_playwright
-
-    from ..browser import launch, ua
-
-    detail: dict = {}
-    with sync_playwright() as p:
-        browser = launch(p)  # 统一出口（含可选代理）
-        try:
-            ctx = browser.new_context(user_agent=ua(), locale="zh-CN",
-                                      viewport={"width": 1280, "height": 900})
-            page = ctx.new_page()
-
-            def on_response(resp):
-                try:
-                    if "aweme/v1/web/aweme/detail" in resp.url and not detail:
-                        detail.update(resp.json())
-                except Exception:  # noqa: BLE001
-                    pass
-
-            page.on("response", on_response)
-            page.goto(f"https://www.douyin.com/video/{vid}",
-                      timeout=45000, wait_until="domcontentloaded")
-            _wait_detail(page, detail)
-        finally:
-            browser.close()
-
-    ad = detail.get("aweme_detail") or {}
+    ad = _fetch_aweme_detail(vid)
     out: list[dict] = []
     seen: set[str] = set()
     for t in ad.get("text_extra") or []:
@@ -282,7 +262,6 @@ async def check_topic(row: RadarTopic) -> dict:
     vids = await asyncio.to_thread(fetch_topic_videos, row.ch_id)
     seen = set(row.seen_ids or [])
     fresh_ids = {v["id"] for v in vids if v["id"] not in seen}
-    spiked = False
     name = row.name
     recent = [dict(v, new=v["id"] in fresh_ids) for v in vids[:10]]
     # 已命中 id 必须在首个会话 commit 前取（expire_on_commit 会把 merged 实例过期，
@@ -357,6 +336,6 @@ async def check_topic(row: RadarTopic) -> dict:
             hit_note += f"（自动拆解失败：{type(e).__name__}）"
     if spiked:
         titles = "；".join(v["desc"] for v in recent[:2])
-        await asyncio.to_thread(_notify, f"#{name} 新增 {row_new if (row_new := len(fresh_ids)) else 0} 条视频：{titles[:80]}")
+        await asyncio.to_thread(_notify, f"#{name} 新增 {len(fresh_ids)} 条视频：{titles[:80]}")
     return {"name": name, "new": len(fresh_ids), "spiked": spiked}
 

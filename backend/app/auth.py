@@ -143,7 +143,6 @@ class CurrentUser:
     username: str = ""
     display_name: str = ""
     status: str = "active"
-    must_change_password: bool = False
 
 
 
@@ -161,7 +160,7 @@ def _resolve_user(token: str) -> Optional[CurrentUser]:
             return None
         return CurrentUser(id=user.id, tenant_id=user.tenant_id, role=user.role,
                            username=user.username, display_name=user.display_name,
-                           status=user.status, must_change_password=user.must_change_password)
+                           status=user.status)
 
 
 def get_current_user(request: Request) -> Optional[CurrentUser]:
@@ -180,14 +179,10 @@ async def require_user(request: Request) -> CurrentUser:
 
 
 async def require_ready_user(request: Request) -> CurrentUser:
-    """业务路由依赖：在 require_user 之上强制完成首登改密。
-
-    PRD R11.2「一次性密码首登强制改密」的服务端口径——否则直接调 API 可绕过前端拦截，
-    一次性密码被转发后攻击者可长期使用而受害者的改密动作永不被触发。"""
-    user = await require_user(request)
-    if user.must_change_password:
-        raise HTTPException(status_code=403, detail="首次登录需先修改密码后再使用")
-    return user
+    """业务路由依赖：现与 require_user 等价（R11.2 首登强制改密流程已随
+    must_change_password 全链退役删除——2026-11-16：bootstrap 两条路径从不置位，
+    403 分支实践不可达）。保留名义依赖占位，路由挂载零改动。"""
+    return await require_user(request)
 
 
 async def require_admin(request: Request) -> CurrentUser:

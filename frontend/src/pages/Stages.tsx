@@ -81,7 +81,7 @@ export function PersonaStage(props: { tab: string; onTab: (t: string) => void; o
       {({ id }) => (
         <>
           {id === 'topics' && <HotTargets onNavigate={props.onNavigate} />}
-          {id === 'scripts' && <Scripts onNavigate={props.onNavigate} accountType="persona" />}
+          {id === 'scripts' && <Scripts accountType="persona" />}
           {id === 'own' && <AccountTrends onNavigate={props.onNavigate} />}
         </>
       )}
@@ -99,7 +99,7 @@ export function LeadgenStage(props: { tab: string; onTab: (t: string) => void; o
       {({ id }) => (
         <>
           {id === 'topics' && <LeadgenOre onNavigate={props.onNavigate} />}
-          {id === 'scripts' && <Scripts onNavigate={props.onNavigate} accountType="leadgen" />}
+          {id === 'scripts' && <Scripts accountType="leadgen" />}
         </>
       )}
     </StageShell>
@@ -138,7 +138,7 @@ export function MonitorStage(props: { tab: string; onTab: (t: string) => void; o
         <>
           {id === 'watch' && <Watch onNavigate={props.onNavigate} accountType={line} />}
           {id === 'radar' && <TopicInsights />}
-          {id === 'bench' && <Benchmarks onNavigate={props.onNavigate} accountType={line} />}
+          {id === 'bench' && <Benchmarks accountType={line} />}
           {id === 'cand' && <DiscoveredAccounts accountType={line} />}
         </>
       )}

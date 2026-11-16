@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 
 from sqlmodel import Session, select
 
@@ -21,8 +20,11 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, Article
+from ..models import Article
 from ..prompts import load, render
+from .quality import load_cursor, min_chars_or_raise, save_cursor
+from .quality import quality_gate as _quality_gate
+from .quality import strip_fence as _strip_fence
 from .service import (
     ACTIVE_ARTICLE_STATUSES,
     _article_generate_fail,
@@ -32,7 +34,6 @@ from .service import (
     _finalize_article,
     _gen_titles,
     _kb_style_violations,
-    _quality_gate,
     length_specs,
 )
 
@@ -43,21 +44,11 @@ _GATE_LINE = 7.0     # 可发线：重写一次仍低于此分 = 不进待发
 
 
 def _load_cursor(s: Session) -> tuple[int, int]:
-    row = s.get(AppSetting, "deepread_cursor")
-    raw = (row.value or "").strip() if row is not None else ""
-    m = re.match(r"^(\d+):(\d+)$", raw)
-    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    return load_cursor(s, "deepread_cursor")
 
 
 def _save_cursor(s: Session, idx: int, pos: int) -> None:
-    row = s.get(AppSetting, "deepread_cursor")
-    val = f"{idx}:{pos}"
-    if row is None:
-        s.add(AppSetting(key="deepread_cursor", value=val))
-    else:
-        row.value = val
-        s.add(row)
-    s.commit()
+    save_cursor(s, "deepread_cursor", idx, pos)
 
 
 async def _digest_doc(ctx: JobContext, title: str, text: str,
@@ -219,18 +210,13 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
                                             BRIEF=json.dumps(brief, ensure_ascii=False),
                                             MATERIAL=material)}],
         max_tokens=8192, thinking="disabled")
-    body = (body or "").strip()
-    if body.startswith("```"):
-        body = re.sub(r"^```[a-z]*\n?", "", body)
-        body = re.sub(r"\n?```$", "", body).strip()
+    body = _strip_fence(body)
     lines = body.split("\n")
     if not lines or not lines[0].lstrip().startswith("# "):
         raise TransientError("成文输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
     title = lines[0].lstrip()[2:].strip() or title_from_call or judgment[:40]
     md_text = "\n".join(lines[1:]).strip()
-    n_chars = len(re.sub(r"\s", "", md_text))
-    if n_chars < 1500:
-        raise TransientError(f"成文仅 {n_chars} 字（规格 1900~2200、下限 1500），疑似截断，稍后自动重试")
+    min_chars_or_raise(md_text, "成文")
 
     # ── 禁令机检 → 定向重写（签名守卫防数字被改）──
     anchor_texts = [x for x in anchors_text.split("## 范本")[1:] if len(x) > 200]
@@ -256,7 +242,7 @@ async def article_deepread(ctx: JobContext, payload: dict) -> dict:
 
     # ── 带牙质量闸：重写一次仍 <7 分 = 不进待发 ──
     ctx.set_progress(94, "质量自评")
-    score = await _quality_gate(ctx, md_text)
+    score, md_text = await _quality_gate(md_text)
     if score is not None and score < _GATE_LINE:
         with Session(engine) as s:
             art = s.get(Article, article_id)

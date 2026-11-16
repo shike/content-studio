@@ -10,7 +10,7 @@ from difflib import SequenceMatcher
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import SelfVideo, TopicCard
+from ..models import TopicCard
 from ..settings import settings
 from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _COVER_RANK, _coverage_of,
                     _max_chars, _norm, _PREDICT_KW, _pron_len)

@@ -1,6 +1,4 @@
 """GET /api/health：服务、数据库、LLM 与本地浏览器依赖健康。"""
-import traceback
-
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, text
 

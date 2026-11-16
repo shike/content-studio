@@ -237,10 +237,6 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
               + "\n\n" + json.dumps(material, ensure_ascii=False)}],
             max_tokens=1024, thinking="disabled")
         picked = str(pick.get("style") or "").strip()
-        curated = ("deep_dive", "practice", "inquiry", "anatomy", "comparison")
-        if picked not in curated and picked in ARTICLE_STYLES:
-            print(f"[article] 透镜 {picked} 不在精选五，回落 deep_dive")
-            picked = "deep_dive"
         if picked in ARTICLE_STYLES:
             style = picked
             ctx.set_progress(12, f"透镜已挑：{picked}（{(pick.get('reason') or '')[:40]}）")
@@ -379,7 +375,7 @@ ACTIVE_ARTICLE_STATUSES = ["pending", "generating", "draft", "edited", "rendered
 
 
 def find_pending_article(title: str) -> Article | None:
-    """同题查重（报题线与 API 共用）：同标题且仍处于在途/就绪状态的已有草稿；
+    """同题查重（唯一调用方=article_hotspots 报题直出链）：同标题且仍处于在途/就绪状态的已有草稿；
     命中返回该行（调用方可取 id 报 409），未命中返回 None。"""
     with Session(engine) as s:
         return s.exec(select(Article).where(
@@ -459,17 +455,15 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
     chained = 0
     if created:
         from ..jobs.runner import runner
-        from ..db import engine as _engine
-        from sqlmodel import Session as _S
-        with _S(_engine) as s2:
+        with Session(engine) as s2:
             rows = s2.exec(select(Article).where(
                 Article.title.in_(created),  # type: ignore[attr-defined]
                 Article.status == "pending")).all()  # type: ignore[attr-defined]
             ids = [r.id for r in rows]
         for aid in ids:
             await runner.submit("article_generate",
-                                {"article_id": aid, "style": "auto", "length": "deep"})
-            with _S(_engine) as s3:
+                                {"article_id": aid, "style": "auto"})
+            with Session(engine) as s3:
                 art = s3.get(Article, aid)
                 if art is not None:
                     art.status = "generating"

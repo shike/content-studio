@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
@@ -23,12 +22,7 @@ from ..prompts import render
 
 FALSIFY_STATUS = ("pending", "testing", "tested", "scripted", "dismissed")
 _HUNT_MAX = 3
-
-_NORM_RE = re.compile(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]")
-
-
-def _norm(t: str) -> str:
-    return _NORM_RE.sub("", str(t)).lower()
+from ..cards.norms import _norm  # 归一化单点（2026-11-16 合并，原逐字符同款双份）
 
 
 async def hunt_candidates(ctx: JobContext, tenant_id: int) -> dict:

@@ -421,7 +421,6 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         from ..tenant_brand import brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
-        account_type = b.account_type or "persona"
 
     if not media_path:
         if source != "douyin" or not url:
@@ -540,7 +539,6 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             b.title = analysis["summary"][:80]
         s.add(b)
         s.commit()  # 选题候选沉淀已退役（2026-11-14 分型路由定版：人设=靶子卡线、获客=获客矿线）
-        topic_id = None
 
     # 媒体即用即弃（磁盘防线）：拆解成功后删除视频文件——转写/拆解已入库，
     # 重拆解会重新下载；失败不删（重试还要用）
@@ -557,12 +555,5 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
         print(f"[benchmark] 拆解后媒体清理失败（reaper 会兜底）: {type(e).__name__}: {str(e)[:100]}")
 
     ctx.set_progress(100, "完成")
-    return {"benchmark_id": benchmark_id, "topic_id": topic_id,
-            "transcript_chars": len(transcript)}
+    return {"benchmark_id": benchmark_id, "transcript_chars": len(transcript)}
 
-
-def _safe_score(value) -> float | None:
-    try:
-        return max(0.0, min(10.0, float(value)))
-    except (TypeError, ValueError):
-        return None

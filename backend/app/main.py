@@ -44,8 +44,8 @@ _FALLBACK_HTML = """<!doctype html>
 
 def _bootstrap_admin() -> None:
     """首次启动引导：无任何用户时创建工作室档案 + 单管理员 admin。
-    初始密码随机生成并打印到日志一次，首登强制改密；
-    验收隔离实例可用 CS_BOOTSTRAP_PASSWORD 指定确定性口令。"""
+    初始密码随机生成并打印到日志一次；
+    隔离冒烟实例可用 CS_BOOTSTRAP_PASSWORD 指定确定性口令。"""
     from .auth import hash_password
     from .models import Tenant, User
 
@@ -59,7 +59,7 @@ def _bootstrap_admin() -> None:
         password = os.environ.get("CS_BOOTSTRAP_PASSWORD") or secrets.token_urlsafe(8)
         u = User(tenant_id=tenant.id, username="admin",
                  password_hash=hash_password(password), role="platform_admin",
-                 display_name="示例工作室", status="active", must_change_password=False)
+                 display_name="示例工作室", status="active")
         s.add(u)
         s.commit()
         if os.environ.get("CS_BOOTSTRAP_PASSWORD"):

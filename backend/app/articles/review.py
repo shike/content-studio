@@ -5,18 +5,10 @@
 去AI味一条由改编器内的违禁词机检承担（正则兜底）。审失败一律不阻塞成文（宁漏勿误）。"""
 from __future__ import annotations
 
-import re
 
 from ..llm import gateway
 from ..prompts import render
-
-
-def _strip_fence(body: str) -> str:
-    body = (body or "").strip()
-    if body.startswith("```"):
-        body = re.sub(r"^```[a-z]*\n?", "", body)
-        body = re.sub(r"\n?```$", "", body).strip()
-    return body
+from .quality import strip_fence as _strip_fence
 
 
 async def review_facts(md: str, source: str) -> list[str]:

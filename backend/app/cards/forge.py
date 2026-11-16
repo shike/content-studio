@@ -56,26 +56,26 @@ def _fewshot_lines(limit: int = 14) -> str:
                 lines.append(f"- 「{b.title[:44]}」（拆解库 {b.author or '?'}）")
             if len(lines) >= limit:
                 break
+    lines += [f"- 「{(v.title or '')[:44]}」（自己的爆款）" for v in _self_titles(6) if v.title]
+    return "\n".join(lines[:limit + 6]) or "（暂无已验证样本）"
+
+
+def _self_titles(n: int) -> list[SelfVideo]:
+    """自己已发布视频按播放排序取前 n（三份同查询合并点，2026-11-16）。"""
     with Session(engine) as s:
         vids = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
             SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]
-        own = sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0),
-                     reverse=True)[:6]
-    lines += [f"- 「{(v.title or '')[:44]}」（自己的爆款）" for v in own if v.title]
-    return "\n".join(lines[:limit + 6]) or "（暂无已验证样本）"
+    return sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0), reverse=True)[:n]
 
 
 def _spine_shots() -> str:
     """用户自己发过的视频标题（三秒原则的活样本）——句式标尺 few-shot。"""
-    with Session(engine) as s:
-        vids = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
-            SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]
-        ranked = sorted(vids, key=lambda v: int((v.stats or {}).get("play") or 0), reverse=True)
-    shots = [f"- 「{(v.title or '').strip()[:30]}」" for v in ranked[:12] if v.title]
+    ranked = _self_titles(12)
+    shots = [f"- 「{(v.title or '').strip()[:30]}」" for v in ranked if v.title]
     return chr(10).join(shots) or "（暂无已发标题）"
 
 
-def _spine_static_fail(spine: str, source: str) -> Optional[str]:
+def _spine_static_fail(spine: str) -> Optional[str]:
     """主线静态死因（不含需查库的撞车/批内闸）——重锻循环的输入。"""
     spine = spine.strip()
     n = _pron_len(spine)
@@ -93,7 +93,6 @@ def _spine_static_fail(spine: str, source: str) -> Optional[str]:
         return "预言腔"
     # 罪名与立场的品味判断归总法官（judge_cards：无罪名无立场的正确废话 ≤3 分）——
     # 程序层不再做词表追杀（实测证明词表永远追不上锋利新表述，误杀率 100%）
-    pass
     return None
 
 
@@ -158,7 +157,7 @@ async def _forge_with_retry(pools: list[dict], persona: str, audience_note: str,
         f = forged.get(i)
         if not f:
             continue
-        fail = _spine_static_fail(str(f.get("spine") or ""), p["source"])
+        fail = _spine_static_fail(str(f.get("spine") or ""))
         if fail:
             redo_hint[i] = {"spine": str(f.get("spine") or "").strip(), "last_fail": fail}
     if redo_hint:

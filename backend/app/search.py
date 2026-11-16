@@ -24,10 +24,6 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 _CACHE_TTL = 24 * 3600
 
 
-def search_enabled() -> bool:
-    return getattr(settings, "search_enabled", True)
-
-
 def _cache_path() -> Path:
     p = settings.data_dir / "cache" / "search.json"
     p.parent.mkdir(parents=True, exist_ok=True)

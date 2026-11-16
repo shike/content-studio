@@ -200,8 +200,9 @@ async def recover_interrupted_jobs() -> None:
         job_type = next((jt for jt in requeued_types if jt[0] == job_id), None)
         # light 类型走并发池（与 _reenqueue 同分道；此前一律塞 heavy 串行队列，
         # 扫描类重启恢复会堵住其他租户的 LLM 任务且绕过同类合并）
-        if job_type and job_type[1] == "light":
-            asyncio.create_task(runner._run_light(job_id, job_type[2]))
+        # requeued_types 三元组 = (job_id, 任务类型, lane)——lane 取 [2]，类型取 [1]
+        if job_type and job_type[2] == "light":
+            asyncio.create_task(runner._run_light(job_id, job_type[1]))
         else:
             runner._put(tenant_id, job_id)
 
@@ -271,7 +272,6 @@ class JobRunner:
 """
         if not self._started:
             raise RuntimeError("JobRunner 未启动")
-        from ..auth import ACTOR
         if actor is None:
             actor = ACTOR.get()
         tenant_id, user_id, _role = actor
@@ -699,14 +699,11 @@ def _upsert_failure_pattern(s: Session, fp: str, fc: str, job_type: str,
     if row is None:
         s.add(FailurePattern(fp=fp, fail_class=fc,
                              label=fingerprint_label(fp), count=1,
-                             sample_error=error[:2000], sample_job_id=job_id,
-                             last_type=job_type))
+                             sample_error=error[:2000]))
     else:
         row.count += 1
         row.fail_class = fc
-        row.last_type = job_type
         row.sample_error = error[:2000]
-        row.sample_job_id = job_id
         if row.status == "fixed":
             row.status = "open"  # 修过的坑又出现 → 自动回到待处置
         s.add(row)

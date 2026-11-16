@@ -31,21 +31,13 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '生成失败',
 }
 
-interface Template {
-  id: number
-  name: string
-  structure: { step: string; requirement: string }[]
-  usage_count?: number
-}
-
-export default function Scripts({ onNavigate, accountType }: { onNavigate?: (k: string) => void; accountType?: 'persona' | 'leadgen' }) {
+export default function Scripts({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [scripts, setScripts] = useState<Script[]>([])
   const [allScripts, setAllScripts] = useState<Script[]>([])
   const [oreTitles, setOreTitles] = useState<Record<number, string>>({}) // 获客矿建稿脚本的标题映射
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
-  const [length, setLength] = useState<'short' | 'long'>('short')
   const [view, setView] = useState<'queue' | 'table'>('table')
   const [booted, setBooted] = useState(false)
   const [selVersion, setSelVersion] = useState(0)

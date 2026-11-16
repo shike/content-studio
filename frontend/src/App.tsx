@@ -14,7 +14,6 @@ import SettingsPage from './pages/Settings'
 import { PersonaStage, LeadgenStage, ArticleStage, MonitorStage } from './pages/Stages'
 import { fetchMenuStats, menuBadges } from './counts'
 import Login from './pages/Login'
-import ForceChangePassword from './pages/ForceChangePassword'
 import Mobile from './Mobile'
 
 /**
@@ -33,23 +32,16 @@ interface NavTarget {
 /** 旧键 → 新页+页内 tab（全量兼容：产线树 16 叶 + 更早 4 键）。 */
 const NAVMAP: Record<string, NavTarget> = {
   p_topics: { key: 'persona', tab: 'topics' },
-  l_topics: { key: 'leadgen', tab: 'topics' },
   p_content: { key: 'persona', tab: 'scripts' },
   l_scripts: { key: 'leadgen', tab: 'scripts' },
-  p_own: { key: 'persona', tab: 'own' },
   p_bench: { key: 'monitor', tab: 'bench:persona' },
   l_bench: { key: 'monitor', tab: 'bench:leadgen' },
-  p_cand: { key: 'monitor', tab: 'cand:persona' },
   l_cand: { key: 'monitor', tab: 'cand:leadgen' },
   p_watch: { key: 'monitor', tab: 'watch:persona' },
-  l_watch: { key: 'monitor', tab: 'watch:leadgen' },
-  c_items: { key: 'article', tab: 'items' },
   article: { key: 'article', tab: 'workshop' },
-  a_style: { key: 'article', tab: 'style' },
   benchmarks: { key: 'monitor', tab: 'bench:persona' },
   scripts: { key: 'persona', tab: 'scripts' },
   articles: { key: 'article', tab: 'workshop' },
-  topics: { key: 'persona', tab: 'topics' },
 }
 
 const BADGED = new Set<string>(['today', 'persona', 'leadgen', 'article', 'monitor', 'tasks'])
@@ -75,8 +67,7 @@ export default function App() {
         if (d.user_id) {
           setAuthed(true)
           setMe({
-            role: d.role, user_id: d.user_id, display_name: d.display_name,
-            must_change_password: d.must_change_password,
+            role: d.role, display_name: d.display_name,
           })
         } else setAuthed(false)
       })
@@ -157,9 +148,6 @@ export default function App() {
   }
 
   // 首登强制改密（R11.1）：一次性密码登录后全屏拦截，改完才放行
-  if (authed === true && me?.must_change_password) {
-    return <ForceChangePassword username={me.display_name} onDone={() => probe()} />
-  }
 
   // 手机轻量页（/?view=m，2026-11-05 ⑤）：只做拍板动作，不渲染桌面侧栏
   if (new URLSearchParams(window.location.search).get('view') === 'm') {
@@ -233,7 +221,5 @@ export default function App() {
 /** 会话口径：/auth/me 返回的用户上下文（单管理员版） */
 interface MeInfo {
   role: string
-  user_id: number
   display_name: string
-  must_change_password?: boolean
 }

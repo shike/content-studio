@@ -14,12 +14,11 @@ from urllib.parse import quote
 
 from sqlmodel import Session, select
 
-from ..browser import launch, ua
+from ..browser import launch
 from ..db import engine
 from ..jobs.runner import register_executor
 from ..llm import gateway
-from ..models import AppSetting, WatchCandidate
-from ..settings import settings
+from ..models import WatchCandidate
 
 
 def _harvest_budget(key: str, default: int) -> int:

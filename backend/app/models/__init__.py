@@ -81,8 +81,6 @@ class FailurePattern(TimestampMixin, table=True):
     status: str = Field(default="open", index=True)  # open 待处置 | fixed 已修复 | ignored 已忽略
     count: int = 0
     sample_error: str = ""  # 最近一次完整错误（诊断线索）
-    sample_job_id: int = 0
-    last_type: str = ""  # 最近一次出现的任务类型
 
 
 class Topic(TenantScoped, TimestampMixin, table=True):
@@ -191,7 +189,6 @@ class User(TimestampMixin, table=True):
     role: str = Field(default="member", index=True)  # platform_admin（单管理员定版；tenant_admin/member 为多租户旧值，历史行兼容）
     display_name: str = ""
     status: str = Field(default="active", index=True)  # active | disabled
-    must_change_password: bool = Field(default=False)
 
 
 class UserSession(TimestampMixin, table=True):
@@ -225,7 +222,6 @@ class Script(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "scripts"
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
-    topic_id: Optional[int] = Field(default=None, foreign_key="topics.id", index=True)
     card_id: Optional[int] = Field(default=None, foreign_key="topic_cards.id", index=True)  # 靶子卡备稿（选题工场 R1.4）
     falsify_item_id: Optional[int] = Field(default=None, foreign_key="falsify_items.id", index=True)  # 实测稿备稿（R1.4③）
     ore_id: Optional[int] = Field(default=None, foreign_key="benchmark_videos.id", index=True)  # 获客矿建稿锚（分型路由消费面，2026-11-14）

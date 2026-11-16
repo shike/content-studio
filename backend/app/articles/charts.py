@@ -137,8 +137,8 @@ def render_chart(spec: dict[str, Any], primary: str = _BRAND) -> str:
 
 
 def render_cover(title: str, account: str = "", primary: str = _BRAND, slogan: str = "") -> str:
-    """primary = 租户主色 hex（渐变底部色）。"""
-    """公众号头图（1080x460）：深靛蓝渐变底 + 白色标题大字自动断行 + 账号名。"""
+    """公众号头图（1080x460）：primary=租户主色 hex（渐变底部色），
+    深靛蓝渐变底 + 白色标题大字自动断行（≤3 行）+ 账号名。"""
     _setup_font()
     from PIL import Image, ImageDraw, ImageFont
 
@@ -181,8 +181,6 @@ def render_cover(title: str, account: str = "", primary: str = _BRAND, slogan: s
             cur += tk
     if cur.strip():
         lines.append(cur.strip())
-    while len(lines) > 3:
-        lines = lines[:3]
 
     y = 150 if len(lines) >= 2 else 170
     d.rectangle([64, y - 14, 72, y + len(lines) * 78 - 30], fill=(255, 255, 255))

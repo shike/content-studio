@@ -16,9 +16,7 @@ interface CardPool {
   heat_level?: string
   role?: string
   coverage?: string
-  secondary?: boolean
   douyin_evidence?: { kind?: string; ref?: string; comments?: number; diggs?: number; spike_speed?: number; rank?: number } | null
-  external_evidence?: { src?: string; title?: string } | null
   peer_covered?: boolean
 }
 
@@ -40,7 +38,6 @@ interface FalsifyItem {
   result_note: string
   status: string // pending | testing | tested | scripted | dismissed
   auto_source: boolean
-  script_id?: number | null
   created_at: string
 }
 
@@ -53,7 +50,7 @@ const FSTATUS: Record<string, { label: string; cls: string }> = {
 
 interface TopicCard {
   id: number
-  batch_date: string
+  script_id?: number | null
   source: string
   pool: CardPool
   spine: string
@@ -63,8 +60,6 @@ interface TopicCard {
   judge: CardJudge
   gates: CardGate[]
   status: string // draft | approved | discarded | jail
-  script_id?: number | null
-  superseded_by?: number | null
   created_at: string
 }
 
@@ -110,7 +105,6 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const [form, setForm] = useState({ hook: '', spine: '', angle: ANGLES[0] })
   const [seedOpen, setSeedOpen] = useState(false)
   const [seedText, setSeedText] = useState('')
-  const [seedUrl, setSeedUrl] = useState('')
   const [fAddOpen, setFAddOpen] = useState(false)
   const [fNew, setFNew] = useState({ claim: '', target: '', evidence_note: '' })
   const [msg, setMsg] = useState('')
@@ -163,11 +157,10 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const feed = () =>
     guard(async () => {
       const d = await api<{ job_id: number }>('/cards/seed', {
-        method: 'POST', body: JSON.stringify({ text: seedText.trim(), url: seedUrl.trim() }),
+        method: 'POST', body: JSON.stringify({ text: seedText.trim() }),
       })
       setSeedOpen(false)
       setSeedText('')
-      setSeedUrl('')
       setMsg('投喂处理中（锻主线→铸钩子→法官，约 2~4 分钟）…')
       pollJob(d.job_id, 'card_seed', (st, err) => {
         setFactoryBusy(false)
@@ -236,7 +229,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const composeF = (f: FalsifyItem) =>
     guard(async () => {
       const d = await api<{ job_id: number; script_id: number }>(`/falsify/${f.id}/compose`, { method: 'POST' })
-      setExpanded(null)
+      setFExpanded(null)
       setMsg(`实测稿已受理（脚本 #${d.script_id}，任务 #${d.job_id}）——进内容看板待定稿`)
       await load()
     })
@@ -294,9 +287,6 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
             placeholder="一句话说清这事+你的判断（例：某公司发布 XX，砸的是谁的饭碗）"
             onChange={(e) => setSeedText(e.target.value)} />
           <div className="mt-2 flex items-center gap-2">
-            <input className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-1.5 text-[12.5px] outline-none focus:border-violet-400"
-              value={seedUrl} placeholder="相关链接（可选）"
-              onChange={(e) => setSeedUrl(e.target.value)} />
             <button className="btn-accent btn-sm shrink-0" disabled={!seedText.trim() || !!busy} onClick={feed}>投进池子</button>
             <button className="btn-ghost btn-sm shrink-0" onClick={() => setSeedOpen(false)}>取消</button>
           </div>

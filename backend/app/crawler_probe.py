@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -115,7 +116,7 @@ def _pick_probe_urls(count: int = SAMPLES) -> tuple[list[str], str]:
     if not pool:
         return [FALLBACK_URL] * count, "兜底探测页"
     picks = (pool * count)[:count]
-    return picks, f"拆解库视频（最近 20 条轮换）"
+    return picks, "拆解库视频（最近 20 条轮换）"
 
 
 async def _proxy_alive(proxy: str) -> bool:
@@ -156,7 +157,7 @@ async def probe() -> dict:
         urls, src = _pick_probe_urls(SAMPLES)
         results = []
         for u in urls:  # 顺序轻探测（每条 ~10s，与真人浏览密度相当）
-            r = await asyncio.to_thread(_probe_browser, u, src, bool(proxy))
+            r = await asyncio.to_thread(_probe_browser, u, src)
             r["url"] = u
             results.append(r)
         ok_n = sum(1 for r in results if r["status"] == "ok")
@@ -203,7 +204,7 @@ async def probe() -> dict:
     return result
 
 
-def _probe_browser(url: str, src: str, via_proxy: bool) -> dict:
+def _probe_browser(url: str, src: str) -> dict:
     from playwright.sync_api import sync_playwright
 
     from .browser import launch, ua
@@ -228,8 +229,8 @@ def _probe_browser(url: str, src: str, via_proxy: bool) -> dict:
 
                 page.on("response", on_response)
                 page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                _t = __import__("time").time()
-                while not detail and __import__("time").time() - _t < PROBE_DEADLINE_SEC:
+                _t = time.time()
+                while not detail and time.time() - _t < PROBE_DEADLINE_SEC:
                     page.wait_for_timeout(2000)
                 if not detail:
                     m = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.+?\})\s*</script>",

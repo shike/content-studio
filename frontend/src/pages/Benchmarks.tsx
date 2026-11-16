@@ -30,10 +30,10 @@ interface Benchmark {
   account_type?: string
 }
 
-const analyzed = (b: Benchmark) =>
+export const analyzed = (b: Benchmark) =>
   Boolean(b.analysis && (b.analysis.hook || b.analysis.structure || b.analysis.score != null))
 
-export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (k: string) => void; accountType?: 'persona' | 'leadgen' }) {
+export default function Benchmarks({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [items, setItems] = useState<Benchmark[]>([])
   const [filter, setFilter] = useState('')
   const [author, setAuthor] = useState('')

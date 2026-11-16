@@ -98,7 +98,7 @@ content-studio/
 `.env` 不进版本库；`health` 接口回报各依赖配置状态（不回传密钥）。
 
 **数据库运行时配置（`app_settings`，受管键登记于 `settings_store.MANAGED`，启动载入即生效）**：
-`llm_model / zhipu_api_key / zhipu_base_url / search_provider / search_enabled / zhipu_search_base_url /
+`llm_model / zhipu_api_key / zhipu_base_url / search_provider / zhipu_search_base_url /
 asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch_scan_hour /
 creator_data_enabled / ima_kb_enabled / dissect_comment_min / dissect_digg_min /
 pool_peer_min_comments / hook_speed_cps / hook_ban_prefixes / coverage_min / judge_pass_line /
@@ -137,7 +137,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `content_items` | media_id(索引防重), kb_id/folder, title, source_author, quality_score, why_good, adapt_angle, best_quotes(JSON), category, priority, status(pending/running/done/published/dismissed/low), article_id | 内容清单=知识库挖出的高质量源文（挖掘器≥线入清单，改编器取项成文；低分落 low 防回卷重评）（R5.6b 源文改编流） |
 | `daily_ledger` | day(UTC), phase(mine/adapt), produced, reason, ok | 产线当日账（防「成功但空转」；anomaly=ok 但无产出无原因，按故障处理） |
 | `tenants` | name, brand(JSON 九字段) | 工作室档案（单用户版恒 1 行；R11.2） |
-| `users` | tenant_id(FK), username(全局唯一), password_hash(scrypt), role(platform_admin/tenant_admin/member), display_name, status, must_change_password | 租户成员 |
+| `users` | tenant_id(FK), username(全局唯一), password_hash(scrypt), role(platform_admin/tenant_admin/member), display_name, status | 租户成员 |
 | `user_sessions` | token_hash(唯一), user_id, tenant_id, expires_at | 服务端会话（Cookie 只带明文 token） |
 | `radar_topics` | tenant_id, ch_id(全局唯一), enabled, notify, seen_ids/recent/hits(JSON), last_checked_at | 话题雷达监控项 |
 | `failure_patterns` | fp(唯一), kind, fail_class, label, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
@@ -515,8 +515,8 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
   ⑥**SSRF 闸门**：服务端会主动请求的用户 URL（贴链接拆解/链接识别/话题提取/监控账号写入）
     一律经 `is_douyin_url()` 校验——仅放行 `*.douyin.com` / `*.iesdouyin.com` 的 http(s)
     （内网地址、云元数据端点 169.254.169.254、伪装域、危险协议全部拒绝），API 层 400 + 下载器/扫描器内部兜底；
-  ⑦**首登强制改密（服务端强制）**：业务与管理路由用 `require_ready_user` 依赖，
-    `must_change_password=1` 的会话访问业务接口一律 403（仅 `/auth/*` 放行以完成改密）；
+  ⑦~~首登强制改密~~（2026-11-16 退役：bootstrap 从不置位、403 分支不可达，全链删除；
+    `require_ready_user` 保留为路由依赖名义占位）；
   ⑧**任务错误脱敏**：任务详情对租户可见，落库前把服务器绝对路径（仓库根/主目录）替换为 `<server>`；
   ⑨**应用级安全响应头**：全局 CSP（`default-src 'self'`，脚本仅同源；wechat.html 端点自设更严 CSP 不被覆盖）
     + `X-Content-Type-Options: nosniff` + `Referrer-Policy: same-origin`；
@@ -616,7 +616,7 @@ DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 \
   （调度、自动重试、ping）。
 - **会话**：随机 token 走 HttpOnly Cookie，库存 sha256(token) + 过期时间；登出即服务端失效；
   改密即全端重登（作废全部旧会话并补发新会话）。
-- **一次性密码**：建号/重置生成随机口令，仅当次响应返回，明文不落库；首登强制改密。
+- **一次性密码**：建号/重置生成随机口令，仅当次响应返回，明文不落库。
 - **抖音抓取出口与指纹**：抓取 UA 由 `browser.ua()` 按运行平台生成
   （UA 与 navigator.platform 不一致会被抖音挑战）；浏览器用完整版 Chromium
   （`channel="chromium"`，headless-shell 指纹更易被挑战）；匿名采集默认机房直连

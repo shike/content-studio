@@ -6,7 +6,7 @@ from sqlmodel import Session, func, select
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Article, Script, ScriptTemplate, Topic, User
+from ..models import Article, Script, ScriptTemplate, User
 from ..scripts import service as script_service
 from ._listing import paged_list_response
 
@@ -14,9 +14,8 @@ router = APIRouter(prefix="/api/scripts")
 
 
 class GenerateIn(BaseModel):
-    topic_id: int = 0
-    card_id: int = 0  # 靶子卡备稿（选题工场 R1.4；与 topic_id 二选一）
-    ore_id: int = 0  # 获客矿建稿（分型路由消费面 2026-11-14；与 topic_id/card_id 三选一）
+    card_id: int = 0  # 靶子卡备稿（选题工场 R1.4）
+    ore_id: int = 0  # 获客矿建稿（分型路由消费面 2026-11-14；与 card_id 二选一）
     hook: str = ""    # 卡备稿可改写钩子（空=用卡上钩子）
     spine: str = ""   # 卡备稿可改写主线（空=用卡上主线）
     use_style: bool = True  # 贴合我的风格（R9.4）
@@ -83,22 +82,8 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
                                    "angles": angles, "template_id": body.template_id},
                                   dedup_key=f"ore:{body.ore_id}", actor=(user.tenant_id, user.id, user.role))
         return {"script_id": script_id, "job_id": job.id}
-    with Session(engine) as s:
-        topic = s.get(Topic, body.topic_id)
-        if topic is None:
-            raise HTTPException(status_code=404, detail="topic not found")
-        dup = s.exec(select(Script).where(
-            Script.topic_id == body.topic_id,  # type: ignore[attr-defined]
-            Script.status.in_(["generating", "polishing"]),  # type: ignore[attr-defined]
-        )).first()  # type: ignore[attr-defined]
-        if dup is not None:  # 实体级去重：同选题在途不重复生成
-            raise HTTPException(status_code=409,
-                                detail=f"该选题正在生成脚本（脚本 #{dup.id}），请等完成或删除后再试")
-        script = Script(topic_id=body.topic_id, status="generating")
-        s.add(script)
-        s.commit()
-        s.refresh(script)
-        script_id = script.id
+    if not (body.card_id or body.ore_id):
+        raise HTTPException(status_code=400, detail="需要 card_id 或 ore_id（老选题库 topic 备稿已随 topics 退役删除）")
     angles = [a.strip() for a in body.angles if a.strip()][:3]
     known = script_service.SIX_ANGLES
     bad = [a for a in angles if a not in known]
@@ -219,16 +204,6 @@ def delete_script(script_id: int) -> dict:
         for art in s.exec(select(Article).where(Article.script_id == script_id)).all():
             art.script_id = None
             s.add(art)
-        # 若选题因该脚本被标为 produced，回退为 approved（可再生成）
-        if script.topic_id:
-            topic = s.get(Topic, script.topic_id)
-            if topic is not None and topic.status == "produced":
-                has_other = s.exec(select(Script).where(
-                    Script.topic_id == script.topic_id,
-                    Script.id != script_id)).first()
-                if not has_other:
-                    topic.status = "approved"
-                    s.add(topic)
         s.delete(script)
         s.commit()
     return {"ok": True}

@@ -19,28 +19,22 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import re
-from datetime import datetime, timedelta, timezone
-from difflib import SequenceMatcher
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Session, select
 
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
-from ..llm import gateway
-from ..models import BenchmarkVideo, RadarTopic, Script, SelfVideo, TopicCard
-from ..prompts import render
+from ..models import BenchmarkVideo, RadarTopic, Script, TopicCard
 from ..settings import settings
 
 # ── C 阶段结构整治（2026-11-16）：归一/闸门/锻造链拆至 norms/gates/forge，本模块留执行器与编排；facade 导入沿用旧名（api/、deepread 等零改动）──
 
 
-from .forge import (_forge_with_retry, _llm_cast, _llm_forge, _llm_judge,
-                    _llm_pick, _norm_takeaways)
-from .gates import (_hook_gate, _merge_card, _recent_card_spines,
-                    _spine_gate)
+from .forge import (_forge_with_retry, _llm_cast, _llm_judge,
+                    _llm_pick, _self_titles)
+from .gates import (_hook_gate, _merge_card, _spine_gate)
 from .norms import (_COVER_RANK, _kw_hit, _norm)
 
 
@@ -55,10 +49,7 @@ def _pool_dict(*, domain: str, heat: str, level: str, role: str = "", coverage: 
 
 def _published_titles() -> list[str]:
     """已发视频标题（冷饭判据：判冷饭不问人，清单就是判据）。"""
-    with Session(engine) as s:
-        rows = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
-            SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]
-    return [v.title for v in rows if v.title]
+    return [v.title for v in _self_titles(100000) if v.title]
 
 
 async def _hunt_safe(ctx: JobContext, tenant_id: int, meta: dict) -> None:

@@ -22,21 +22,6 @@ class AnalyzeIn(BaseModel):
     url: str
 
 
-def crawl_warning_note() -> str:
-    """采集预警：最近一次探针异常 → 提交时就告诉用户可能失败（省一轮空等）。
-    预警失败不影响提交，异常吞掉返回空串。"""
-    try:
-        from ..crawler_probe import read_state
-
-        last = (read_state().get("last") or {})
-        if last.get("status") not in (None, "ok"):
-            return (f"抖音采集当前异常（{str(last.get('detail', ''))[:40]}，"
-                    f"探测于 {last.get('at', '')}），任务可能失败")
-    except Exception:  # noqa: BLE001 预警失败不影响提交
-        pass
-    return ""
-
-
 @router.post("/api/analyze/video", status_code=202)
 async def analyze_video(body: AnalyzeIn,
                         user: User = Depends(require_user)) -> dict:
@@ -55,10 +40,7 @@ async def analyze_video(body: AnalyzeIn,
         benchmark_id = b.id
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
                               dedup_key=f"bm:{benchmark_id}")
-    out = {"benchmark_id": benchmark_id, "job_id": job.id}
-    if note := crawl_warning_note():
-        out["crawl_warning"] = note
-    return out
+    return {"benchmark_id": benchmark_id, "job_id": job.id}
 
 
 @router.post("/api/analyze/local", status_code=202)
@@ -88,10 +70,7 @@ async def analyze_local(file: UploadFile,
         benchmark_id = b.id
     job = await runner.submit("benchmark_analyze", {"benchmark_id": benchmark_id},
                               dedup_key=f"bm:{benchmark_id}")
-    out = {"benchmark_id": benchmark_id, "job_id": job.id}
-    if note := crawl_warning_note():
-        out["crawl_warning"] = note
-    return out
+    return {"benchmark_id": benchmark_id, "job_id": job.id}
 
 
 @router.get("/api/benchmarks/authors")
@@ -145,8 +124,6 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
             q = q.where(BenchmarkVideo.author == author)
         if source:
             q = q.where(BenchmarkVideo.source == source)
-        if comment_kind in ("persona_ore", "leadgen_ore"):
-            q = q.where(BenchmarkVideo.comment_kind == comment_kind)  # type: ignore[attr-defined]
         rows = s.exec(q.order_by(BenchmarkVideo.id.desc())).all()  # type: ignore[attr-defined]
         if scan_status == "all":
             pass  # 显式看全部状态（Watch 展开卡：该号最近作品含待定夺）
@@ -183,7 +160,6 @@ def list_benchmarks(limit: int = 20, offset: int = 0, author: str = "",
 class ResolveIn(BaseModel):
     action: str  # approve | ignore
     author: str = ""  # 可选：只处理该作者的待定夺行
-    ignore_already_analyzed: bool = True  # 批量忽略时跳过已拆解行
 
 
 @router.post("/api/benchmarks/{benchmark_id}/resolve", status_code=202)

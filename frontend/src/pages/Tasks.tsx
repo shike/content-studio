@@ -188,7 +188,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
 
   const changeRunFilter = (k: string) => { setRunFilter(k); setPage(0) }
 
-  const schedAction = (key: string, action: 'toggle' | 'run', hour?: number) =>
+  const schedAction = (key: string, action: 'toggle' | 'run') =>
     (async () => {
       setError('')
       try {
@@ -571,9 +571,9 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
                                     <div>
                                       <div className="mb-1 text-xs font-semibold text-slate-500">调度档案</div>
                                       <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-                                        <div>分道：{t.lane === 'light' ? '轻并发' : t.lane === 'external' ? '外部渲染' : t.lane === 'scheduled' ? '定时' : 'LLM 串行'}</div>
+                                        <div>分道：{LANE_LABEL[t.lane || 'heavy']}</div>
                                         <div>重试：{t.retry_count || 0} / {t.max_retries || 0} 次</div>
-                                        {t.fail_class && <div>失败分类：{t.fail_class === 'transient' ? '瞬时故障' : t.fail_class === 'quota' ? '额度窗口' : t.fail_class === 'captcha' ? '风控拦截' : '确定性失败'}</div>}
+                                        {t.fail_class && <div>失败分类：{FAIL_CLASS_LABEL[t.fail_class] || t.fail_class}</div>}
                                         {t.retry_of ? <div>血缘：由失败任务 #{t.retry_of} 重试而来</div> : null}
                                         {t.covered_by != null && <div className="text-emerald-600">已闭环：后续任务 #{t.covered_by} 已成功重跑同一工作，此失败无需处理</div>}
                                         {t.next_retry_at && <div>自动重试排期：{new Date(t.next_retry_at + 'Z').toLocaleString()}</div>}

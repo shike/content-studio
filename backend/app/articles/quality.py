@@ -11,8 +11,9 @@ import json
 import re
 from pathlib import Path
 
-from ..jobs.runner import JobContext
+from ..jobs.errors import TransientError
 from ..llm import gateway
+from ..models import AppSetting
 from ..prompts import render
 
 # 违禁词表（程序化合规红线）抽单一数据源 banned_words.json：
@@ -25,6 +26,43 @@ BANNED_PATTERNS = _BANNED_TABLE["banned_patterns"]
 CTA_PATTERNS = _BANNED_TABLE["cta_patterns"]
 
 _KB_BAN_CONNECTORS = ("综上所述", "由此可见", "说到底", "总而言之")
+
+
+def strip_fence(body: str) -> str:
+    """剥 LLM 输出的 ``` 围壳（adapt/review/deepread 三线共用，2026-11-16 合并）。"""
+    body = (body or "").strip()
+    if body.startswith("```"):
+        body = re.sub(r"^```[a-z]*\n?", "", body)
+        body = re.sub(r"\n?```$", "", body).strip()
+    return body
+
+
+def load_cursor(s, key: str) -> tuple[int, int]:
+    """AppSetting 游标 "idx:pos"（miner/deepread 两线共用，2026-11-16 合并）。"""
+    from sqlmodel import Session  # noqa: F401 仅类型位
+    row = s.get(AppSetting, key)
+    raw = (row.value or "").strip() if row is not None else ""
+    m = re.match(r"^(\d+):(\d+)$", raw)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def save_cursor(s, key: str, idx: int, pos: int) -> None:
+    row = s.get(AppSetting, key)
+    val = f"{idx}:{pos}"
+    if row is None:
+        s.add(AppSetting(key=key, value=val))
+    else:
+        row.value = val
+        s.add(row)
+    s.commit()
+
+
+def min_chars_or_raise(md_text: str, label: str) -> int:
+    """1500 字下限守卫（adapt/deepread 两线共用，2026-11-16 合并；文案里的规格数字随线不同勿写死）。"""
+    n_chars = len(re.sub(r"\s", "", md_text))
+    if n_chars < 1500:
+        raise TransientError(f"{label}仅 {n_chars} 字（下限 1500），疑似截断，稍后自动重试")
+    return n_chars
 
 
 def banned_hits(text: str) -> list[str]:
@@ -84,10 +122,11 @@ def kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
     return out
 
 
-async def quality_gate(ctx: JobContext, md_text: str) -> float | None:
+async def quality_gate(md_text: str) -> tuple[float | None, str]:
     """质量自评闸门（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：
     模型主编按 5 维打分；低于 7 分用评审意见定向重写一次（签名守卫防数字/图被改）。
-    返回最终分（评审失败返回 None，不阻塞成文）。"""
+    返回 (最终分, 正文)——正文可能是重写后的版本（2026-11-16 修复：此前重写稿被丢弃，
+    落库仍是 <7 分原稿）；评审失败返回 (None, 原文)，不阻塞成文。"""
     try:
         verdict = await gateway.complete_json(
             [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
@@ -96,10 +135,10 @@ async def quality_gate(ctx: JobContext, md_text: str) -> float | None:
         worst = str(verdict.get("worst") or "")[:80]
     except Exception as e:  # noqa: BLE001 自评失败不阻塞
         print(f"[kb-write] 质量自评失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
-        return None
+        return None, md_text
     if score >= 7.0:
         print(f"[kb-write] 质量自评 {score:.1f}，过闸")
-        return score
+        return score, md_text
     print(f"[kb-write] 质量自评 {score:.1f} 未过闸（{worst}），定向重写一次")
     try:
         polished = await gateway.complete(
@@ -122,4 +161,4 @@ async def quality_gate(ctx: JobContext, md_text: str) -> float | None:
             print("[kb-write] 重写稿签名不符（数字/图片变化），保留原稿分")
     except Exception as e:  # noqa: BLE001 重写失败不阻塞
         print(f"[kb-write] 质量重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
-    return score
+    return score, md_text

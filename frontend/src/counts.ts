@@ -77,7 +77,6 @@ export function menuBadges(s: MenuStats): Partial<Record<string, number>> {
     article: s.article + s.c_items,
     monitor: s.p_cand + s.l_cand + s.p_bench + s.l_bench,
     tasks: s.tasks,
-    failed: s.failed,
     tasks_alert: s.tasks_alert,
   }
 }

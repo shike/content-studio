@@ -45,12 +45,12 @@ def list_jobs(request: Request, status: str = "", type: str = "", limit: int = 5
         cnt_q = select(Job.status, Job.next_retry_at).where(Job.archived == 0)  # type: ignore[attr-defined]
         if my_tenant:
             cnt_q = cnt_q.where(Job.tenant_id == my_tenant)  # type: ignore[attr-defined]
-        for st, n in s.exec(cnt_q).all():
-            if st in counts:
-                counts[st] += 1
-        # 用户可见三态汇总（引擎统一 2026-10-12）：failed+next_retry_at 属"进行中"
+        # 单遍同时填 counts 与用户可见三态汇总（引擎统一 2026-10-12）：
+        # failed+next_retry_at 属"进行中"，failed 无排期=终态待处置
         s_active = s_todo = s_done = 0
         for st, nrt in s.exec(cnt_q).all():
+            if st in counts:
+                counts[st] += 1
             if st in ("succeeded", "superseded"):
                 s_done += 1
             elif st == "failed" and nrt is None:

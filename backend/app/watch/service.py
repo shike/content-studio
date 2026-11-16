@@ -9,20 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 import re
 import time
-from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from sqlmodel import Session, select
 
 from ..browser import launch, ua
 from ..db import engine
-from ..llm import gateway
 from ..jobs.errors import TransientError
-from ..jobs.runner import register_concurrent, register_executor
+from ..jobs.runner import register_executor
 from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
 
 
@@ -451,8 +447,8 @@ async def watch_discover(ctx, payload: dict) -> dict:
 async def watch_backfill(ctx, payload: dict) -> dict:
     """监控号存量回填（2026-11-14；2026-11-15 追溯窗参数化）：逐启用对标账号列表近期作品——
     发布时间 ≤backfill_window_days（设置项，默认 30）+ 拆解闸同口径（评论≥20 或赞≥300）
-    → 未入库的建行自动拆解（拆解自动采高赞评论+分型路由）。
-    深翻页模式（列表 60 条/账号）把高频账号 30 天前的旧片也送进闸口。"""
+    → 未入库的建行自动拆解（拆解自动采高赞评论+分型路由）。匿名列表深度天花板
+    ~15 条/账号（2026-11-16 实测，契约见 TDD §6）。"""
     from ..benchmarks import service as bms
     from ..settings import settings
 
