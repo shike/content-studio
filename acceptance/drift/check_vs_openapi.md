@@ -2,11 +2,11 @@
 
 | 套件 | 端点数 | 在线 | 不在线 |
 | --- | --- | --- | --- |
-| run_p0.py | 5 | 4 | 0 |
+| run_p0.py | 6 | 5 | 0 |
 | run_p1.py | 12 | 9 | 0 |
-| run_p6.py | 8 | 8 | 0 |
-| run_p7.py | 16 | 7 | 0 |
-| run_p8.py | 23 | 19 | 0 |
+| run_p6.py | 7 | 7 | 0 |
+| run_p7.py | 17 | 8 | 0 |
+| run_p8.py | 25 | 21 | 0 |
 | e2e_run.py | 0 | 0 | 0 |
 | **合计（去重）** | **59** | **59** | **0（0.0%）** |
 
@@ -31,4 +31,4 @@
 - `/api/radar` — run_p8:186 负断言——独立雷达端点已退役，打 404 即绿（选题工场替代，PRD R1.8）
 - `/api/radar/mine` — run_p8:188 负断言——雷达挖矿端点已退役，打 404 即绿
 - `/api/topics/import/feigua` — run_p1 —— 飞瓜导入已移除，打 404/405 即绿（commit 0cccf40 全删 topics.py）
-- `/api/topics/trending` — run_p8 —— 旧热点提炼端点已删，打 404 即绿（选题工场替代，PRD R1.4）
+- `/api/topics/trending` — run_p8 —— 旧热点提炼下线后的存量兼容探针（注：/api/topics/* 现已全 404，本条不再有区分度，DSH 建议下轮删）

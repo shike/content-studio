@@ -27,7 +27,7 @@ IGNORE_PREFIX = ("/api/articles/images/", "/api/public/images/")
 NEGATIVE_EXACT = {
     "/api/jobs/999999": "run_p0 —— 刻意打不存在的任务，验 404 契约",
     "/api/topics/import/feigua": "run_p1 —— 飞瓜导入已移除，打 404/405 即绿（commit 0cccf40 全删 topics.py）",
-    "/api/topics/trending": "run_p8 —— 旧热点提炼端点已删，打 404 即绿（选题工场替代，PRD R1.4）",
+    "/api/topics/trending": "run_p8 —— 旧热点提炼下线后的存量兼容探针（注：/api/topics/* 现已全 404，本条不再有区分度，DSH 建议下轮删）",
     "/api/admin/tenants": "run_p7:119-131 负断言（多租户拆除 a78e200，2026-10-27）",
     "/api/admin/users": "run_p7:119-131 负断言（同上）",
     "/api/auth/switch-tenant": "run_p7:119-131 负断言（切换租户拆除，a78e200）",
@@ -62,8 +62,20 @@ def code_routes() -> set[str]:
 
 def check_routes(path: Path) -> set[str]:
     src = path.read_text(encoding="utf-8")
-    found = {m.group(1) for m in re.finditer(r'''["'](/api/[A-Za-z0-9_\-{}/\.]*)["']''', src)}
-    return {r for r in found if not r.endswith((".png", ".jpg", ".json"))}
+    # 字符集含 ?=&：带 query 的字面量（如 /api/topics?line=persona）也要整条抓到，
+    # norm() 统一剥 query——2026-11-16 WB 实查：无 ? 时 8 处引用被整条漏抓
+    found = {m.group(1) for m in re.finditer(
+        r'''["'](/api/[A-Za-z0-9_\-{}/\.\?=&]*)["']''', src)}
+    # 过滤 f-string 内层代码碎片（如 /api/scripts/{d.get( 这类跨引号残片）：
+    # 合法路由只含 字母数字_-{}/.，norm 剥 query 后再校验一遍
+    keep: set[str] = set()
+    for r in found:
+        if r.endswith((".png", ".jpg", ".json")):
+            continue
+        n = norm(r)
+        if re.fullmatch(r"/api/[\w\-{}/\.]*", n):
+            keep.add(n)
+    return keep
 
 
 def main() -> int:
@@ -73,18 +85,24 @@ def main() -> int:
     args = ap.parse_args()
 
     live = code_routes()
+    ignore_norm = {norm(p) for p in IGNORE_PREFIX}
+    neg_norm = {norm(k): v for k, v in NEGATIVE_EXACT.items()}
     rows = []
     all_eps: set[str] = set()
+    raw_all = 0
+    raw_unique: set[str] = set()
     for name in CHECK_FILES:
         eps = check_routes(ROOT / "acceptance" / name)
-        all_eps |= eps
+        raw_all += len(eps)
+        raw_unique |= eps
+        all_eps |= {norm(e) for e in eps}
         dead = sorted(e for e in eps if norm(e) not in live
-                      and e not in NEGATIVE_EXACT and not e.startswith(IGNORE_PREFIX))
+                      and norm(e) not in neg_norm and norm(e) not in ignore_norm)
         rows.append((name, len(eps), sorted(e for e in eps if norm(e) in live), dead))
 
-    neg_all = sorted(e for e in all_eps if e in NEGATIVE_EXACT)
-    dead_all = sorted({e for e in all_eps if norm(e) not in live
-                       and e not in NEGATIVE_EXACT and not e.startswith(IGNORE_PREFIX)})
+    neg_all = sorted(e for e in all_eps if e in neg_norm)
+    dead_all = sorted({e for e in all_eps if e not in live
+                       and e not in neg_norm and e not in ignore_norm})
     total = len(all_eps)
     pct = round(len(dead_all) / total * 100, 1) if total else 0.0
 
@@ -111,7 +129,7 @@ def main() -> int:
                 print(f"  DEAD {d}")
         print(f"negative assertions (documented): {len(neg_all)}")
         for k in neg_all:
-            print(f"  NEG  {k}  ({NEGATIVE_EXACT[k]})")
+            print(f"  NEG  {k}  ({neg_norm[k]})")
         print(f"total unique: {total}, dead: {len(dead_all)} ({pct}%)")
 
     return 1 if (args.strict and dead_all) else 0
