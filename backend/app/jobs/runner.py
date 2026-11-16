@@ -89,7 +89,7 @@ def _human_delay(seconds: int) -> str:
 # 会以僵尸形态跑完，但完成回调有状态护栏不再覆写结果）。
 # 重试机制统一后（2026-10-12），类型间只剩超时阈值差异；重试全走 RETRY_LADDER（默认 4 跳）
 _POLICIES: dict[str, RetryPolicy] = {
-    "benchmark_analyze": RetryPolicy(task_timeout=2700),
+    "material_analyze": RetryPolicy(task_timeout=2700),
     "script_generate": RetryPolicy(task_timeout=2400),
     "script_polish": RetryPolicy(task_timeout=2400),
     "script_finalize": RetryPolicy(task_timeout=1800),
@@ -98,18 +98,19 @@ _POLICIES: dict[str, RetryPolicy] = {
     "article_adapt": RetryPolicy(task_timeout=3600),  # 改编器：拉源文全文+成文+原创度闸+机检
     "article_hotspots": RetryPolicy(task_timeout=1200),  # 报题：热点抓取+双 LLM（预筛+提炼）
     "article_style_extract": RetryPolicy(task_timeout=900),
-    "topic_backfill": RetryPolicy(task_timeout=3600),  # 话题回填：话题数×精选集逐条探测（每条 ~10s）
+    "material_topic_backfill": RetryPolicy(task_timeout=3600),  # 话题回填：话题数×精选集逐条探测（每条 ~10s）
+    "material_topic_check": RetryPolicy(task_timeout=600),  # 单话题即时巡检
     "card_daily": RetryPolicy(task_timeout=1800),   # 选题工场：雷达巡检+4 次 LLM（pick/forge/cast/judge）
-    "hl_search_matrix": RetryPolicy(task_timeout=3600),    # 同城搜索矩阵：预算 12 组搜索+取证（2026-11-13 补硬超时）
+    "material_hl_search": RetryPolicy(task_timeout=3600),  # 同城搜索矩阵：预算 12 组搜索+取证（2026-11-13 补硬超时）
     "creator_data_scan": RetryPolicy(task_timeout=300),
     "video_weekly_report": RetryPolicy(task_timeout=600),
     "self_analyze": RetryPolicy(task_timeout=2700),
     "self_profile_update": RetryPolicy(task_timeout=1800),
-    "watch_scan": RetryPolicy(task_timeout=3600),
-    "watch_backfill": RetryPolicy(task_timeout=3600),  # 存量回填：账号数×锚点列表逐号枚举
+    "material_watch_scan": RetryPolicy(task_timeout=3600),
+    "material_backfill": RetryPolicy(task_timeout=3600),  # 存量回填：账号数×锚点列表逐号枚举
     "self_scan": RetryPolicy(task_timeout=2700),
-    "watch_resolve": RetryPolicy(task_timeout=1800),
-    "watch_discover": RetryPolicy(task_timeout=3600),
+    "material_resolve": RetryPolicy(task_timeout=1800),
+    "material_discover": RetryPolicy(task_timeout=3600),
 }
 _DEFAULT_POLICY = RetryPolicy()
 

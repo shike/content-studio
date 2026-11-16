@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from ..db import engine
 from ..llm import gateway
-from ..models import BenchmarkVideo, SelfVideo
+from ..models import Material, SelfVideo
 from ..prompts import render
 from ..settings import settings
 from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _PREDICT_KW, _max_chars,
@@ -29,23 +29,30 @@ async def _llm_pick(menu_text: str, persona: str, audience_note: str) -> list[di
 
 
 def _fewshot_lines(limit: int = 14) -> str:
-    """few-shot 句式标尺：拆解库近 30 天高分样本的钩子/高光 + 已发视频标题（正样本）。"""
+    """few-shot 句式标尺：素材库近 30 天高分拆解的钩子/高光 + 已发视频标题（正样本）。"""
     from datetime import timedelta as _td
+
+    from ..materials.service import analyses_map
 
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _td(days=30)
     lines: list[str] = []
     with Session(engine) as s:
-        rows = s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
-            BenchmarkVideo.created_at >= cutoff)).all()  # type: ignore[attr-defined]
-        rows = sorted((b for b in rows if b.analysis or b.title),
-                      key=lambda b: -(b.quality_score or 0))
+        rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
+            Material.origin_type == "douyin_video",  # type: ignore[attr-defined]
+            Material.status == "ready",  # type: ignore[attr-defined]
+            Material.created_at >= cutoff)).all()  # type: ignore[attr-defined]
+        amap = analyses_map(s, [b.id for b in rows], kinds=("breakdown",))
+        rows = sorted(
+            (b for b in rows
+             if (amap.get(b.id) or {}).get("breakdown") or b.title),
+            key=lambda b: -float((b.quality or {}).get("heat") or 0))
         for b in rows:
             # 夹具（2026-11-16 修）：拆解 JSON 的 hook 是 dict（type/position_text/position_sec）、
-            # highlights 是英文键——旧逻辑只认「键名含 hook/钩/开场/高光/金句且值是字符串」，
-            # 两个字段因此从未进过 few-shot（拆解白产）。现按结构取：hook.position_text 优先，
-            # 兼容字符串形态；highlights/高光/金句键收列表字符串。
+            # highlights 是英文键——按结构取：hook.position_text 优先，兼容字符串形态；
+            # highlights/高光/金句键收列表字符串。
+            an = ((amap.get(b.id) or {}).get("breakdown") or {}).get("payload") or {}
+            author = b.author or "?"
             taken = False
-            an = b.analysis or {}
             hook_v = an.get("hook")
             hook_text = ""
             if isinstance(hook_v, dict):
@@ -53,7 +60,7 @@ def _fewshot_lines(limit: int = 14) -> str:
             elif isinstance(hook_v, str):
                 hook_text = hook_v.strip()
             if hook_text:
-                lines.append(f"- 「{hook_text[:44]}」（拆解库 {b.author or '?'}）")
+                lines.append(f"- 「{hook_text[:44]}」（素材库 {author}）")
                 taken = True
             if not taken:
                 for k, v in an.items():
@@ -63,13 +70,13 @@ def _fewshot_lines(limit: int = 14) -> str:
                     vals = v if isinstance(v, list) else [v]
                     for x in vals:
                         if isinstance(x, str) and x.strip():
-                            lines.append(f"- 「{x.strip()[:44]}」（拆解库 {b.author or '?'}）")
+                            lines.append(f"- 「{x.strip()[:44]}」（素材库 {author}）")
                             taken = True
                             break
                     if taken:
                         break
             if not taken and b.title:
-                lines.append(f"- 「{b.title[:44]}」（拆解库 {b.author or '?'}）")
+                lines.append(f"- 「{b.title[:44]}」（素材库 {author}）")
             if len(lines) >= limit:
                 break
     lines += [f"- 「{(v.title or '')[:44]}」（自己的爆款）" for v in _self_titles(6) if v.title]

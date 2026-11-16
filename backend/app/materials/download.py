@@ -282,3 +282,53 @@ def _find_video_url(node) -> Optional[str]:
         if node.startswith("http") and ".mp4" in node:
             return node
     return None
+
+
+# ── 全局下载节流与验证码熔断（2026-11-16 P2 素材域收编：原散在 benchmarks.service，
+#    self_analyze 也经此闸——所有抖音下载统一走这里，别再绕行）──
+import time as _time
+
+from ..jobs.errors import CaptchaError
+
+_CAPTCHA_FAILS: list[float] = []
+_LAST_DOWNLOAD_TS: float = 0.0
+_CAPTCHA_WINDOW = 1800.0
+_CAPTCHA_TRIP = 2
+
+
+def captcha_record() -> None:
+    now = _time.time()
+    _CAPTCHA_FAILS[:] = [t for t in _CAPTCHA_FAILS if now - t < _CAPTCHA_WINDOW]
+    _CAPTCHA_FAILS.append(now)
+
+
+def captcha_breaker() -> None:
+    now = _time.time()
+    _CAPTCHA_FAILS[:] = [t for t in _CAPTCHA_FAILS if now - t < _CAPTCHA_WINDOW]
+    if len(_CAPTCHA_FAILS) >= _CAPTCHA_TRIP:
+        wait_min = max(1, int((max(_CAPTCHA_FAILS) + _CAPTCHA_WINDOW - now) // 60))
+        raise CaptchaError(
+            f"下载熔断：抖音风控窗中（近期 {len(_CAPTCHA_FAILS)} 次验证码失败），"
+            f"约 {wait_min} 分钟后自动重试")
+
+
+def download_wait_s() -> float:
+    """当前还需等待的节流秒数（0=可立即下载）。供进度回显用。"""
+    import os
+
+    _min_gap = float(os.environ.get("CS_DOWNLOAD_MIN_INTERVAL", "45"))
+    now_ts = _time.time()
+    if _LAST_DOWNLOAD_TS and now_ts - _LAST_DOWNLOAD_TS < _min_gap:
+        return _min_gap - (now_ts - _LAST_DOWNLOAD_TS)
+    return 0.0
+
+
+def throttle_download() -> None:
+    """全局下载节流：两次下载最小间隔（默认 45s，CS_DOWNLOAD_MIN_INTERVAL 可调）——
+    批量连续高频下载会触发抖音 IP 级验证码（家宽出口 IP 被 punishing）。
+    同步阻塞版（配 asyncio.to_thread 用）。"""
+    global _LAST_DOWNLOAD_TS
+    wait_s = download_wait_s()
+    if wait_s > 0:
+        _time.sleep(wait_s)
+    _LAST_DOWNLOAD_TS = _time.time()

@@ -15,7 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, ContentItem, DailyLedger
+from ..models import AppSetting, DailyLedger, Material
 from ..prompts import render
 from .quality import load_cursor, save_cursor
 
@@ -76,7 +76,8 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
         kb_id = topic_kb_id(s)
         idx, pos = _load_cursor(s)
         line = _gen_line(s)
-        existing = set(s.exec(select(ContentItem.media_id)).all())  # type: ignore[attr-defined]
+        existing = {r.origin_id for r in s.exec(select(Material.origin_id).where(  # type: ignore[attr-defined]
+            Material.origin_type == "kb_doc")).all()}  # type: ignore[attr-defined]
     if not folders:
         raise RuntimeError("挖掘目录为空：请配置 ima_topic_folders")
     client_id, api_key = cfg["client_id"], cfg["api_key"]
@@ -154,28 +155,35 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
             if cat not in _CATEGORIES:
                 cat = _FOLDER_CATEGORY.get(folder_name, "交付现场")
             with Session(engine) as s:
-                again = s.exec(select(ContentItem).where(  # type: ignore[attr-defined]
-                    ContentItem.media_id == mid)).first()  # type: ignore[attr-defined]
+                again = s.exec(select(Material).where(  # type: ignore[attr-defined]
+                    Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+                    Material.origin_id == mid)).first()  # type: ignore[attr-defined]
                 if again is None:  # 双保险：批内重复评估不重入
-                    s.add(ContentItem(
-                        media_id=mid,
-                        folder_name=folder_name, title=title[:120],
-                        source_author=str((note or {}).get("source_author") or "")[:60],
-                        quality_score=score, why_good=str((note or {}).get("why_good") or "")[:200],
-                        adapt_angle=str((note or {}).get("adapt_angle") or "")[:300],
-                        best_quotes=quotes, category=cat, status="pending"))
+                    # kb 素材：status=ready（挖掘已批准，人工决策点在改编清单），stage=改编流
+                    s.add(Material(
+                        tenant_id=1, origin_type="kb_doc", origin_id=mid,
+                        title=title[:120],
+                        author=str((note or {}).get("source_author") or "")[:60],
+                        quality={"score": score,
+                                 "folder": folder_name,
+                                 "why_good": str((note or {}).get("why_good") or "")[:200],
+                                 "adapt_angle": str((note or {}).get("adapt_angle") or "")[:300],
+                                 "best_quotes": quotes, "category": cat, "priority": 0},
+                        stage="pending", status="ready", note="挖掘入清单"))
                     s.commit()
                     added += 1
         else:
             skipped_low += 1
             with Session(engine) as s:
-                again = s.exec(select(ContentItem).where(  # type: ignore[attr-defined]
-                    ContentItem.media_id == mid)).first()  # type: ignore[attr-defined]
-                if again is None:  # 低分也落行（status=low）：整库盘完回卷时不重复评估
-                    s.add(ContentItem(
-                        media_id=mid,
-                        folder_name=folder_name, title=title[:120],
-                        quality_score=score, status="low",
+                again = s.exec(select(Material).where(  # type: ignore[attr-defined]
+                    Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+                    Material.origin_id == mid)).first()  # type: ignore[attr-defined]
+                if again is None:  # 低分也落行（stage=low）：整库盘完回卷时不重复评估
+                    s.add(Material(
+                        tenant_id=1, origin_type="kb_doc", origin_id=mid,
+                        title=title[:120],
+                        quality={"score": score, "folder": folder_name, "priority": 0},
+                        stage="low", status="ignored",
                         note=f"评分 {score} 低于生成线 {line}，未入改编队列"))
                     s.commit()
         ctx.set_progress(4 + int(90 * i / len(batch)),

@@ -151,8 +151,10 @@ wechat_app_id / wechat_app_secret / wechat_publish_enabled`。
 **素材状态机**：`inbox → ready / ignored`；`archived` 为人工归档。
 采集器只写 inbox；质量闸可自动置 ignored（quality.gate_reason 留痕，可翻案）。
 
-**quality JSONB 约定**：`{score, heat, comment_kind(persona_ore|leadgen_ore), leadgen_share,
-gate_reason, comments_top:[{t,d}], stats_source}`。
+**quality JSONB 约定**：`{heat, comment_kind(persona_ore|leadgen_ore), leadgen_share,
+gate_reason, stats_source, account_type, kb:{score,why_good,adapt_angle,best_quotes,category,priority,article_id},
+falsify:{target,auto_source,script_id}}`。高赞评论原文不进 quality——存 `material_analyses(kind=comments,
+payload.items)`；拆解结果存 `kind=breakdown`（版本留痕，消费方经 `materials.service.analyses_map/material_context` 取）。
 
 ### 5.3 内容域（5 表）
 
@@ -539,6 +541,16 @@ PY
 - **公众号登录态**：仅用于自有账号数据回流，永不爬取他人内容（红线）。
 
 ## 15. 迁移映射（迁移期专用，P5 收口后删除）
+
+> **P2 素材域已执行（2026-11-16）**：`backend/scripts/migrate_materials.py` 已把旧 5 表迁入
+> sources/materials/material_analyses/material_usages（幂等可重跑），scripts.ore_id/falsify_item_id
+> 重映射为 materials.id（FK 已在 0002 迁移拆除）；旧表停读写、模型已删，生产库原地只读保留
+> （schema_audit 白名单 `_LEGACY_TABLES`，P5 DROP 时移除）。执行器/调度改名同步落地：
+> watch_scan→material_watch_scan、watch_resolve→material_resolve、watch_discover→material_discover、
+> watch_backfill→material_backfill、topic_backfill→material_topic_backfill（+material_topic_check）、
+> hl_search_matrix→material_hl_search、benchmark_analyze→material_analyze；
+> article_kb_miner/article_adapt/self_scan 等内容线与自有链执行器名 P3/P4 再随域迁移。
+
 
 **原则**：Expand-Contract。先建 Postgres 等价库并全量搬数据；新域表与旧表并存，
 双写/回填后切读；旧表在 P5 停写并 DROP。所有旧 id 原样保留，迁移后重置 identity 序列。

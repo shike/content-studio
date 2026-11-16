@@ -89,21 +89,22 @@ def _in_cooldown(url: str, cooldown: dict, now: datetime) -> bool:
 
 
 def _pick_probe_urls(count: int = SAMPLES) -> tuple[list[str], str]:
-    """选 N 条拆解库 approved 视频链接（轮换+跳过冷却中的毒视频）；不足补兜底。"""
+    """选 N 条素材库 ready 视频链接（轮换+跳过冷却中的毒视频）；不足补兜底。"""
     from sqlmodel import Session, select
 
     from .db import engine
-    from .models import BenchmarkVideo
+    from .models import Material
 
     try:
         with Session(engine) as s:
             rows = s.exec(
-                select(BenchmarkVideo)
-                .where(BenchmarkVideo.scan_status == "approved")  # type: ignore[attr-defined]
-                .order_by(BenchmarkVideo.id.desc())  # type: ignore[attr-defined]
+                select(Material)
+                .where(Material.origin_type == "douyin_video",  # type: ignore[attr-defined]
+                       Material.status == "ready")  # type: ignore[attr-defined]
+                .order_by(Material.id.desc())  # type: ignore[attr-defined]
             ).all()
-        urls = [v.url for v in rows
-                if v.url and "douyin.com" in v.url][:20]
+        urls = [v.origin_url for v in rows
+                if v.origin_url and "douyin.com" in v.origin_url][:20]
     except Exception:  # noqa: BLE001 库不可读就用兜底
         urls = []
     state = read_state()
@@ -261,8 +262,9 @@ def recent_failure_count(minutes: int = 60) -> int:
     from .db import engine
     from .models import Job
 
-    scrape_types = {"benchmark_analyze", "watch_scan", "watch_resolve",
-                    "self_analyze"}
+    scrape_types = {"material_analyze", "material_watch_scan", "material_resolve",
+                    "material_backfill", "material_topic_backfill", "material_discover",
+                    "material_hl_search", "self_analyze"}
     since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes)
     try:
         with Session(engine) as s:

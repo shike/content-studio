@@ -45,7 +45,7 @@ export default function LeadgenOre({ onNavigate }: { onNavigate?: (k: string) =>
   }
 
   useEffect(() => {
-    api<{ items: OreRow[] }>('/benchmarks?comment_kind=leadgen_ore&scan_status=all&limit=50')
+    api<{ items: OreRow[] }>('/materials?ore=leadgen&status=all&limit=50')
       .then((d) => {
         setRows(d.items || [])
         setLoaded(true)

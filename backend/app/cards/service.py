@@ -26,7 +26,7 @@ from sqlmodel import Session, select
 
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
-from ..models import BenchmarkVideo, RadarTopic, Script, TopicCard
+from ..models import Material, Script, Source, TopicCard
 from ..settings import settings
 
 # ── C 阶段结构整治（2026-11-16）：归一/闸门/锻造链拆至 norms/gates/forge，本模块留执行器与编排；facade 导入沿用旧名（api/ 既有导入零改动）──
@@ -67,11 +67,12 @@ async def _radar_round(ctx: JobContext) -> tuple[list[str], list[dict]]:
     spikes: list[dict] = []
     try:
         with Session(engine) as s:
-            radar_rows = s.exec(select(RadarTopic).where(  # type: ignore[attr-defined]
-                RadarTopic.enabled == True)).all()  # noqa: E712
+            radar_rows = s.exec(select(Source).where(  # type: ignore[attr-defined]
+                Source.kind == "radar_topic",  # type: ignore[attr-defined]
+                Source.status == "active")).all()  # type: ignore[attr-defined]
         for rrow in radar_rows:
             try:
-                from ..radar.service import check_topic
+                from ..materials.collectors.radar_patrol import check_topic
                 r = await check_topic(rrow)
                 notes.append(f"#{rrow.name}：新增 {r['new']} 条" + ("（飙升）" if r["spiked"] else ""))
                 if r["spiked"]:
@@ -89,9 +90,11 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     """人设号选题工场五段（R1.4）。空过合法：无可怼=诚实空过，失败是异常不是工作流。"""
     from datetime import timedelta as _td
 
+    from ..materials.collectors.hotlist import (fetch_aihot_hot, fetch_baidu_hot,
+                                                fetch_douyin_hot, fetch_github_hot,
+                                                fetch_tech_news, fetch_zhihu_hot)
+    from ..materials.service import analyses_map
     from ..tenant_brand import audience_note_of, brand_of
-    from ..topics.hotlist import (fetch_aihot_hot, fetch_baidu_hot, fetch_douyin_hot,
-                                  fetch_github_hot, fetch_tech_news, fetch_zhihu_hot)
 
     tenant_id = payload.get("tenant_id") or 1
     persona = brand_of(tenant_id)["persona"]
@@ -112,16 +115,29 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         )).all()  # type: ignore[attr-defined]
         seen_refs = {str(((c.pool or {}).get("douyin_evidence") or {}).get("ref") or "")
                      for c in recent_cards}
-        peer_rows = s.exec(select(BenchmarkVideo).where(  # type: ignore[attr-defined]
-            BenchmarkVideo.created_at >= cutoff)).all()  # type: ignore[attr-defined]
+        # 一手池子线（P2 素材域）：ready 的抖音素材，新鲜度=published_at（缺省 collected_at）
+        from sqlalchemy import coalesce as _coalesce
+
+        peer_rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
+            Material.origin_type == "douyin_video",  # type: ignore[attr-defined]
+            Material.status == "ready",  # type: ignore[attr-defined]
+            _coalesce(Material.published_at, Material.collected_at) >= cutoff)).all()  # type: ignore[attr-defined]
+    peer_amap = {}
+    if peer_rows:
+        with Session(engine) as s:
+            peer_amap = analyses_map(s, [r.id for r in peer_rows])
     peer_min = max(1, int(settings.pool_peer_min_comments or 50))
     routed_leadgen = []  # 求学型评论区视频（获客矿）——元角度口子的候选
     for b in peer_rows:
+        am = peer_amap.get(b.id) or {}
+        breakdown = (am.get("breakdown") or {}).get("payload") or {}
+        comments_top = list(((am.get("comments") or {}).get("payload") or {}).get("items") or [])
         stats = b.stats or {}
         comment = int(stats.get("comment") or 0)
-        if comment < peer_min or not b.title or b.url in seen_refs:
+        if comment < peer_min or not b.title or b.origin_url in seen_refs:
             continue
-        if (b.comment_kind or "") == "leadgen_ore":
+        kind = (b.quality or {}).get("comment_kind") or ""
+        if kind == "leadgen_ore":
             # 分型路由（R1.4）：求学型评论区=获客需求信号，归获客线，人设号不吃；
             # 每批最多留 1 条做「求学现象卡」（对求学现象立立场的元角度口子，用户批准）
             routed_leadgen.append(b)
@@ -129,35 +145,38 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         pools.append({"source": "douyin_peer", "pool": _pool_dict(
             domain=f"监控对标号 {b.author or '?'}（AI 落地赛道，用户精选清单）",
             heat=f"{b.author or '?'}《{b.title[:36]}》评论 {comment}（抖音实数）",
-            level="高", douyin={"kind": "peer_video", "ref": b.url,
+            level="高", douyin={"kind": "peer_video", "ref": b.origin_url,
                                 "comments": comment, "diggs": int(stats.get("digg") or 0),
-                                "ore_kind": (b.comment_kind or "persona_ore"),
-                                "study_share": float(b.comment_leadgen_share or 0),
-                                "top": [c for c in (b.top_comments or [])
+                                "ore_kind": kind or "persona_ore",
+                                "study_share": float((b.quality or {}).get("leadgen_share") or 0),
+                                "top": [c for c in comments_top
                                         if isinstance(c, dict) and str(c.get("t") or "").strip()][:12],
-                                "digest": str((b.analysis or {}).get("summary") or "")[:80]},
+                                "digest": str(breakdown.get("summary") or "")[:80]},
             peer_covered=True)})
         meta["peer"] += 1
-        seen_refs.add(b.url)
+        seen_refs.add(b.origin_url)
         if meta["peer"] >= 10:
             break
     if routed_leadgen:
         meta["peer_routed_leadgen"] = len(routed_leadgen)
         best = max(routed_leadgen, key=lambda x: int((x.stats or {}).get("comment") or 0))
+        am_best = peer_amap.get(best.id) or {}
+        best_breakdown = (am_best.get("breakdown") or {}).get("payload") or {}
+        best_comments = list(((am_best.get("comments") or {}).get("payload") or {}).get("items") or [])
         st = best.stats or {}
         pools.append({"source": "douyin_peer", "pool": _pool_dict(
             domain=f"监控对标号 {best.author or '?'}（AI 落地赛道，用户精选清单）",
             heat=f"{best.author or '?'}《{best.title[:36]}》评论 {int(st.get('comment') or 0)}（抖音实数）",
-            level="高", douyin={"kind": "study_meta", "ref": best.url,
+            level="高", douyin={"kind": "study_meta", "ref": best.origin_url,
                                 "comments": int(st.get("comment") or 0),
                                 "diggs": int(st.get("digg") or 0),
-                                "study_share": float(best.comment_leadgen_share or 0),
-                                "top": [c for c in (best.top_comments or [])
+                                "study_share": float((best.quality or {}).get("leadgen_share") or 0),
+                                "top": [c for c in best_comments
                                         if isinstance(c, dict) and str(c.get("t") or "").strip()][:12],
-                                "digest": str((best.analysis or {}).get("summary") or "")[:80]},
+                                "digest": str(best_breakdown.get("summary") or "")[:80]},
             peer_covered=True)})
         meta["peer_meta"] = 1
-        seen_refs.add(best.url)
+        seen_refs.add(best.origin_url)
 
     for sp in radar_spikes[:6]:
         key = f"radar:{sp['name']}"

@@ -12,7 +12,7 @@ from ..articles.renderer import render_wechat_html, sanitize_html
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Article, ContentItem, DailyLedger, User
+from ..models import Article, DailyLedger, Material, User
 from ..settings import settings
 
 router = APIRouter(prefix="/api/articles")
@@ -51,24 +51,55 @@ async def mine_sources(user: User = Depends(require_user)) -> dict:
     return {"job_id": job.id}
 
 
+_KB_STAGE_OUT = {"pending": "pending", "running": "running", "done": "done",
+                 "published": "published", "dismissed": "dismissed", "low": "low",
+                 "": "pending"}
+
+
+def _kb_item_out(m: Material) -> dict:
+    """kb 素材行 → 内容清单旧形状（ContentItems/Workshop 前端零改动）。"""
+    q = m.quality or {}
+    return {
+        "id": m.id, "folder_name": q.get("folder") or "", "title": m.title or "",
+        "source_author": m.author or "", "quality_score": float(q.get("score") or 0),
+        "why_good": q.get("why_good") or "", "adapt_angle": q.get("adapt_angle") or "",
+        "best_quotes": q.get("best_quotes") or [], "category": q.get("category") or "",
+        "priority": int(q.get("priority") or 0),
+        "status": _KB_STAGE_OUT.get(m.stage or "", m.stage),
+        "article_id": q.get("article_id"), "note": m.note or "",
+        "created_at": m.created_at,
+    }
+
+
 @router.get("/content-items")
 def list_content_items(status: str = "", category: str = "",
                        limit: int = 100, offset: int = 0) -> dict:
-    """内容清单：源文列表（置顶→质量分→新）+ 两组计数（按状态/按栏目）。"""
+    """内容清单（P2 起后端=素材库 kb_doc 子集门面，契约不变）：
+    源文列表（置顶→质量分→新）+ 两组计数（按状态/按栏目）。"""
+    from sqlalchemy import text as _text
+
     with Session(engine) as s:
-        q = select(ContentItem).order_by(
-            ContentItem.priority.desc(), ContentItem.quality_score.desc(), ContentItem.id.desc())
+        q = select(Material).where(Material.origin_type == "kb_doc")  # type: ignore[attr-defined]
         if status:
-            q = q.where(ContentItem.status == status)
+            q = q.where(Material.stage == status)  # type: ignore[attr-defined]
         if category:
-            q = q.where(ContentItem.category == category)
-        total = len(s.exec(q).all())
-        rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()
-        scq = select(ContentItem.status, func.count(ContentItem.id)).group_by(ContentItem.status)
-        ccq = select(ContentItem.category, func.count(ContentItem.id)).group_by(ContentItem.category)
-        return {"items": [r.model_dump() for r in rows], "total": total,
+            q = q.where(_text("materials.quality->>'category' = :cat").bindparams(cat=category))
+        total = s.exec(select(func.count()).select_from(q.subquery())).one() or 0
+        rows = s.exec(q.order_by(  # type: ignore[attr-defined]
+            Material.quality.op('->')('priority').desc().nulls_last(),
+            Material.quality.op('->')('score').desc().nulls_last(),
+            Material.id.desc())
+            .offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()
+        scq = select(Material.stage, func.count(Material.id)).group_by(Material.stage)  # type: ignore[arg-type]
+        scq = scq.where(Material.origin_type == "kb_doc")  # type: ignore[attr-defined]
+        # 同一个表达式对象进 select 与 group_by——各自 new 一个会生成两个绑定参数，
+        # Postgres 按文本匹配 GROUP BY，参数名不同即报 GroupingError（冒烟实测踩中）
+        cat_expr = Material.quality.op('->>')('category')
+        ccq = select(cat_expr, func.count(Material.id)).where(  # type: ignore[attr-defined]
+            Material.origin_type == "kb_doc").group_by(cat_expr)  # type: ignore[attr-defined]
+        return {"items": [_kb_item_out(r) for r in rows], "total": total,
                 "status_counts": {st: n for st, n in s.exec(scq).all()},
-                "category_counts": {c: n for c, n in s.exec(ccq).all()}}
+                "category_counts": {c or "": n for c, n in s.exec(ccq).all()}}
 
 
 @router.post("/content-items/{item_id}/status")
@@ -78,32 +109,35 @@ def set_content_item_status(item_id: int, body: ItemStatusIn,
     if body.status not in ("pending", "dismissed"):
         raise HTTPException(status_code=400, detail="只允许 pending（入队）或 dismissed（不做）")
     with Session(engine) as s:
-        it = s.get(ContentItem, item_id)
-        if it is None:
+        it = s.get(Material, item_id)
+        if it is None or it.origin_type != "kb_doc":
             raise HTTPException(status_code=404, detail="清单项不存在")
-        if it.status in ("running", "done", "published"):
-            raise HTTPException(status_code=409, detail=f"当前状态 {it.status} 不允许手改")
-        it.status = body.status
+        if (it.stage or "") in ("running", "done", "published"):
+            raise HTTPException(status_code=409, detail=f"当前状态 {it.stage} 不允许手改")
+        it.stage = body.status
+        it.status = "ignored" if body.status == "dismissed" else "ready"
         s.add(it)
         s.commit()
         s.refresh(it)
-        return it.model_dump()
+        return _kb_item_out(it)
 
 
 @router.post("/content-items/{item_id}/pin")
 def pin_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
     """置顶：「明天改编」——priority=9，改编器先取（再看质量分）。"""
     with Session(engine) as s:
-        it = s.get(ContentItem, item_id)
-        if it is None:
+        it = s.get(Material, item_id)
+        if it is None or it.origin_type != "kb_doc":
             raise HTTPException(status_code=404, detail="清单项不存在")
-        if it.status != "pending":
+        if (it.stage or "") != "pending":
             raise HTTPException(status_code=409, detail="只有待改编项可以置顶")
-        it.priority = 9
+        q = dict(it.quality or {})
+        q["priority"] = 9
+        it.quality = q
         s.add(it)
         s.commit()
         s.refresh(it)
-        return it.model_dump()
+        return _kb_item_out(it)
 
 
 @router.get("/ledger")
@@ -138,10 +172,11 @@ def publish_article(article_id: int, body: PublishIn,
         if art.kb_sources:  # 清单项联动：源文项标已发布
             mid = (art.kb_sources[0] or {}).get("media_id")
             if mid:
-                it = s.exec(select(ContentItem).where(  # type: ignore[attr-defined]
-                    ContentItem.media_id == mid)).first()  # type: ignore[attr-defined]
-                if it is not None and it.status == "done":
-                    it.status = "published"
+                it = s.exec(select(Material).where(  # type: ignore[attr-defined]
+                    Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+                    Material.origin_id == mid)).first()  # type: ignore[attr-defined]
+                if it is not None and (it.stage or "") == "done":
+                    it.stage = "published"
                     s.add(it)
         s.add(art)
         s.commit()

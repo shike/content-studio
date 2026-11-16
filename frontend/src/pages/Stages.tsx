@@ -1,9 +1,6 @@
 import HotTargets from './HotTargets'
-import TopicInsights from './TopicInsights'
+import Materials from './Materials'
 import LeadgenOre from './LeadgenOre'
-import Watch from './Watch'
-import Benchmarks from './Benchmarks'
-import DiscoveredAccounts from './DiscoveredAccounts'
 import Scripts from './Scripts'
 import Workshop from './Workshop'
 import ContentItems from './ContentItems'
@@ -11,16 +8,16 @@ import ArticleStyle from './ArticleStyle'
 import AccountTrends from './AccountTrends'
 
 /**
- * 侧重版导航（2026-11-14 用户定版）：菜单按业务线组织，主线靠前——
- * 人设号（主线，选题/视频稿/经营全闭环一页）→ 获客（获客矿+建稿/视频稿）→ 公众号（工场/清单/画像）
- * → 监控（进料管理，低频垫底）。tab id 编码：`段内名` 或 `段内名:persona|leadgen`（监控页带线 tab）。
+ * 侧重版导航（重构 P2 2026-11-16：素材库成为唯一进料口，取代旧「监控」页——
+ * 监控号/话题雷达/拆解库/账号候选全部收进素材库四个 tab）。
+ * tab id 编码：`段内名` 或 `段内名:persona|leadgen`。
  */
 type Line = 'persona' | 'leadgen'
 
 interface TabDef {
   id: string
   label: string
-  line?: boolean  // 带线切换（监控页两线共用）
+  line?: boolean
 }
 
 function parseTab(tab: string, tabs: TabDef[]): { id: string; line: Line } {
@@ -125,23 +122,16 @@ export function ArticleStage(props: { tab: string; onTab: (t: string) => void; o
   )
 }
 
-/** 监控（进料管理，两线共用）：监控号 / 话题雷达 / 拆解库 / 账号候选 */
-export function MonitorStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
+/** 素材库（唯一进料口，重构 P2）：收件箱 / 全部素材 / 采集源 / 账号候选 */
+export function MaterialsStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
-      { id: 'watch', label: '监控号', line: true },
-      { id: 'radar', label: '话题雷达' },
-      { id: 'bench', label: '拆解库', line: true },
-      { id: 'cand', label: '账号候选', line: true },
+      { id: 'inbox', label: '素材库' },
+      { id: 'all', label: '全部素材' },
+      { id: 'sources', label: '采集源' },
+      { id: 'cand', label: '账号候选' },
     ]}>
-      {({ id, line }) => (
-        <>
-          {id === 'watch' && <Watch onNavigate={props.onNavigate} accountType={line} />}
-          {id === 'radar' && <TopicInsights />}
-          {id === 'bench' && <Benchmarks accountType={line} />}
-          {id === 'cand' && <DiscoveredAccounts accountType={line} />}
-        </>
-      )}
+      {({ id }) => <Materials onNavigate={props.onNavigate} tabId={id} />}
     </StageShell>
   )
 }

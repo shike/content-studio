@@ -8,8 +8,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (articles, auth_api as auth_routes, benchmarks, cards, stats, crawl, falsify, health, jobs, llm, metrics, tenant_api,
-                  public_media, radar, schedules, scripts, settings as settings_api, style,
+from .api import (articles, auth_api as auth_routes, cards, stats, crawl, falsify, health, jobs, llm, materials, metrics, sources,
+                  tenant_api, public_media, schedules, scripts, settings as settings_api, style,
                   watch)
 from .db import engine, init_db
 from sqlmodel import Session, select
@@ -20,12 +20,9 @@ from .version import APP_VERSION
 from .articles import service as _article_service  # noqa: F401
 from .articles import miner as _article_kb_miner  # noqa: F401
 from .articles import adapt as _article_adapt  # noqa: F401
-from .benchmarks import service as _benchmark_service  # noqa: F401
 from .cards import service as _card_service  # noqa: F401
-from .falsify import service as _falsify_service  # noqa: F401
-from .radar import service as _radar_service  # noqa: F401
-from .scripts import service as _script_service  # noqa: F401
-from .watch import service as _watch_service  # noqa: F401
+from .materials import executors as _materials_executors  # noqa: F401  素材域执行器（scan/analyze/discover/backfill/topic/hl）
+from .scripts import service as _script_service  # noqa: F401  （链带 selfstyle 执行器注册）
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -116,8 +113,8 @@ app.include_router(cards.router, dependencies=[Depends(require_ready_user)])
 app.include_router(falsify.router, dependencies=[Depends(require_ready_user)])
 app.include_router(scripts.router, dependencies=[Depends(require_ready_user)])
 app.include_router(articles.router, dependencies=[Depends(require_ready_user)])
-app.include_router(benchmarks.router, dependencies=[Depends(require_ready_user)])
-app.include_router(radar.router, dependencies=[Depends(require_ready_user)])
+app.include_router(materials.router, dependencies=[Depends(require_ready_user)])
+app.include_router(sources.router, dependencies=[Depends(require_ready_user)])
 app.include_router(watch.router, dependencies=[Depends(require_ready_user)])
 app.include_router(style.router, dependencies=[Depends(require_ready_user)])
 app.include_router(metrics.router, dependencies=[Depends(require_ready_user)])

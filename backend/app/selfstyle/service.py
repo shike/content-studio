@@ -13,15 +13,15 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from ..asr import transcribe
-from ..benchmarks import downloader
-from ..benchmarks.downloader import resolve_aweme_id
+from ..materials import download as downloader
+from ..materials.download import resolve_aweme_id
 from ..db import engine
 from ..jobs.runner import JobContext, register_concurrent, register_executor, runner
 from ..llm import gateway
 from ..models import SelfVideo, StyleProfile, WatchAccount
 from ..prompts import load
 from ..settings import settings
-from ..watch.service import (
+from ..materials.collectors.douyin_list import (
     _list_account_videos_playwright,
     _list_author_videos_via_anchor,
     _list_author_videos_via_share_page,
@@ -284,7 +284,7 @@ async def self_analyze(ctx: JobContext, payload: dict) -> dict:
         # 2026-11-13 修复：原路径直接调 downloader.download_video，绕过了验证码熔断
         # 与 45s 下载节流（两者只在 benchmark_analyze 路径生效）——自有下载同样吃家宽
         # IP 的风控，统一走 benchmarks 的节流+熔断闸门再下载
-        from ..benchmarks.service import _captcha_breaker, _captcha_record, _throttle_download
+        from ..materials.download import captcha_breaker as _captcha_breaker, captcha_record as _captcha_record, throttle_download as _throttle_download
         from ..jobs.errors import CaptchaError as _CaptchaError
         await asyncio.to_thread(_captcha_breaker)
         await asyncio.to_thread(_throttle_download)

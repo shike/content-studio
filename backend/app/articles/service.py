@@ -373,7 +373,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
 
     与人设号选题工场（cards）完全独立——公众号线不进选题库，直出链建稿。"""
     from ..tenant_brand import brand_of
-    from ..topics.hotlist import fetch_baidu_hot, fetch_tech_news
+    from ..materials.collectors.hotlist import fetch_baidu_hot, fetch_tech_news
 
     ctx.set_progress(10, "收集站外热点")
     baidu, _ = await asyncio.to_thread(fetch_baidu_hot, 12)

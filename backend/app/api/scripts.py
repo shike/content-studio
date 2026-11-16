@@ -50,10 +50,12 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
             raise HTTPException(status_code=409, detail=str(e)) from None
     if body.ore_id:  # 获客矿建稿（2026-11-14）：获客矿视频+求学需求评论直接进获客脚本生成
         with Session(engine) as s:
-            from ..models import BenchmarkVideo
-            ore = s.get(BenchmarkVideo, body.ore_id)
-            if ore is None:
-                raise HTTPException(status_code=404, detail="获客矿样本不存在")
+            from ..materials.service import record_usage
+            from ..models import Material
+
+            ore = s.get(Material, body.ore_id)
+            if ore is None or (ore.quality or {}).get("comment_kind") != "leadgen_ore":
+                raise HTTPException(status_code=404, detail="获客矿素材不存在")
             dup = s.exec(select(Script).where(
                 Script.ore_id == body.ore_id,  # type: ignore[attr-defined]
                 Script.status.in_(["generating", "polishing"]),  # type: ignore[attr-defined]
@@ -66,6 +68,9 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
             s.add(script)
             s.commit()
             s.refresh(script)
+            # 引用追溯（PRD R1.6）：获客稿 ← 获客矿素材
+            record_usage(s, tenant_id=user.tenant_id, material_id=body.ore_id,
+                         target_type="content", target_id=script.id, role="source")
             script_id = script.id
         angles = [a.strip() for a in body.angles if a.strip()][:3]
         known = script_service.SIX_ANGLES

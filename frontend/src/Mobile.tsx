@@ -13,7 +13,7 @@ export default function Mobile({ onExit }: { onExit: () => void }) {
   const reload = useCallback(async () => {
     try {
       const [c, a] = await Promise.all([
-        api<{ items: OpenCand[] }>('/watch/discover/candidates?status=open'),
+        api<{ items: OpenCand[] }>('/sources?status=candidate'),
         api<{ items: { title: string; status: string }[] }>('/articles?limit=5'),
       ])
       setCands((c.items || []).slice(0, 10))
@@ -31,7 +31,7 @@ export default function Mobile({ onExit }: { onExit: () => void }) {
   const candAct = (id: number, act: 'add' | 'dismiss') =>
     (async () => {
       try {
-        await api(`/watch/discover/candidates/${id}/${act}`, { method: 'POST' })
+        await api(`/sources/${id}/${act === 'add' ? 'activate' : 'dismiss'}`, { method: 'POST' })
         setCands((m) => m.filter((x) => x.id !== id))
       } catch (e) {
         setError(String(e).replace(/^Error:\s*/, ''))

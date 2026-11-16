@@ -35,7 +35,7 @@ def require_douyin_url(url: str,
     """SSRF 闸门：服务端会主动打开/下载该链接，非抖音域一律 400。
 
     detail 供各端点保持原文案（拆解页与同行监测页文案不同）。校验通过原样返回 url。"""
-    from ..benchmarks.downloader import is_douyin_url
+    from ..materials.download import is_douyin_url
 
     if not is_douyin_url(url):
         raise HTTPException(status_code=400, detail=detail)

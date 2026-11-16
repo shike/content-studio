@@ -66,7 +66,7 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
     if (s.counts) setCounts(s.counts)
     if (accountType === 'leadgen') {
       // 获客矿建稿脚本的标题映射（topics 退役后标题走 title_hint/ore 快照）
-      api<{ items: { id: number; title: string }[] }>('/benchmarks?comment_kind=leadgen_ore&scan_status=all&limit=100')
+      api<{ items: { id: number; title: string }[] }>('/materials?ore=leadgen&status=all&limit=100')
         .then((d) => setOreTitles(Object.fromEntries((d.items || []).map((b) => [b.id, b.title]))))
         .catch(() => {})
     }

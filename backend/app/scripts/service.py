@@ -8,11 +8,18 @@ from sqlmodel import Session
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import BenchmarkVideo, FalsifyItem, Script, TopicCard
+from ..models import Material, Script, TopicCard
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
 SIX_ANGLES = ["反常识判断", "身份定位喊话", "行动指令", "提问式", "对比打假", "数字落差"]
+
+
+def _material_ctx(s: Session, material_id: int) -> dict:
+    """素材消费上下文（评论/拆解/分型）——单一通道，禁止消费方直接猜 JSON。"""
+    from ..materials.service import material_context
+
+    return material_context(s, int(material_id))
 
 
 def _script_length_spec(length: str) -> str:
@@ -75,32 +82,37 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         card = s.get(TopicCard, int(payload["card_id"])) if payload.get("card_id") else None
         if payload.get("card_id") and card is None:
             raise RuntimeError(f"card {payload['card_id']} 不存在")
-        falsify = (s.get(FalsifyItem, int(payload["falsify_item_id"]))
+        falsify = (s.get(Material, int(payload["falsify_item_id"]))
                    if payload.get("falsify_item_id") else None)
-        if payload.get("falsify_item_id") and falsify is None:
-            raise RuntimeError(f"falsify item {payload['falsify_item_id']} 不存在")
-        ore = (s.get(BenchmarkVideo, int(payload["ore_id"]))
+        if payload.get("falsify_item_id") and (falsify is None
+                                               or falsify.origin_type != "test_record"):
+            raise RuntimeError(f"实测素材 {payload['falsify_item_id']} 不存在")
+        ore = (s.get(Material, int(payload["ore_id"]))
                if payload.get("ore_id") else None)
-        if payload.get("ore_id") and ore is None:
-            raise RuntimeError(f"获客矿样本 {payload['ore_id']} 不存在")
+        if payload.get("ore_id") and (ore is None
+                                      or (ore.quality or {}).get("comment_kind") != "leadgen_ore"):
+            raise RuntimeError(f"获客矿素材 {payload['ore_id']} 不存在")
+        ore_ctx = _material_ctx(s, ore.id) if ore is not None else {}
         if falsify is not None:
-            # 实测打假稿（R1.4③）：result_note=唯一事实来源，没实测的环节一个字不许编
+            # 实测打假稿（R1.4③）：body=实测结论（唯一事实来源），没实测的环节一个字不许编
+            fq = falsify.quality or {}
             topic_info = {
-                "title": falsify.claim[:60],
+                "title": (falsify.title or "")[:60],
                 "angle": "",
                 "audience": "both",
                 "pain_points": [],
                 "hooks": [],
-                "claim": falsify.claim,
-                "target": falsify.target,
-                "evidence": (falsify.result_note or "")[:1500],
+                "claim": falsify.title,
+                "target": fq.get("target") or "",
+                "evidence": (falsify.body or "")[:1500],
                 "spice": "high",
             }
         elif ore is not None:
             # 获客矿建稿（分型路由消费面 2026-11-14）：求学评论区=需求清单，稿子必须接住需求+完成获客引导
             demands = [str(c.get("t") or "").strip()[:60]
-                       for c in (ore.top_comments or []) if isinstance(c, dict) and str(c.get("t") or "").strip()][:10]
-            share = int(round(float(ore.comment_leadgen_share or 0) * 100))
+                       for c in (ore_ctx.get("comments") or [])
+                       if isinstance(c, dict) and str(c.get("t") or "").strip()][:10]
+            share = int(round(float(ore_ctx.get("leadgen_share") or 0) * 100))
             topic_info = {
                 "title": f"获客需求：{(ore.title or '')[:50]}",
                 "angle": "",
@@ -109,7 +121,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                 "hooks": [],
                 "demand_note": (f"这条视频的评论区 {share}% 在求资料/学习（上面 pain_points=赞数最高的求学评论原文）。"
                                 "稿子要面向这些需求做获客内容：接住需求、给出具体可上手的方案，结尾按获客引导完成转化动作；"
-                                f"视频背景供参考：{(ore.analysis or {}).get('summary', '')[:160]}"),
+                                f"视频背景供参考：{(ore_ctx.get('analysis') or {}).get('summary', '')[:160]}"),
             }
         elif card is not None:
             # 靶子卡备稿（选题工场 R1.4）：钩子/主线由卡带（备稿时可被用户改写），spice 辣度入通道

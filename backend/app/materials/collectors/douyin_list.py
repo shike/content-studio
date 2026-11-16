@@ -10,7 +10,7 @@ import re
 import time
 from typing import Optional
 
-from ..browser import launch, ua
+from ...browser import launch, ua
 
 _LIST_LIMIT = 20          # 每账号最多看最近 N 条
 
@@ -61,7 +61,7 @@ def _list_author_videos_via_anchor(url: str, limit: int = _LIST_LIMIT) -> tuple[
     except ImportError:
         return None, "未安装 playwright", True
 
-    from ..benchmarks.downloader import resolve_aweme_id
+    from ..download import resolve_aweme_id
 
     rid = resolve_aweme_id(url)
     if not rid:
@@ -139,7 +139,7 @@ def _list_author_videos_via_anchor(url: str, limit: int = _LIST_LIMIT) -> tuple[
 
 def _list_author_videos_via_share_page(url: str, limit: int = _LIST_LIMIT) -> tuple[Optional[list], Optional[str], bool]:
     """移动分享主页路线：iesdouyin share/user 页零登录墙，拦 aweme/post 拿作品列表。"""
-    from ..benchmarks.downloader import is_douyin_url
+    from ..download import is_douyin_url
 
     if not is_douyin_url(url):  # SSRF 闸门：扫描任务会主动打开该 URL
         return None, "仅支持抖音链接", True
@@ -268,7 +268,7 @@ def _list_account_videos_playwright(url: str) -> tuple[Optional[list], Optional[
 
 def _resolve_author_via_video(url: str) -> tuple[Optional[dict], Optional[str]]:
     """视频页路线：detail 接口自带作者昵称与 sec_uid，免登录 最稳。"""
-    from ..benchmarks.downloader import resolve_aweme_id
+    from ..download import resolve_aweme_id
 
     rid = resolve_aweme_id(url)
     if not rid:
@@ -313,7 +313,7 @@ def _resolve_author_via_video(url: str) -> tuple[Optional[dict], Optional[str]]:
 
 def _resolve_author_via_share_page(url: str) -> tuple[Optional[dict], Optional[str]]:
     """分享主页路线：页面标题即「昵称的主页」，免登录。"""
-    from ..benchmarks.downloader import is_douyin_url
+    from ..download import is_douyin_url
 
     if not is_douyin_url(url):
         return None, "仅支持抖音链接"

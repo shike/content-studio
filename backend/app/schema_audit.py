@@ -17,6 +17,13 @@ from sqlmodel import SQLModel
 
 _IGNORED_TABLES = {"alembic_version"}
 
+# 迁移期白名单（P2 素材域 2026-11-16）：旧素材面 5 表已停止读写，数据已迁 sources/materials，
+# 生产库原地只读保留到 P5 收口统一 DROP（Expand-Contract；模型已删=新库不再建）。
+# P5 删旧表时同步移出本清单，让审计闸拦截任何残留。
+_LEGACY_TABLES = {
+    "benchmark_videos", "watch_candidates", "radar_topics", "content_items", "falsify_items",
+}
+
 # 类型只比「家族」：避免 VARCHAR(200) vs VARCHAR、identity INTEGER vs INTEGER 之类误报
 _TYPE_FAMILY = {
     "VARCHAR": "STRING", "TEXT": "STRING", "CHAR": "STRING", "STRING": "STRING",
@@ -52,7 +59,7 @@ def db_tables(engine) -> dict[str, dict[str, str]]:  # noqa: ANN001
     insp = sa_inspect(engine)
     out: dict[str, dict[str, str]] = {}
     for name in insp.get_table_names():
-        if name in _IGNORED_TABLES:
+        if name in _IGNORED_TABLES or name in _LEGACY_TABLES:
             continue
         out[name] = {c["name"]: _family(c["type"]) for c in insp.get_columns(name)}
     return out

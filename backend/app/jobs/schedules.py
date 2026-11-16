@@ -159,7 +159,7 @@ async def dispatch_due() -> list[str]:
 
 async def _run_watch_scan() -> str:
     from .runner import runner
-    job = await runner.submit("watch_scan", {"auto": True},
+    job = await runner.submit("material_watch_scan", {"auto": True},
                               dedup_key=f"1:scan:all:{datetime.now():%Y%m%d}")
     return f"job #{job.id}"
 
@@ -177,12 +177,12 @@ async def _run_daily_backup() -> str:
 
 
 async def _run_media_cleanup() -> str:
-    from ..benchmarks.service import cleanup_completed_media
+    from ..materials.enrich import cleanup_completed_media
     n = await asyncio.to_thread(cleanup_completed_media)
     return f"清理 {n} 个媒体文件"
 
 
-register_schedule(Schedule(key="watch_scan", label="同行扫描（全部监控账号）",
+register_schedule(Schedule(key="material_watch_scan", label="同行扫描（全部采集源）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_watch_scan))
 async def _run_article_hotspots() -> str:
@@ -287,13 +287,13 @@ register_schedule(Schedule(key="crawl_probe", label="抖音采集探针（2 小�
 
 async def _run_hl_search() -> str:
     from .runner import runner
-    job = await runner.submit("hl_search_matrix", {"auto": True},
+    job = await runner.submit("material_hl_search", {"auto": True},
                               dedup_key=f"1:hlsearch:{datetime.now():%Y%m%d}",
                               actor=(1, 0, "platform_admin"))
     return f"job #{job.id}（同城组局号搜索矩阵：城市×关键词→取证→LLM分级）"
 
 
-register_schedule(Schedule(key="hl_search_daily", label="同城组局号搜索挖掘（江浙沪）",
+register_schedule(Schedule(key="material_hl_search", label="同城组局号搜索挖掘（江浙沪）",
                            daily_hour=2, run=_run_hl_search))
 
 

@@ -14,17 +14,17 @@ from urllib.parse import quote
 
 from sqlmodel import Session, select
 
-from ..browser import launch
-from ..db import engine
-from ..jobs.runner import register_executor
-from ..llm import gateway
-from ..models import WatchCandidate
+from ...browser import launch
+from ...db import engine
+from ...jobs.runner import register_executor
+from ...llm import gateway
+from ...models import Source
 
 
 def _harvest_budget(key: str, default: int) -> int:
     """战役模式预算覆盖：app_settings.harvest_hl_search / harvest_hl_verify 可临时调大
     （挖号冲刺期用），不设或非法回落默认小预算（夜间常态挖不动太快会撞限速）。"""
-    from ..models import AppSetting
+    from ...models import AppSetting
     k = f"harvest_{key}"
     with Session(engine) as s:
         row = s.get(AppSetting, k)
@@ -70,7 +70,7 @@ _HL_NEG = ["金价", "美业", "护肤", "探店", "好物", "穿搭", "美食",
 
 
 def _hl_setting(key: str, default: list[str]) -> list[str]:
-    from ..models import AppSetting
+    from ...models import AppSetting
     with Session(engine) as s:
         row = s.get(AppSetting, key)
     try:
@@ -81,7 +81,7 @@ def _hl_setting(key: str, default: list[str]) -> list[str]:
 
 
 def _hl_get_cursor() -> list[str]:
-    from ..models import AppSetting
+    from ...models import AppSetting
     with Session(engine) as s:
         row = s.get(AppSetting, "hl_search_cursor")
     try:
@@ -92,7 +92,7 @@ def _hl_get_cursor() -> list[str]:
 
 
 def _hl_save_cursor(done: list[str]) -> None:
-    from ..models import AppSetting
+    from ...models import AppSetting
     with Session(engine) as s:
         row = s.get(AppSetting, "hl_search_cursor")
         val = json.dumps(done, ensure_ascii=False)
@@ -260,8 +260,8 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
             "authors": authors, "verified": verified}
 
 
-@register_executor("hl_search_matrix")
-async def hl_search_matrix(ctx, payload: dict) -> dict:
+@register_executor("material_hl_search")
+async def material_hl_search(ctx, payload: dict) -> dict:
     """同城组局号搜索矩阵挖掘（每晚调度）：城市×关键词搜索 → 作者池 → 取证 →
     四要素筛 → LLM 分级 → 判 A/B 入候选表（keyword=搜索矩阵，人工定夺）。"""
     cities = _hl_setting("hl_search_cities", _HL_CITIES)
@@ -270,8 +270,9 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
     n_verify = min(_harvest_budget("hl_verify", _HL_VERIFY_BUDGET), 60)
 
     with Session(engine) as s:
-        known = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
-                 if c.sec_uid}
+        known = {c.ext_id for c in s.exec(select(Source).where(  # type: ignore[attr-defined]
+            Source.kind == "peer_account")).all()  # type: ignore[attr-defined]
+            if c.ext_id}
 
     done_queries = _hl_get_cursor()
     result = await asyncio.to_thread(_hl_crawl_sync, ctx, done_queries, cities,
@@ -311,8 +312,9 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
     inserted = 0
     strong = mid = rejected = 0
     with Session(engine) as s:
-        known = {c.sec_uid for c in s.exec(select(WatchCandidate)).all()  # type: ignore[attr-defined]
-                 if c.sec_uid}
+        known = {c.ext_id for c in s.exec(select(Source).where(  # type: ignore[attr-defined]
+            Source.kind == "peer_account")).all()  # type: ignore[attr-defined]
+            if c.ext_id}
         for i, c in enumerate(cands):
             j = jmap.get(i + 1)
             if not isinstance(j, dict):
@@ -322,14 +324,16 @@ async def hl_search_matrix(ctx, payload: dict) -> dict:
             if tier not in ("强", "中") or c["sec"] in known:
                 rejected += 1
                 continue
-            s.add(WatchCandidate(
-                keyword="搜索矩阵", direction="同城组局", name=c["nick"][:60], sec_uid=c["sec"],
+            s.add(Source(
+                tenant_id=1, kind="peer_account", platform="douyin",
+                name=c["nick"][:60], ext_id=c["sec"], status="candidate",
                 url=f"https://www.iesdouyin.com/share/user/{c['sec']}",
-                signature=c["signature"], follower_count=0,
-                sample_video_id="", sample_title="",
-                sample_stats=json.dumps({"works": len(c.get("works", []))}, ensure_ascii=False),
-                account_type="leadgen",
-                pure_reason=f"搜索矩阵·LLM判{tier} · {why}"[:90], status="open"))
+                handle=c["nick"][:60],
+                config={"keyword": "搜索矩阵", "direction": "同城组局",
+                        "signature": c["signature"][:100],
+                        "account_type": "leadgen",
+                        "pure_reason": f"搜索矩阵·LLM判{tier} · {why}"[:90],
+                        "stats": {"works": len(c.get("works", []))}}))
             inserted += 1
             if tier == "强":
                 strong += 1

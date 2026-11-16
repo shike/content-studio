@@ -56,6 +56,14 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: string) 
     reload().catch((e) => setError(String(e)))
   }, [reload])
 
+  const runSelfScan = async () => {
+    if (!data?.account) return
+    setError('')
+    try {
+      await api(`/watch/accounts/${data.account.id}/scan`, { method: 'POST' })
+    } catch (e) { setError(String(e)) }
+  }
+
   // 忽略出口只留给「无法判断」的废视频；正常视频已全自动拆解（2026-11-07 定版）
   const ignoreVideo = (id: number) =>
     (async () => {
@@ -70,19 +78,33 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: string) 
       }
     })()
 
+  const [form, setForm] = useState({ name: '', url: '', creator_cookie: '' })
+  const [showEdit, setShowEdit] = useState(false)
+
+  const addAccount = async () => {
+    setError('')
+    try {
+      await api('/watch/accounts', { method: 'POST', body: JSON.stringify(form) })
+      setForm({ name: '', url: '', creator_cookie: '' })
+      await reload()
+    } catch (e) { setError(String(e)) }
+  }
+
   if (data && !data.account) {
     return (
       <div className="card mt-4 p-6">
         <EmptyState
           icon={Fingerprint}
-          title="还没有标记「我的账号」"
-          desc="在「监控清单」添加你的账号并勾选「这是我的账号」——新视频每晚自动扫描拆解。"
+          title="还没有登记「我的账号」"
+          desc="贴主页链接登记你的抖音账号——新视频每晚自动扫描并拆解说话方式。"
         />
-        {onNavigate && (
-          <div className="flex justify-center">
-            <button onClick={() => onNavigate('p_watch')} className="btn-accent">去监控清单添加 →</button>
-          </div>
-        )}
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="账号昵称"
+            className="w-36 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-sky-400" />
+          <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="主页分享链接"
+            className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-sky-400" />
+          <button onClick={addAccount} className="btn-accent">登记我的账号</button>
+        </div>
         {error && <div className="mt-3"><ErrorLine text={error} /></div>}
       </div>
     )
@@ -98,12 +120,52 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: string) 
         <span className="text-sm font-semibold text-zinc-900">风格画像</span>
         <span className="text-[11px] text-slate-400">脚本自动贴合我的说话方式</span>
       </div>
-      {/* 状态行 */}
+      {/* 状态行 + 自账号管理（监控页退役后收编于此，P4 迁 accounts） */}
       <div className="card mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>账号 <b className="text-zinc-900">{data?.account?.name || '—'}</b></span>
         <span>已分析 <b className="text-zinc-900">{data?.stats.analyzed ?? 0}</b> / {data?.stats.total ?? 0} 条</span>
         <span>画像 <b className="text-zinc-900">{p ? `v${p.version}（基于 ${p.based_on} 条）` : '未生成'}</b></span>
+        <span className="ml-auto flex items-center gap-1.5">
+          <button onClick={() => runSelfScan()} className="btn-ghost btn-xs">手动扫描</button>
+          <button onClick={() => setShowEdit(!showEdit)} className="btn-ghost btn-xs">管理</button>
+        </span>
       </div>
+      {showEdit && data?.account && (
+        <div className="card mt-2 space-y-2 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder={data.account.name} className="w-36 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-sky-400" />
+            <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="新主页链接（可空=不改）"
+              className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-sky-400" />
+            <input value={form.creator_cookie} onChange={(e) => setForm({ ...form, creator_cookie: e.target.value })}
+              type="password" placeholder="创作者中心 cookie（可空=不改）"
+              className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-sky-400" />
+            <button onClick={async () => {
+              setError('')
+              try {
+                const patch: Record<string, string> = {}
+                if (form.name.trim()) patch.name = form.name.trim()
+                if (form.url.trim()) patch.url = form.url.trim()
+                if (form.creator_cookie.trim()) patch.creator_cookie = form.creator_cookie.trim()
+                if (Object.keys(patch).length) await api(`/watch/accounts/${data.account!.id}`, { method: 'PUT', body: JSON.stringify(patch) })
+                setForm({ name: '', url: '', creator_cookie: '' })
+                setShowEdit(false)
+                await reload()
+              } catch (e) { setError(String(e)) }
+            }} className="btn-accent">保存</button>
+            <button onClick={async () => {
+              if (!window.confirm) return
+              setError('')
+              try {
+                await api(`/watch/accounts/${data.account!.id}`, { method: 'DELETE' })
+                setShowEdit(false)
+                await reload()
+              } catch (e) { setError(String(e)) }
+            }} className="btn-ghost btn-xs text-red-500">删除账号</button>
+          </div>
+          <div className="text-[11.5px] text-slate-400">cookie 只写不读（用于创作者中心数据回流，仅限自有账号）；删除不影响已分析的视频。</div>
+        </div>
+      )}
 
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
 

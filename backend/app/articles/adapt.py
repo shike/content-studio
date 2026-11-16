@@ -15,7 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Article, ContentItem, DailyLedger
+from ..models import Article, DailyLedger, Material
 from ..prompts import load, render
 from .service import (
     _article_generate_fail,
@@ -72,37 +72,43 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             raise RuntimeError("改编器未启用：缺少 ima_kb_enabled / 凭证配置")
         # 卡死自愈：改编中超 2 小时无进展的项退回待改编（job 被杀/超时的残留）
         stale_cut = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
-        for it in s.exec(select(ContentItem).where(  # type: ignore[attr-defined]
-                ContentItem.status == "running")).all():  # type: ignore[attr-defined]
+        for it in s.exec(select(Material).where(  # type: ignore[attr-defined]
+                Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+                Material.stage == "running")).all():  # type: ignore[attr-defined]
             if it.updated_at and it.updated_at < stale_cut:
-                it.status = "pending"
+                it.stage = "pending"
                 s.add(it)
         s.commit()
-        item = s.exec(select(ContentItem).where(  # type: ignore[attr-defined]
-            ContentItem.status == "pending")  # type: ignore[attr-defined]
-            .order_by(ContentItem.priority.desc(), ContentItem.quality_score.desc(),  # type: ignore[attr-defined]
-                      ContentItem.id)).first()  # type: ignore[attr-defined]
+        item = s.exec(select(Material).where(  # type: ignore[attr-defined]
+            Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+            Material.stage == "pending")  # type: ignore[attr-defined]
+            .order_by(Material.quality.op('->')('priority').desc().nulls_last(),
+                      Material.quality.op('->')('score').desc().nulls_last(),
+                      Material.id)).first()  # type: ignore[attr-defined]
         if item is None:
             s.add(DailyLedger(day=_today(), phase="adapt", ok=True,
                               produced="", reason="清单空：无待改编项（宁缺勿滥）"))
             s.commit()
             ctx.set_progress(100, "清单空，今日不出稿")
             return {"adapted": False, "message": "清单空"}
-        item.status = "running"  # CAS 占位（单 worker + 日级 dedup_key，无并发竞争）
+        item.stage = "running"  # CAS 占位（单 worker + 日级 dedup_key，无并发竞争）
         s.add(item)
         s.commit()
         s.refresh(item)
-        item_id, mid, src_title = item.id, item.media_id, item.title
-        angle, quotes = item.adapt_angle, [str(q) for q in (item.best_quotes or [])]
-        score = item.quality_score
+        item_id, mid, src_title = item.id, item.origin_id, item.title
+        q0 = item.quality or {}
+        angle = str(q0.get("adapt_angle") or "")
+        quotes = [str(x) for x in (q0.get("best_quotes") or [])]
+        score = float(q0.get("score") or 0)
     client_id, api_key = cfg["client_id"], cfg["api_key"]
 
     def _release(reason: str, item_status: str = "pending", tag: str = "") -> None:
         """空过/未过收尾：清单项退回指定状态 + 当日账写原因。"""
         with Session(engine) as s:
-            it = s.get(ContentItem, item_id)
+            it = s.get(Material, item_id)
             if it is not None:
-                it.status = item_status
+                it.stage = item_status
+                it.status = "ignored" if item_status == "low" else "ready"
                 if tag:
                     it.note = ((it.note or "") + f"｜{tag}").strip("｜")[:300]
                 s.add(it)
@@ -217,7 +223,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 issues = await review_facts(md_text, source)
         if issues:
             with Session(engine) as s:
-                it0 = s.get(ContentItem, item_id)
+                it0 = s.get(Material, item_id)
                 fails = (it0.note or "").count("审校未过") if it0 is not None else 0
             tag = f"审校未过×{fails + 1}"
             _release(f"事实审校二次未过（{'；'.join(issues[:2])}），清单项 #{item_id} 落 low 不再自动重试"
@@ -246,9 +252,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             title = ranked[0][0]
     except TransientError:
         with Session(engine) as s:
-            it = s.get(ContentItem, item_id)
-            if it is not None and it.status == "running":
-                it.status = "pending"  # 梯子重试时同一清单项重新来过
+            it = s.get(Material, item_id)
+            if it is not None and it.stage == "running":
+                it.stage = "pending"  # 梯子重试时同一清单项重新来过
                 s.add(it)
                 s.commit()
         raise
@@ -272,12 +278,18 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                     p[:44] for p in reader_points[:2])[:200]
             s.add(art)
             s.commit()
-        it = s.get(ContentItem, item_id)
+        it = s.get(Material, item_id)
         if it is not None:
-            it.status = "done"
-            it.article_id = article_id
+            it.stage = "done"
+            q1 = dict(it.quality or {})
+            q1["article_id"] = article_id
+            it.quality = q1
             s.add(it)
             s.commit()
+            from ..materials.service import record_usage
+
+            record_usage(s, tenant_id=it.tenant_id or 1, material_id=item_id,
+                         target_type="content", target_id=article_id, role="source")
         s.add(DailyLedger(day=_today(), phase="adapt", ok=True,
                           produced=f"清单项 #{item_id} → 文章 #{article_id}《{title[:24]}》（重复率 {ratio}%）"))
         s.commit()

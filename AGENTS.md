@@ -1,12 +1,12 @@
 # 跃迁内容工作室 · Agent 工作规约
 
 单管理员流水线（登录门禁，PRD R11/TDD §15）：选题 → 口播脚本（一版精品直出）→ 公众号长文。发布永远人工；数字人成片/发布台/多租户不在系统范围。
-架构：FastAPI + SQLModel + SQLite（`backend/app/`，24 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。
+架构：FastAPI + SQLModel + PostgreSQL 16（`backend/app/`，20 模型；迁移期生产库另存 5 张只读旧素材表，P5 收口 DROP）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。schema 变更唯一通道=Alembic（`backend/.venv/bin/alembic -c backend/alembic.ini upgrade head`，sync-server 发版自动跑）。
 两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约（§13：冒烟纪律/隔离实例/审计对账）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根）
 
-- 后端 8100：`scripts/launchd.sh install`（正式常驻+看门狗）/ `start-absolute.sh`（临时）；Linux `deploy-linux.sh install`；一键起 `dev.sh`。
+- 后端 8100：`scripts/launchd.sh install`（正式常驻+看门狗，装前自动 alembic）/ `start-absolute.sh`（临时）；Linux `deploy-linux.sh install`；一键起 `dev.sh`。本地开发数据库=pgserver（`data/pgdata`，重启 Mac 后需重跑 TDD §12 启动片段）；`.env` 必配 `DATABASE_URL`。
 - 发服务器唯一流程 `scripts/sync-server.sh`（rsync+重启+健康检查；在途任务拒发，`CS_FORCE_RESTART=1` 强发；裸 rsync 不重启=旧代码照跑）。
 - 重启自愈（queued 回队/running 标 failed）须在 `runner.start()` 之后。前端改完必 `npx tsc --noEmit && npm run build`。
 
@@ -14,7 +14,7 @@
 
 - **验收=功能冒烟实跑（2026-11-16 用户裁决：验收套件整目录删除）**：日常验证=真实链路把新功能本身跑通（冒烟先行），生产运行本身承担长周期验证（夜间扫描/调度即真实使用，失败可见于失败中台）。验收脚本不再作为回归门存在。
 - **冒烟必须覆盖执行器全路径（2026-11-16 cards 拆分教训）**：重构挪函数后，只冒烟一个入口会漏其余执行器的 NameError（实测 card_seed 绿、card_daily 因漏导入门面名在调度时必炸）。改完用 `dis` 全量扫描**本次拆分涉及的每个模块、每个顶层函数及全部嵌套 code object** 的 LOAD_GLOBAL，逐一核对模块 globals 可解析；调度类执行器（如 card_daily）在隔离实例至少触发一次真实调度。
-- 隔离实例（本地冒烟防污染）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；**收尾必须 pkill 干净 + 删 `data-acceptance`**——漏 DATA_DIR 会摸到默认 data/；复制库先清继承队列 `UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`）。
+- 隔离实例（本地冒烟防污染）：业务库与媒体**两把钥匙都要显式**——`DATABASE_URL=<隔离库> DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；收尾 pkill + dropdb/清库 + 删 `data-acceptance`；复制生产数据用 `pg_dump|pg_restore`，先清继承队列 `UPDATE jobs SET status='failed' WHERE status IN ('queued','running')`）。
 - 全线 naive-UTC，SQL 用 `datetime('now')`。测试数据收尾必清（假数据污染选题评分）。
 - 失败是异常不是工作流：瞬时失败走退避梯子 30min→2h→6h→24h→每日慢巡（30 次上限）；确定性失败安静终态；界面只有红徽章+行内重试（后端 failures API 保留）。
 
@@ -27,8 +27,8 @@
 ## 前端规矩
 
 - 页面六段式：页头带（主操作 ≤2）→回显带（全站此位置）→计数 chips→紧凑行列表+点行展开→空态。UI 操作必有回显，降级必须可见（含原因）；禁 `prompt()`/`alert()`。审阅队列一律手动进入（交互契约=PRD R1.5）；共享组件 QueueBar/ChipRow/relTime 在 `components.tsx`。
-- 侧重版导航（2026-11-14 用户定版：菜单按业务线组织、主线靠前）：侧栏顶层 7 项=今天/人设号（主线：选题/视频稿/经营）/获客（获客选题/视频稿）/公众号（工场/清单/画像）/监控（监控号/话题雷达/拆解库/账号候选）/任务/设置，目的地由页内 tab 承载（用户批准破「目的地不藏页内 tab」旧规）；监控页两线共用 tab 带「人设|获客」线切换；容器组件在 `pages/Stages.tsx`，旧 16 叶+三段式+4 键经 App.tsx NAVMAP 全量兼容路由（内嵌 onNavigate 不断链）。**业务口径唯一权威在 PRD（R1.4/R5.6b/R6），本文件不复述。**
-- 徽章（counts.ts 同源，60s 刷新）落线页自身：人设号=待备稿靶子+待定稿脚本/获客=获客矿数+待定稿脚本/公众号=待决策稿+待改编源文/监控=账号候选+拆解待定夺合计/任务=在途（红警只在终态失败亮）/今天=待备稿靶子数；过程性数字不上菜单。
+- 侧重版导航（重构 P2 2026-11-16 定版：素材库=唯一进料口）：侧栏顶层 7 项=今天/人设号（主线：选题/视频稿/经营）/获客（获客选题/视频稿）/公众号（工场/清单/画像）/**素材库（收件箱/全部素材/采集源/账号候选——原监控页四叶收编于此）**/任务/设置，目的地由页内 tab 承载；旧 16 叶+监控 4 键经 App.tsx NAVMAP 全量兼容路由到素材库（内嵌 onNavigate 不断链）。容器组件在 `pages/Stages.tsx`。**业务口径唯一权威在 PRD（R1/R2-R5/R6），本文件不复述。**
+- 徽章（counts.ts 同源，60s 刷新）落线页自身：人设号=待备稿靶子+待定稿脚本/获客=获客矿数+待定稿脚本/公众号=待决策稿+待改编源文/**素材库=收件箱待定夺+账号候选合计**/任务=在途（红警只在终态失败亮）/今天=待备稿靶子数；过程性数字不上菜单。
 - 主题 moxt（墨绿×白纸）：**换色只改 index.css 的 `@theme`，别动组件类名**；改页面前先给交互方案。icon=public/icon.svg，数字用 `.num-serif`。
 
 ## 抖音抓取事实（会过期，改前先实测）

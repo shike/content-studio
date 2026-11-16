@@ -1,8 +1,7 @@
 """全站待办统计（服务端真值口径）：菜单徽章/工作台待办的唯一数据源。
 
-此前 TodoStats 由前端拉 4 个大列表（topics 200/scripts 500/articles 100）自行派生——
-窗口口径不一致且随数据量增长失真。本端点一次性给全库（本租户）真值。
-三库独立（2026-11-02）：选题/脚本待办按线拆分（persona 人设库 / leadgen 获客库）。
+本端点一次性给全库（本租户）真值；P2 素材域起：候选/收件箱读 sources+materials
+（旧拆解库/候选表已退役）。三库独立（2026-11-02）：选题/脚本待办按线拆分。
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -29,27 +28,34 @@ def _count(s: Session, tid: int, table: str, **eq) -> int:
 def todo_stats(user: User = Depends(require_user)) -> dict:
     tid = user.tenant_id
     with Session(engine) as s:
-        # 选题库候选计数已退役（2026-11-14 分型路由：人设=靶子卡、获客=获客矿，topics 表只留历史）
         pending_scripts_persona = _count(s, tid, "scripts",
                                          status="generated", account_type="persona")
         pending_scripts_leadgen = _count(s, tid, "scripts",
                                          status="generated", account_type="leadgen")
-        # 待写长文（公众号独立报题线 2026-11-02）：草稿箱里待写的报题草稿
-        # 内容工场待决策稿（2026-11-10 用户定版「系统全干、用户只决策」）：
-        # 排队写 + 待发（draft/edited/rendered）——选题池降级为系统内部机制，不再人工挑选
         pending_articles = s.execute(text(
             "SELECT COUNT(*) FROM articles WHERE tenant_id=:tid AND status IN "
             "('pending','draft','edited','rendered')"), {"tid": tid}).scalar() or 0
-        # 候选账号待定夺（2026-11-03 IA 收敛：情报并入产线，徽章随线走）
-        cand_open_persona = _count(s, tid, "watch_candidates",
-                                   status="open", account_type="persona")
-        cand_open_leadgen = _count(s, tid, "watch_candidates",
-                                   status="open", account_type="leadgen")
+        # 候选账号待定夺（P2 素材域：sources candidate，account_type 在 config）
+        cand_open_persona = s.execute(text(
+            "SELECT COUNT(*) FROM sources WHERE tenant_id=:tid AND status='candidate' "
+            "AND COALESCE(config->>'account_type','persona')='persona' "
+            "AND COALESCE(config->>'dismissed','false') NOT IN ('true','True','1')"),
+            {"tid": tid}).scalar() or 0
+        cand_open_leadgen = s.execute(text(
+            "SELECT COUNT(*) FROM sources WHERE tenant_id=:tid AND status='candidate' "
+            "AND COALESCE(config->>'account_type','persona')='leadgen' "
+            "AND COALESCE(config->>'dismissed','false') NOT IN ('true','True','1')"),
+            {"tid": tid}).scalar() or 0
         # 今日靶子（2026-11-14 选题工场 R1.4）：靶子卡待备稿数——叶子徽章口径
         targets_persona = _count(s, tid, "topic_cards", status="draft")
+        # 素材收件箱待定夺（P2 素材域：抖音采集新视频入口）
+        materials_inbox = s.execute(text(
+            "SELECT COUNT(*) FROM materials WHERE tenant_id=:tid AND status='inbox' "
+            "AND origin_type='douyin_video'"), {"tid": tid}).scalar() or 0
     return {"targetsPersona": targets_persona,
             "pendingScriptsPersona": pending_scripts_persona,
             "pendingScriptsLeadgen": pending_scripts_leadgen,
             "pendingArticles": pending_articles,
             "openCandidatesPersona": cand_open_persona,
-            "openCandidatesLeadgen": cand_open_leadgen}
+            "openCandidatesLeadgen": cand_open_leadgen,
+            "materialsInbox": materials_inbox}

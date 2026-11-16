@@ -89,8 +89,6 @@ class FailurePattern(TimestampMixin, table=True):
     sample_error: str = ""  # 最近一次完整错误（诊断线索）
 
 
-
-
 class TopicCard(TenantScoped, TimestampMixin, table=True):
     """人设号靶子卡（选题工场，PRD R1.4 三原则定版 2026-11-14）。
 
@@ -112,46 +110,6 @@ class TopicCard(TenantScoped, TimestampMixin, table=True):
     status: str = Field(default="draft", index=True)
     superseded_by: Optional[int] = None  # 批次替代链（当日无下游旧卡让位）
     script_id: Optional[int] = None  # 备稿后回填（与 scripts.card_id 双向锚）
-
-
-class FalsifyItem(TenantScoped, TimestampMixin, table=True):
-    """实测打假清单（PRD R1.4③，2026-11-14 定版）：实测是物理动作，系统只管清单与成稿。
-
-    result_note=实测结论自由文本（过程+关键数字），是成稿的唯一事实来源——
-    没回填结论不可成稿（没有实测事实的打假稿=编造）。"""
-    __tablename__ = "falsify_items"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    claim: str = ""       # 要打的主张一句话（≤60）
-    target: str = ""      # 实测对象（≤40：某课/某工具/某说法）
-    evidence_note: str = ""  # 线索/链接（自由文本）
-    result_note: str = ""    # 实测结论（自由文本）
-    status: str = Field(default="pending", index=True)  # pending|testing|tested|scripted|dismissed
-    auto_source: bool = Field(default=False)  # hunt 自动猎取 vs 手动添加
-    script_id: Optional[int] = None  # 成稿后回填（与 scripts.falsify_item_id 双向锚）
-
-
-
-
-class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
-    __tablename__ = "benchmark_videos"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    url: str = ""
-    author: str = ""
-    title: str = ""
-    stats: dict = Field(default_factory=dict, sa_column=Column(JSONB))
-    transcript: str = ""
-    analysis: dict = Field(default_factory=dict, sa_column=Column(JSONB))
-    top_comments: list = Field(default_factory=list, sa_column=Column(JSONB))  # 高赞评论原文 [{t,d}]（拆解时抓取存档——评论区=观点的矿脉，R1.4 进料）
-    comment_kind: str = Field(default="")  # 评论区分型：persona_ore(人设矿)|leadgen_ore(获客矿，求学打卡型→归获客线)；''=未采评论未分型
-    comment_leadgen_share: float = Field(default=0.0)  # 求学密度 0~1（求学词根命中占比，分型依据留痕）
-    media_path: str = ""
-    quality_score: float = 0.0  # 内容热度分 0~10（评论/2+赞/60 封顶 10，_heat_score 2026-11-11 定版）
-    account_type: str = Field(default="persona")  # persona(人设) | leadgen(获客)——拆解 prompt 分叉依据
-    notes: str = ""  # 自动拆解闸标记等（自动批准原因/雷达来源）
-    source: str = "douyin"  # douyin | local
-    scan_status: str = Field(default="approved")  # pending(待定夺) | approved(已批准) | ignored(已忽略)
 
 
 class Tenant(TimestampMixin, table=True):
@@ -186,30 +144,13 @@ class UserSession(TimestampMixin, table=True):
     expires_at: datetime = Field(index=True)
 
 
-class RadarTopic(TenantScoped, TimestampMixin, table=True):
-    """话题雷达：监控的抖音话题（泛 AI 类），按日巡检话题下新视频测热度。
-
-    热度代理=新增视频速度（话题接口免登录 但无互动数字）；单次巡检新增
-    ≥5 条判为飙升（通知仅 Mac 生效，服务器静默跳过）。seen_ids 记已见视频防重复计数。"""
-    __tablename__ = "radar_topics"
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(default=0, index=True)
-    ch_id: str = Field(unique=True)
-    name: str = ""
-    enabled: bool = True
-    notify: bool = True
-    seen_ids: list = Field(default_factory=list, sa_column=Column(JSONB))  # 已见视频 id（尾端截断 300）
-    hits: list = Field(default_factory=list, sa_column=Column(JSONB))  # 低粉高赞清单 [{id, desc, author, digg, followers, ratio}]
-    last_checked_at: Optional[datetime] = None
-
-
 class Script(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "scripts"
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
     card_id: Optional[int] = Field(default=None, foreign_key="topic_cards.id", index=True)  # 靶子卡备稿（选题工场 R1.4）
-    falsify_item_id: Optional[int] = Field(default=None, foreign_key="falsify_items.id", index=True)  # 实测稿备稿（R1.4③）
-    ore_id: Optional[int] = Field(default=None, foreign_key="benchmark_videos.id", index=True)  # 获客矿建稿锚（分型路由消费面，2026-11-14）
+    falsify_item_id: Optional[int] = Field(default=None, index=True)  # 实测素材锚（P2 起=materials.id，test_record；FK 已随素材域迁移拆除）
+    ore_id: Optional[int] = Field(default=None, index=True)  # 获客矿建稿锚（P2 起=materials.id，leadgen_ore；FK 已随素材域迁移拆除）
     title_hint: str = Field(default="")  # 生成来源标题快照（列表显示用；topics 退役后不再 join）
     versions: list = Field(default_factory=list, sa_column=Column(JSONB))
     final_text: str = ""
@@ -218,11 +159,6 @@ class Script(TenantScoped, TimestampMixin, table=True):
     title_candidates: list = Field(default_factory=list, sa_column=Column(JSONB))
     status: str = "generating"  # generating | polishing | generated（待定稿，徽章计数依赖）| final
     account_type: str = Field(default="persona")  # persona | leadgen（两类号：内容看板过滤/风格分叉）
-
-
-
-
-
 
 
 class Article(TenantScoped, TimestampMixin, table=True):
@@ -246,27 +182,6 @@ class Article(TenantScoped, TimestampMixin, table=True):
 # 同批划线退役的列：research_reports.tokens_in/tokens_out/cost_est（成本台账）、
 # tenants.status、watch_candidates.leadgen_comments/recent_same、radar_topics.recent/
 # new_since_last、articles.title_alts/kb_doc_ids——生产库旧列原地保留，新库不再建。
-
-
-class ContentItem(TenantScoped, TimestampMixin, table=True):
-    """内容清单（2026-11-11 源文改编产线）：挖掘器逐篇评估知识库，高质量源文入清单，
-    改编器每日取一项改编成文——清单项 = 一篇具体源文（保骨架保原话，换判断口径）。"""
-    __tablename__ = "content_items"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    media_id: str = Field(default="", index=True)  # ima 源文 id（库内唯一，防重挖重入）
-    folder_name: str = ""                 # 产出来源目录
-    title: str = ""                       # 源文标题
-    source_author: str = ""               # 来源号/作者
-    quality_score: float = 0.0            # 挖掘器评分（≥生成线才入清单；低分不落行只记日账）
-    why_good: str = ""                    # 为什么值得发（一句）
-    adapt_angle: str = ""                 # 改编角度（保什么骨架/换什么口径/接什么钩子）
-    best_quotes: list = Field(default_factory=list, sa_column=Column(JSONB))  # 逐字原话 [str]（改编时保留引用）
-    category: str = Field(default="", index=True)  # 栏目：转行真话|交付现场|行业拆局|变现报价|现场实录
-    priority: int = Field(default=0, index=True)  # 人工置顶权重（「明天改编」=9，取项先看它再看质量分）
-    status: str = Field(default="pending", index=True)  # pending 待改编 | running 改编中 | done 已改编 | published 已发布 | dismissed 不做
-    article_id: Optional[int] = Field(default=None, index=True)  # 改编产出的文章 id
-    note: str = ""                        # 备注（空过原因等）
 
 
 class DailyLedger(TenantScoped, TimestampMixin, table=True):
@@ -295,27 +210,6 @@ class WatchAccount(TenantScoped, TimestampMixin, table=True):
     note: str = ""
     account_type: str = Field(default="persona")  # persona(立人设) | leadgen(获客)（2026-10-28 两类号策略）
     last_scan_at: Optional[datetime] = None
-
-
-class WatchCandidate(TenantScoped, TimestampMixin, table=True):
-    """关键词搜出的候选对标账号（watch_discover 产出，人工定夺后入监测清单）。"""
-    __tablename__ = "watch_candidates"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    keyword: str = ""
-    direction: str = ""
-    name: str = ""
-    sec_uid: str = Field(default="", index=True)
-    url: str = ""  # 分享主页链接（iesdouyin share/user，扫描链路免登录 可用）
-    signature: str = ""
-    follower_count: int = 0
-    sample_video_id: str = ""
-    sample_title: str = ""
-    sample_stats: str = ""  # JSON：digg/comment/share/collect
-    account_type: str = Field(default="persona")  # persona | leadgen（评论区求带密度判定）
-    leadgen_density: float = 0.0  # 评论区求带密度 0~1（获客信号，2026-10-28）
-    pure_reason: str = ""  # 纯获客判定依据（名字/签名/近期作品命中的引流词，v3 挖号先行 2026-11-02）
-    status: str = Field(default="open", index=True)  # open 待定夺 | added 已加入 | dismissed 已忽略
 
 
 class ScheduleState(TimestampMixin, table=True):
@@ -389,3 +283,87 @@ class StyleProfile(TenantScoped, TimestampMixin, table=True):
     traits: list = Field(default_factory=list, sa_column=Column(JSONB))
     exemplars: list = Field(default_factory=list, sa_column=Column(JSONB))
     based_on: int = 0  # 基于多少条视频
+
+
+# ── 素材域（重构 P2，2026-11-16）：sources/materials/material_analyses/material_usages ──
+# 旧素材表（benchmark_videos/watch_candidates/radar_topics/content_items/falsify_items）
+# 模型已删：数据迁到新表后原地只读保留（schema_audit 白名单，P5 收口统一 DROP）。
+
+
+class Source(TenantScoped, TimestampMixin, table=True):
+    """采集源（素材域唯一来源登记，PRD R1.3）：同行账号/话题雷达/知识库目录/热点源/手动。
+    账号候选=同一张表 status=candidate（发现产出，人工定夺后转 active）；dismissed 走 config 标记。"""
+    __tablename__ = "sources"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = Field(default="peer_account", index=True)  # peer_account|radar_topic|kb_folder|hotlist|manual
+    platform: str = Field(default="douyin")  # douyin|wechat|xiaohongshu|web|ima
+    name: str = ""
+    handle: str = ""  # 平台句柄（昵称/话题名/目录名）
+    ext_id: str = Field(default="", index=True)  # 平台侧唯一 id（sec_uid/ch_id/media 目录）——发现去重锚
+    url: str = ""
+    status: str = Field(default="active", index=True)  # candidate|active|disabled
+    config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # config 约定：peer_account={account_type, scores, leadgen_density, keyword, signature,
+    #   sample_*, dismissed}; radar_topic={seen_ids, hits, notify}; kb_folder={folders, kb_id};
+    #   candidate 样本={stats:{digg,comment,...}}
+    last_sync_at: Optional[datetime] = None
+    note: str = ""
+
+
+class Material(TenantScoped, TimestampMixin, table=True):
+    """统一素材（PRD R1.1/R1.2）：外部原料+一手自有素材；成稿不进本表。
+    status=素材可用性（inbox 收件箱|ready 可用|ignored 忽略|archived 归档）；
+    stage=来源特有流程态（test_record: pending/testing/tested/scripted/dismissed；
+    kb_doc: pending/running/done/published/dismissed/low）——两条轴互不污染。"""
+    __tablename__ = "materials"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    source_id: Optional[int] = Field(default=None, foreign_key="sources.id", index=True)
+    origin_type: str = Field(default="douyin_video", index=True)
+    # douyin_video|douyin_image|wechat_article|web_page|kb_doc|manual_note|test_record|image|audio|video
+    origin_id: str = Field(default="", index=True)  # 平台侧 id（aweme id / ima media_id）——去重锚
+    origin_url: str = ""
+    author: str = ""
+    title: str = ""
+    body: str = ""        # 图文正文 / 知识库要点 / 实测结论
+    transcript: str = ""  # 视频/音频转写（拆解产物流回）
+    media: dict = Field(default_factory=dict, sa_column=Column(JSONB))  # {path, duration, cover}
+    stats: dict = Field(default_factory=dict, sa_column=Column(JSONB))  # {digg, comment, share, collect, followers}
+    tags: list = Field(default_factory=list, sa_column=Column(JSONB))
+    quality: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # quality 约定：{heat 热度分, comment_kind persona_ore|leadgen_ore, leadgen_share,
+    #   gate_reason 闸判定留痕, stats_source, account_type persona|leadgen,
+    #   kb: score/why_good/adapt_angle/best_quotes/category/priority,
+    #   falsify: target, claim_norm}
+    stage: str = Field(default="", index=True)
+    status: str = Field(default="inbox", index=True)
+    content_hash: str = Field(default="", index=True)  # origin 去重哈希（origin_type+origin_id/url+title）
+    collected_at: datetime = Field(default_factory=utcnow)
+    published_at: Optional[datetime] = None  # 内容发布时间（新鲜窗/回填窗的判据）
+    note: str = ""
+
+
+class MaterialAnalysis(TimestampMixin, table=True):
+    """素材加工产物版本留痕（PRD R1.5）：拆解/评论存档/摘要/风格标注按 kind+version 追加。
+    同 material+kind 取最新 version；写入不覆盖旧行（分析可回溯）。"""
+    __tablename__ = "material_analyses"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    material_id: int = Field(foreign_key="materials.id", index=True)
+    kind: str = Field(index=True)  # breakdown 拆解|comments 评论存档|style 风格|summary 摘要
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    text: str = ""
+    model: str = ""
+    version: int = 1
+
+
+class MaterialUsage(TenantScoped, TimestampMixin, table=True):
+    """素材引用追溯（PRD R1.6）：哪条素材被哪个选题/稿件用了（只追溯，不做效果归因）。"""
+    __tablename__ = "material_usages"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    material_id: int = Field(foreign_key="materials.id", index=True)
+    target_type: str = Field(default="content", index=True)  # idea|content
+    target_id: int = Field(default=0, index=True)
+    role: str = "source"  # source|evidence|quote|inspiration

@@ -1,18 +1,16 @@
-"""同行监测 API：账号增删改查 + 扫描（全量/单号）+ 识别 + 扫描历史 + 关键词发现账号。"""
-import json
-from datetime import datetime, timedelta, timezone
+"""自有账号 API（P2 收窄）：仅 self 账号 CRUD——同行账号/候选/扫描已迁素材库（/api/sources）。
 
+self 账号走自我研究链（self_scan/self_analyze/创作者中心回流），表仍 watch_accounts，
+P4 数据域迁移 accounts。creator_cookie 绝不出后端（回显只有 has_cookie 位）。
+"""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..auth import require_user
 from ..db import engine
-from ..models import User
 from ..jobs.runner import runner
-from ..models import BenchmarkVideo, Job, WatchAccount, WatchCandidate
-from ..watch.service import _DISCOVER_QUALITY_FANS
-from ..watch.service import _fmt_follow
+from ..models import User, WatchAccount
 from ._listing import require_douyin_url
 
 router = APIRouter(prefix="/api/watch")
@@ -26,54 +24,24 @@ def _account_out(acc: WatchAccount) -> dict:
     return d
 
 
-@router.get("/digest")
-def watch_digest(user: User = Depends(require_user)) -> dict:
-    """同行监测周报（近 7 天摘要，实时计算不落库）：新视频/待定夺按作者分布 +
-    高分选题 Top3（带切角一句话）。数据按租户隔离。"""
-    tid = user.tenant_id
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    # SQLite DATETIME 存 "YYYY-MM-DD HH:MM:SS.ffffff"（空格分隔）；isoformat 的 'T'/'+' 会
-    # 让字符串比较错位（' ' < 'T'，截止日当天恒被排除）——2026-11-13 修复为同构格式
-    cutoff_s = cutoff.strftime("%Y-%m-%d %H:%M:%S.%f")
+@router.get("/accounts")
+def list_accounts(account_type: str = "", user: User = Depends(require_user)) -> dict:
+    """自有账号清单（恒 kind=self；同行账号在 /api/sources）。"""
     with Session(engine) as s:
-        vids = s.exec(
-            select(BenchmarkVideo).where(  # type: ignore[attr-defined]
-                BenchmarkVideo.tenant_id == tid,  # type: ignore[attr-defined]
-                BenchmarkVideo.source == "douyin",  # type: ignore[attr-defined]
-                BenchmarkVideo.created_at >= cutoff_s,  # type: ignore[attr-defined]
-            ).order_by(BenchmarkVideo.id.desc())  # type: ignore[attr-defined]
-        ).all()
-        pending_authors: dict[str, int] = {}
-        for v in vids:
-            if v.scan_status == "pending":
-                key = v.author or "未知"
-                pending_authors[key] = pending_authors.get(key, 0) + 1
-        # 清单外高赞同行（每日发现的 open 候选，粉丝过质量线）：价值流转的第三路
-        disc = s.exec(
-            select(WatchCandidate).where(  # type: ignore[attr-defined]
-                WatchCandidate.tenant_id == tid,  # type: ignore[attr-defined]
-                WatchCandidate.status == "open",  # type: ignore[attr-defined]
-                WatchCandidate.follower_count >= _DISCOVER_QUALITY_FANS,  # type: ignore[attr-defined]
-            ).order_by(WatchCandidate.follower_count.desc())  # type: ignore[attr-defined]
-        ).all()
-        discovered = [{"name": c.name, "follower_count": c.follower_count,
-                       "signature": (c.signature or "")[:40]} for c in disc[:3]]
-    return {
-        "new_videos": len(vids),
-        "pending": sum(1 for v in vids if v.scan_status == "pending"),
-        "pending_authors": sorted(pending_authors.items(), key=lambda x: -x[1])[:5],
-        "discovered": {"count": len(disc), "top": discovered},
-    }
+        q = select(WatchAccount).where(WatchAccount.kind == "self")  # type: ignore[attr-defined]
+        if account_type in ("persona", "leadgen"):
+            q = q.where(WatchAccount.account_type == account_type)  # type: ignore[attr-defined]
+        rows = s.exec(q.order_by(WatchAccount.id)).all()  # type: ignore[attr-defined]
+        return {"items": [_account_out(r) for r in rows]}
 
 
 class AccountIn(BaseModel):
-    platform: str = "douyin"  # douyin | channels
+    platform: str = "douyin"
     name: str
     url: str = ""
     note: str = ""
-    kind: str = "competitor"  # competitor | self
-    account_type: str = "persona"  # persona(立人设) | leadgen(获客)
-    creator_cookie: str = ""  # 创作者中心登录态（仅 self 用；回显只给 has_cookie 不回 cookie）
+    account_type: str = "persona"
+    creator_cookie: str = ""  # 创作者中心登录态（回显只给 has_cookie 不回 cookie）
 
 
 class AccountUpdate(BaseModel):
@@ -81,56 +49,16 @@ class AccountUpdate(BaseModel):
     url: str | None = None
     note: str | None = None
     enabled: bool | None = None
-    kind: str | None = None
+    account_type: str | None = None
     creator_cookie: str | None = None  # 传空串=清除（换号/作废）
 
 
-class ResolveIn(BaseModel):
-    url: str
-
-
-
-
-
-@router.get("/accounts")
-def list_accounts(account_type: str = "") -> dict:
-    """account_type：persona|leadgen 类型内过滤（情报中心 2026-11-03 分线；空=全量）。"""
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    stats: dict[str, dict] = {}
-    with Session(engine) as s:
-        q = select(WatchAccount).order_by(WatchAccount.id)  # type: ignore[attr-defined]
-        if account_type in ("persona", "leadgen"):
-            q = q.where(WatchAccount.account_type == account_type)  # type: ignore[attr-defined]
-        rows = s.exec(q).all()
-        for b in s.exec(select(BenchmarkVideo)).all():
-            if b.source != "douyin" or not b.author:
-                continue
-            st = stats.setdefault(b.author, {"total": 0, "recent": 0})
-            st["total"] += 1
-            created = b.created_at
-            if created is not None:
-                if created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
-                if created >= week_ago:
-                    st["recent"] += 1
-        items = []
-        for r in rows:
-            st = stats.get(r.name) or {"total": 0, "recent": 0}
-            d = _account_out(r)
-            d["video_total"] = st["total"]
-            d["video_recent_7d"] = st["recent"]
-            items.append(d)
-    return {"items": items}
-
-
 @router.post("/accounts", status_code=201)
-def create_account(body: AccountIn) -> dict:
+def create_account(body: AccountIn, user: User = Depends(require_user)) -> dict:
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="账号名不能为空")
     if body.platform not in ("douyin", "channels"):
         raise HTTPException(status_code=400, detail="platform 必须是 douyin / channels")
-    if body.kind not in ("competitor", "self"):
-        raise HTTPException(status_code=400, detail="kind 必须是 competitor / self")
     if body.platform == "douyin" and not body.url.strip():
         raise HTTPException(status_code=400,
                             detail="抖音账号需要主页链接（App 内分享主页 → 复制链接）")
@@ -138,9 +66,9 @@ def create_account(body: AccountIn) -> dict:
         require_douyin_url(body.url.strip())
     with Session(engine) as s:
         acc = WatchAccount(platform=body.platform, name=body.name.strip(),
-                           url=body.url.strip(), note=body.note.strip(), kind=body.kind,
+                           url=body.url.strip(), note=body.note.strip(), kind="self",
                            account_type=body.account_type if body.account_type in ("persona", "leadgen") else "persona",
-                           creator_cookie=body.creator_cookie.strip() if body.kind == "self" else "")
+                           creator_cookie=body.creator_cookie.strip())
         s.add(acc)
         s.commit()
         s.refresh(acc)
@@ -148,10 +76,11 @@ def create_account(body: AccountIn) -> dict:
 
 
 @router.put("/accounts/{account_id}")
-def update_account(account_id: int, body: AccountUpdate) -> dict:
+def update_account(account_id: int, body: AccountUpdate,
+                   user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
         acc = s.get(WatchAccount, account_id)
-        if acc is None:
+        if acc is None or acc.kind != "self":
             raise HTTPException(status_code=404, detail="account not found")
         if body.name is not None:
             if not body.name.strip():
@@ -165,11 +94,11 @@ def update_account(account_id: int, body: AccountUpdate) -> dict:
             acc.note = body.note
         if body.enabled is not None:
             acc.enabled = body.enabled
-        if body.kind is not None:
-            if body.kind not in ("competitor", "self"):
-                raise HTTPException(status_code=400, detail="kind 必须是 competitor / self")
-            acc.kind = body.kind
-        if body.creator_cookie is not None and acc.kind == "self":
+        if body.account_type is not None:
+            if body.account_type not in ("persona", "leadgen"):
+                raise HTTPException(status_code=400, detail="account_type 必须是 persona / leadgen")
+            acc.account_type = body.account_type
+        if body.creator_cookie is not None:
             acc.creator_cookie = body.creator_cookie.strip()  # 传空串=清除
         s.add(acc)
         s.commit()
@@ -178,162 +107,25 @@ def update_account(account_id: int, body: AccountUpdate) -> dict:
 
 
 @router.delete("/accounts/{account_id}")
-def delete_account(account_id: int) -> dict:
+def delete_account(account_id: int, user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
         acc = s.get(WatchAccount, account_id)
-        if acc is None:
+        if acc is None or acc.kind != "self":
             raise HTTPException(status_code=404, detail="account not found")
         s.delete(acc)
         s.commit()
     return {"deleted": account_id}
 
 
-@router.post("/scan", status_code=202)
-async def scan(user: User = Depends(require_user)) -> dict:
-    # dedup 用本地日期（与调度中心 watch_scan 同口径，防 0~8 点窗口双跑）
-    job = await runner.submit("watch_scan", {"auto": True},
-                              dedup_key=f"{user.tenant_id}:scan:all:{datetime.now():%Y%m%d}")
-    return {"job_id": job.id}
-
-
-@router.post("/backfill", status_code=202)
-async def watch_backfill(user: User = Depends(require_user)) -> dict:
-    """监控号 30 天存量回填：锚点列近期作品→过闸→自动拆解（采评论分型）。在途去重。"""
-    job = await runner.submit("watch_backfill", {"auto": True},
-                              dedup_key="1:watch_backfill",
-                              actor=(user.tenant_id, user.id, user.role))
-    return {"job_id": job.id}
-
-
 @router.post("/accounts/{account_id}/scan", status_code=202)
 async def scan_account(account_id: int, user: User = Depends(require_user)) -> dict:
+    """自有账号手动扫描（自我研究链输入）。"""
     with Session(engine) as s:
         if s.get(WatchAccount, account_id) is None:
             raise HTTPException(status_code=404, detail="account not found")
-    job = await runner.submit("watch_scan", {"account_id": account_id},
-                              dedup_key=f"{user.tenant_id}:scan:{account_id}:{datetime.now():%Y%m%d}")
+    from datetime import datetime
+
+    job = await runner.submit("self_scan", {"auto": True},
+                              dedup_key=f"{user.tenant_id}:selfscan:{datetime.now():%Y%m%d}",
+                              actor=(user.tenant_id, user.id, user.role))
     return {"job_id": job.id}
-
-
-@router.post("/resolve", status_code=202)
-async def resolve(body: ResolveIn) -> dict:
-    if not body.url.strip():
-        raise HTTPException(status_code=400, detail="url 不能为空")
-    from ..benchmarks.downloader import extract_douyin_url
-    url = extract_douyin_url(body.url.strip())
-    if not url:
-        raise HTTPException(status_code=400, detail="url 不能为空")
-    require_douyin_url(url)
-    job = await runner.submit("watch_resolve", {"url": url}, dedup_key=url)
-    return {"job_id": job.id}
-
-
-@router.get("/scan/history")
-def scan_history(limit: int = 8) -> dict:
-    with Session(engine) as s:
-        rows = s.exec(
-            select(Job).where(  # type: ignore[attr-defined]
-                Job.type == "watch_scan",  # type: ignore[attr-defined]
-                Job.archived == 0,  # type: ignore[attr-defined]
-            )
-            .order_by(Job.id.desc())  # type: ignore[attr-defined]
-            .limit(max(1, min(limit, 30)))
-        ).all()
-        return {"items": [r.model_dump() for r in rows]}
-
-
-# ---------- 关键词发现对标账号 ----------
-
-class DiscoverIn(BaseModel):
-    keyword: str
-    direction: str = ""
-
-
-def _cand_dict(r: WatchCandidate) -> dict:
-    d = r.model_dump()
-    try:
-        d["stats"] = json.loads(r.sample_stats) if r.sample_stats else {}
-    except json.JSONDecodeError:
-        d["stats"] = {}
-    return d
-
-
-@router.post("/discover", status_code=202)
-async def discover(body: DiscoverIn, user: User = Depends(require_user)) -> dict:
-    kw, direction = body.keyword.strip(), body.direction.strip()
-    if not kw:
-        raise HTTPException(status_code=400, detail="关键词不能为空")
-    job = await runner.submit("watch_discover", {"keyword": kw, "direction": direction},
-                              dedup_key=f"{user.tenant_id}:discover:{kw}:{direction}")
-    return {"job_id": job.id}
-
-
-@router.get("/discover/candidates")
-def list_candidates(status: str = "", account_type: str = "") -> dict:
-    """account_type：persona|leadgen 类型内过滤（情报中心 2026-11-03 分线；空=全量）。"""
-    with Session(engine) as s:
-        q = select(WatchCandidate)
-        if status:
-            q = q.where(WatchCandidate.status == status)  # type: ignore[attr-defined]
-        if account_type in ("persona", "leadgen"):
-            q = q.where(WatchCandidate.account_type == account_type)  # type: ignore[attr-defined]
-        rows = s.exec(q.order_by(  # type: ignore[attr-defined]
-            WatchCandidate.id.desc(),  # type: ignore[attr-defined]
-        )).all()
-        return {"items": [_cand_dict(r) for r in rows]}
-
-
-@router.post("/discover/candidates/{cid}/add")
-def add_candidate(cid: int) -> dict:
-    with Session(engine) as s:
-        c = s.get(WatchCandidate, cid)
-        if c is None:
-            raise HTTPException(status_code=404, detail="candidate not found")
-        if c.status == "dismissed":
-            raise HTTPException(status_code=400, detail="已忽略的候选不能加入，请先重新发现")
-        dup = any(c.sec_uid and c.sec_uid in (a.url or "")
-                  for a in s.exec(select(WatchAccount).where(  # type: ignore[attr-defined]
-                      WatchAccount.platform == "douyin")).all())
-        acc = None
-        if not dup:
-            acc = WatchAccount(
-                platform="douyin", name=c.name, url=c.url, kind="competitor",
-                account_type=c.account_type,
-                note=(f"发现自关键词「{c.keyword}」· 粉丝 {_fmt_follow(c.follower_count)}"
-                      + (f" · 求带密度 {c.leadgen_density:.0%}" if c.leadgen_density else "")))
-            s.add(acc)
-            s.flush()
-        c.status = "added"
-        c.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        s.add(c)
-        s.commit()
-        s.refresh(c)  # commit 后属性过期，model_dump 不触发 refresh 会拿空壳
-        return {"candidate": _cand_dict(c),
-                "account": _account_out(acc) if acc is not None else None,
-                "duplicate": dup}
-
-
-@router.post("/discover/candidates/{cid}/dismiss")
-def dismiss_candidate(cid: int) -> dict:
-    with Session(engine) as s:
-        c = s.get(WatchCandidate, cid)
-        if c is None:
-            raise HTTPException(status_code=404, detail="candidate not found")
-        c.status = "dismissed"
-        c.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)  # 全库 naive-UTC（2026-11-13 修复 aware 写入）
-        s.add(c)
-        s.commit()
-        s.refresh(c)
-        return _cand_dict(c)
-
-
-@router.delete("/discover/candidates")
-def clear_candidates() -> dict:
-    """清掉已处理（已加入/已忽略）的候选记录；待定夺保留。"""
-    with Session(engine) as s:
-        rows = s.exec(select(WatchCandidate).where(  # type: ignore[attr-defined]
-            WatchCandidate.status != "open")).all()  # type: ignore[attr-defined]
-        for r in rows:
-            s.delete(r)
-        s.commit()
-        return {"deleted": len(rows)}
