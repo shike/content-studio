@@ -41,8 +41,8 @@ echo "→ rsync backend/app"
 rsync -az --delete -e "$RSH" backend/app/ "$HOST:$REMOTE_ROOT/backend/app/"
 echo "→ rsync frontend/dist"
 rsync -az --delete -e "$RSH" frontend/dist/ "$HOST:$REMOTE_ROOT/frontend/dist/"
-# 验收套件与文档也同步：服务器上可能要跑验收套件 / 查口径，别让副本漂移
-for d in acceptance docs; do
+# 文档也同步：服务器上可能要查口径，别让副本漂移
+for d in docs; do
   rsync -az --delete -e "$RSH" "$d/" "$HOST:$REMOTE_ROOT/$d/"
 done
 # migrations 在 backend/ 下（schema 审计闸 B 阶段，2026-11-16）：单独同步，别进根级循环

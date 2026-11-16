@@ -1,7 +1,7 @@
 """长文质量与合规：违禁词机检、文风禁令、质量自评闸门。
 
 2026-11-16 从 service.py 拆出（C 阶段结构整治，只挪不改行为）：
-违禁词表单一数据源 banned_words.json 由本模块加载（与 acceptance/quality.py 共用同一 JSON）；
+违禁词表单一数据源 banned_words.json 由本模块加载（单一数据源 JSON）；
 service.py 经 facade 导入继续可用，deepread.py 的既有导入不受影响。
 """
 from __future__ import annotations
@@ -15,13 +15,13 @@ from ..jobs.runner import JobContext
 from ..llm import gateway
 from ..prompts import render
 
-# 违禁词表（程序化合规红线）抽单一数据源 banned_words.json：与 acceptance/quality.py
+# 违禁词表（程序化合规红线）抽单一数据源 banned_words.json：
 # 共用同一 JSON，改表只改文件，不再双处同步。裸「最好的」已移除——误杀「千万别挑最好的
 # 那条」（反向建议）与「最好的线，设备新」（描述性比较），语义级由 LLM 评审兜底。
 _BANNED_TABLE = json.loads((Path(__file__).parent / "banned_words.json").read_text(encoding="utf-8"))
 BANNED_PATTERNS = _BANNED_TABLE["banned_patterns"]
 
-# 刻意转化话术（自然收尾红线）：表本体同在 banned_words.json（与 acceptance/quality.py 共用）
+# 刻意转化话术（自然收尾红线）：表本体同在 banned_words.json
 CTA_PATTERNS = _BANNED_TABLE["cta_patterns"]
 
 _KB_BAN_CONNECTORS = ("综上所述", "由此可见", "说到底", "总而言之")
@@ -30,7 +30,7 @@ _KB_BAN_CONNECTORS = ("综上所述", "由此可见", "说到底", "总而言之
 def banned_hits(text: str) -> list[str]:
     """程序化违禁词命中（否定语境放行：'千万别挑最好的'是反向建议不是绝对化承诺——
     2026-10-02 P1 实测误杀后加窗口）。表已抽单一数据源 banned_words.json（与
-    acceptance/quality.py 共用）；否定语境窗口算法两侧各自实现，改算法需两处同步。"""
+    banned_words.json 单源）；否定语境窗口算法在本模块内实现。"""
     hits = []
     for p in BANNED_PATTERNS:
         start = 0

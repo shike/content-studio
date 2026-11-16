@@ -316,7 +316,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                     f"篇幅 {length_spec['words']} 字，并以完整句子收尾。"}],
                 max_tokens=12000,
                 thinking="disabled")
-        # 合规守卫：违禁词/刻意转化话术命中即定向重写一次（与 acceptance/quality.py 同表）
+        # 合规守卫：违禁词/刻意转化话术命中即定向重写一次（表源=banned_words.json 单一数据源）
         _hits = _banned_hits(part)
         _cta = next((m.group(0) for p in _CTA_PATTERNS if (m := re.search(p, part))), None)
         if _hits or _cta:

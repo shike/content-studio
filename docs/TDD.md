@@ -1,11 +1,11 @@
 # TDD · Technical Design Document（技术设计）
 
-> 技术契约（预期侧）：架构 / 数据模型 / API 契约 / 模块设计 / 部署 / 验收对照。
-> 契约变更必须同步 PRD.md 与 acceptance/（脚本即契约）。
+> 技术契约（预期侧）：架构 / 数据模型 / API 契约 / 模块设计 / 部署。
+> 契约变更必须同步 PRD.md。
 
 # Content Studio · 技术方案
 
-> 定位：实现前技术定稿。API 契约、数据模型以本文为准；各期验收标准以 `acceptance/` 脚本为准（脚本即契约的可执行形式）。
+> 定位：实现前技术定稿。API 契约、数据模型以本文为准；验证口径=功能冒烟实跑+生产运行（2026-11-16 验收脚本整目录删除）。
 
 ---
 
@@ -48,7 +48,6 @@
 | 视频 | FFmpeg（brew） | 工具箱角色 |
 | 前端 | React 18 + Vite 5 + TailwindCSS | 中文界面；构建产物由 FastAPI 托管 |
 | 发布 | 人工（发布永远人工，在系统外完成） | 无任何发布平台集成（R6.4 范围外） |
-| 验收 | acceptance/ 纯标准库 Python 脚本 | 见 §13 |
 
 ## 3. 目录结构
 
@@ -71,7 +70,6 @@ content-studio/
 │   │   ├── selfstyle/          # 自我风格研究：self_scan / 风格画像 / 创作者数据回流
 │   │   └── prompts/            # Prompt 模板（md 文件 + 版本号，代码加载）
 ├── frontend/                   # React + Vite + Tailwind
-├── acceptance/                 # 验收脚本（本文档 §13 的可执行形式）
 ├── scripts/                    # 部署运维脚本（launchd.sh 动态生成 LaunchAgent）
 ├── data/                       # studio.db + backups/ article_images/ cache/ crawl_probe.json asr-models/ self_videos/ benchmarks/
 ├── docs/
@@ -94,7 +92,7 @@ content-studio/
 | `SEARCH_PROVIDER` | auto | 检索通道：auto=智谱搜索优先 DDG 兜底 / ddg / glm（按量余额可用；设置页运行时切换） |
 | `ZHIPU_BASE_URL` / `ZHIPU_SEARCH_BASE_URL` | 智谱 | 生成端点与独立搜索端点（`/web_search`）可分账 |
 | `CS_BOOTSTRAP_PASSWORD` | — | 首次启动引导管理员的确定性口令（验收实例必带；不设则随机生成仅日志打印） |
-| `CS_REAPER_SEC` | 1800 | reaper 巡逻间隔（验收隔离实例设 5 加速快巡） |
+| `CS_REAPER_SEC` | 1800 | reaper 巡逻间隔（冒烟隔离实例设 5 加速快巡） |
 | `CS_MAX_ACTIVE_PER_TENANT` | 30 | 每租户活跃任务上限（提交配额，见 §7） |
 
 `.env` 不进版本库；`health` 接口回报各依赖配置状态（不回传密钥）。
@@ -149,7 +147,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light 两道), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 
-**生产库遗留（已删模型/端点的旧数据原地保留，新库不再建；负向契约见 §13）**：旧表 `kb_topics`/`kb_documents`/`harvest_profiles`/`publish_records`/`media_assets`/`dismissals`（模型已删；publish_records 仍受 hygiene.py ② 假数据巡检）、已 DROP 表 `llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`、旧列 `tenants.credits`/`tenants.status`/`research_reports.tokens_in,tokens_out,cost_est`/`watch_candidates.leadgen_comments,recent_same`/`radar_topics.recent,new_since_last`/`articles.title_alts,kb_doc_ids`。更早的未登记遗留列不逐一维护。
+**生产库遗留（2026-11-16 全部清算完毕）**：已删模型的孤儿旧表 `kb_topics`/`kb_documents`/`harvest_profiles`/`publish_records`/`media_assets`/`dismissals` + 手工备份表 `topics_backup_selfstory_coldrice_20261113` 已于 2026-11-16 生产库 DROP（全库备份 `data/backups/pre-orphan-drop-20261116.sql.gz`）；更早已 DROP：`llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`/`avatar_configs`/`avatar_videos`/`jianying_templates`/`video_projects`。现存 24 表与 24 模型一一对应、零孤儿；旧列 `tenants.credits`/`tenants.status`/`research_reports.tokens_in,tokens_out,cost_est`/`watch_candidates.leadgen_comments,recent_same`/`radar_topics.recent,new_since_last`/`articles.title_alts,kb_doc_ids`。更早的未登记遗留列不逐一维护。
 
 **内容资产状态机**（串联各表的状态流转）：
 
@@ -446,7 +444,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - **执行器注册表**（24 类，2026-11-14 idea_research 随老选题库退役删除；2026-11-15 补登 watch_backfill/topic_backfill 两个存量回填执行器）：`article_generate / article_hotspots（站外热点报题建稿）/ article_style_extract / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；card_id 靶子卡备稿走三段纪律：hook 逐字开场/spine 不出口/单判断推进；ore_id 获客矿建稿 2026-11-14：求学需求评论=痛点输入，强制 leadgen 引导）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）/ watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ watch_backfill（监控号存量回填，追溯窗+拆解闸，契约见 §6 监控节）/ topic_backfill（话题精选集存量回填，dedup=1:topic_backfill，契约见 §6 雷达节）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸） / article_deepread（深读写，调度不注册，保留回滚）/ card_daily（选题工场五段：信号采集→池子→主线→钩子→总法官）/ card_seed（手动投喂：单池子即走主线→钩子→法官）/ falsify_hunt（实测候选猎取，挂 card_daily 尾段）`。
 - **热点雷达（话题查看域）**：`radar_topics` 表（ch_id 全局唯一/seen_ids 防重/recent 最近新视频）。每日 6 点随 `card_line_daily` 车间零巡检话题新视频，低粉高赞同口径自动进拆解（R3.7）；
   雷达飙升（新增视频速度）兼作选题工场一手池子信号（R1.4）；`/api/radar` 仅保留查看域 4 端点（契约见 §6 雷达节）；独立话题雷达面与 topic_radar 任务并入每日热点。
-- **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，与 acceptance/quality.py 同表）；均只在命中时多花一次 LLM 调用。
+- **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，表源=banned_words.json 单一数据源）；均只在命中时多花一次 LLM 调用。
 - **媒体即用即弃**：`benchmark_analyze` 成功即删视频文件（转写/拆解已入库；重拆解自动重新下载，本地拆解的原文件删后需重新上传）；reaper 巡检兜底清扫已完成/已忽略条目的遗留媒体，进行中任务的媒体不动。
 - **实体级去重**：同选题已有 generating/polishing 脚本 → 拒绝再生成（409）；同选题/同脚本已有 generating 长文 → 拒绝（409）；相同原文正在深研 → 拒绝（409）。
 - **任务归属（租户链）**：`jobs.tenant_id/user_id` 由 `auth.ACTOR`（(tenant,user,role) contextvar）在提交时自动落库——请求上下文由 `require_user` 设值；执行器运行期由 runner 从任务行恢复上下文（**同步执行器必须经 `asyncio.to_thread` 派发——`run_in_executor` 不传播 contextvars**）；人工重试继承原任务归属，系统调度与自动重试归 0（系统）。执行器内的一切查询、实体创建随任务租户。
@@ -533,63 +531,31 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
     失败自动 restart）；Nginx 反代 + HTTPS 模板见 `deploy/nginx-content-studio.conf.example`
     （含 `client_max_body_size 2048m`、X-Forwarded-For/Proto 透传）。
 
-## 13. 验收对照与纪律
+## 13. 冒烟纪律（2026-11-16 起取代验收套件，脚本已整目录删除）
 
-验收脚本位于 `acceptance/`（`python3 acceptance/run_pX.py`；拆解实链路的验证由生产运行承担——每晚 1 点 `watch_scan` 与每日自我扫描即真实使用，失败可见；**P8/e2e 必须用 `backend/.venv/bin/python`**——白盒 import 需要 sqlmodel、E2E 需要 playwright+PIL）。判定规则：**FAIL=契约被打破**（退出码 1）；**SKIP=外部依赖缺失**（注明原因，不算破坏契约）。
+- **验收=功能冒烟实跑**：日常验证=真实链路把新功能本身跑通（冒烟先行）；拆解实链路的长周期验证由生产运行承担——每晚 1 点 `watch_scan` 与每日自我扫描即真实使用，失败可见于失败中台（§失败指纹）。
+- **内容质量口径（X11 精神保留）**：程序化违禁词守卫（backend 与 `banned_words.json` 单一表）+ LLM 评审尺（口播尺/长文尺，阈值：单项 ≥6 且总评 ≥7）已内建于生成链路（分节/定稿/改编守卫），不再有独立评审脚本。
+- **回归保险**：脚本退役后，契约回归靠①生产调度每日全链路真实运行 ②失败中台的指纹聚类 ③改动前 git 历史可回溯。
 
-### 13.1 套件清单
+### 13.1 隔离实例纪律（本地冒烟不污染真实数据）
 
-| 套件 | 脚本 | 范围 | 对应需求 | 通过门槛 |
-|---|---|---|---|---|
-| P0 骨架 | run_p0.py | 服务/health/前端页/jobs 契约/LLM 真实调用/设置接口（读·幂等写·非法值拒） | R8.1/8.2, X6 | 全 PASS；未配密钥时 LLM 项允许 SKIP |
-| P1 内容核心 | run_p1.py | idea 深研→入库评分+定审；快速选题+相似标记+否决；脚本一版精品直出（默认档）+自动打磨+定稿三产物；长文深度版唯一档（长度断言 2250~6250 汉字，style=auto 自动透镜）+改稿+渲染（[CHART] 块剥离）；内容质量评审（口播尺/长文尺，X11） | R1.1/1.1b/1.1c/1.3/1.5/1.7, R2.1-2.4, R5.1/5.2/5.1a, X11 | 全 PASS |
-| P6 任务体系 | run_p6.py | 去重幂等（活跃唯一/实体去重）/失败分类（确定性不重试）/到期重试放行/欠任务补队/五要素字段/失败中台（指纹聚类·按指纹复活·指纹处置·实体孤儿复活） | — | 全 PASS |
-| P7 认证与单管理员 | run_p7.py | 未登录 401/错口令 401/登录会话与 me/首登强制改密（服务端 403）/改密全端重登/登出失效/裁撤面 9 条负向断言（switch-tenant、auth/tenants、credits、admin/*、llm/usage、llm/calls、avatar/* 全 404）/业务数据可见/设置页管理员依赖 | R11 | 全 PASS |
-| P8 功能补全 | run_p8.py | 可靠性白盒（组局号钟点/验证码分类/退避梯子+硬超时/熔断）；采集探针（状态接口/手动探测六态分类）；调度中心（列表含探针/开关往返）；品牌九字段 round-trip（GET 全量/PUT 覆盖/清空回落中性默认）；自动透镜受理与同源去重 409；选题工场契约（靶子卡四面结构/三闸负向：窄主语·超15字·劝告开头拦/一手评论≥50 直产/jail 捞回/手动投喂受理/卡备稿→脚本链回归）；产线闸白盒（拆解质量闸三态/改编原创度闸/self_story·hl_search 硬超时/深读调度与知识库选题池执行器=裁撤面负向断言）；源文改编产线契约（内容清单/当日账）；prompt 契约（frontmatter 完整+关键模板可加载）；裁撤面负向契约（独立雷达端点 404；知识库选题池 GET 422/POST 404） | R1.8, R7.3, X10, R11.2, R5.1, R1.4, R5.6b | 全 PASS |
-| E2E 端到端 | e2e_run.py | Playwright 驱动真实 UI：登录（错误拒/正确进）；侧栏 17 页逐页零报错；工作台快速记选题；内容工场发布登记闭环（行展开 HTML 预览）；设置页品牌卡与保存回显 | —（界面冒烟与门禁自动化） | 全 PASS |
-
-
-### 13.2 运行与环境变量
-
-- `CS_API_BASE`（目标实例）、`CS_BOOTSTRAP_PASSWORD`（登录态：runner 首请求前自动以 admin 登录携 Cookie；凭据缺失用例以 401 显式 FAIL）、`CS_REAPER_SEC=5`（隔离实例快巡，P6 owed 用例必带）。
-
-### 13.3 隔离实例纪律（不污染真实数据）
-
-验收产生真实 LLM 调用与库写入，必须跑隔离实例。用复制库约定（bootstrap 只在空库触发，全新 DATA_DIR 无已知口令；部分套件直插 sqlite 夹具，需与生产同构的列默认值）：
+冒烟产生真实 LLM 调用与库写入，必须跑隔离实例：
 
 ```bash
-cp -R data data-acceptance
-# 清继承队列（含 parked）与继承会话，重置已知口令
-sqlite3 data-acceptance/studio.db "UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')"
-sqlite3 data-acceptance/studio.db "DELETE FROM user_sessions"
-DATA_DIR=data-acceptance backend/.venv/bin/python -c "import sys; sys.path.insert(0,'backend'); from app.auth import hash_password; import sqlite3; db=sqlite3.connect('data-acceptance/studio.db'); db.execute(\"UPDATE users SET password_hash=?, must_change_password=0 WHERE username='admin'\", (hash_password('accept-12345'),)); db.commit()"
-DATA_DIR=data-acceptance LOGIN_IP_MAX=1000 backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --port 8200 &   # 验收含预期失败登录，放宽 IP 限流
-CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 DATA_DIR=data-acceptance \
-  python3 acceptance/run_p0.py    # …p1/p6/p7（标准库即可）
-backend/.venv/bin/python acceptance/run_p8.py    # P8 必须 venv
-backend/.venv/bin/python acceptance/e2e_run.py   # E2E 必须 venv
-# 跑完：停 8200，rm -rf data-acceptance
+DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 \
+  uvicorn app.main:app --app-dir backend --port 8200
+# 跑完：pkill 干净 + rm -rf data-acceptance（漏 DATA_DIR 会摸到默认 data/）
 ```
-
-### 13.4 重跑红线
-
-- 任何后端改动后重跑受影响套件（全套隔离实例约 30~40 分钟）——「上次全绿」只对当时代码成立。
-- 前端改动至少跑 P0（页面可达）+ 浏览器逐页冒烟。LLM 预算/超时改动注意实测耗时：打磨最长 ~350s、定稿 ~80s、轮询预算 ≥600s、脚本生成（一版+自动打磨两段）≥900s。
-
-### 13.5 内容质量验收（X11）
-
-- P1 对生成内容加 LLM 质量评审（尺随内容类型走，0-10 分）：**口播尺**（钩子强度/口语化/证明具体性/结尾自然收尾/合规红线/人设回扣）；**长文尺**（deep 唯一档：铺垫/深度/论证/收束/合规/语言）。断言：单项 ≥6 且总评 ≥7。
-- **程序化违禁词**（与 backend 共用 banned_words.json 单一表）：绝对化/收益承诺类命中即 FAIL；**否定语境窗口**：命中位前 4 字含否定词放行；裸「最好的」不进程序化表（避免误杀反向建议），语义级由评审 compliance 项兜底。分节流程另有 **CTA 程序化守卫**（评论区/私信/关注/扣字/领资料命中即定向重写，同表）。评审 prompt 与阈值维护在 `acceptance/quality.py`。
 
 ### 13.6 数据卫生
 
-`acceptance/hygiene.py [data_dir]`：一条命令扫库内测试残留（拆解 fixture 行/演示链接发布记录/评分回流残留字段/未收敛「服务重启中断」记录=提示级）；退出码 0 干净 / 1 有残留。验收与对账前必跑。
+测试残留防线=隔离实例纪律（§13.1）：冒烟只进 `data-acceptance`，生产库永不接触测试数据；生产侧对账走每日备份（`data/backups/`）与失败中台指纹。
 
 ### 13.7 审计对账清单
 
 - [ ] openapi 端点 ↔ §6 逐条一致；反向：前端 api() 每个路径都有后端实现
 - [ ] 页面零报错/未登录业务页被门禁拦截/队列仅手动进入（e2e 自动化覆盖）
-- [ ] 生产库无测试残留（hygiene.py 干净）
+- [ ] 生产库无测试残留（隔离实例纪律贯彻，残留面=0）
 - [ ] 选题评分无发布数据回流残留（R1.6 边界）
 - [ ] 思考型模型调用无 JSON 截断（输出未贴 max_tokens 上限）
 - [ ] PRD 每条 R/X 均有验证方式

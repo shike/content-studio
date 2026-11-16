@@ -2,7 +2,7 @@
 
 单管理员流水线（登录门禁，PRD R11/TDD §15）：选题 → 口播脚本（一版精品直出）→ 公众号长文。发布永远人工；数字人成片/发布台/多租户不在系统范围。
 架构：FastAPI + SQLModel + SQLite（`backend/app/`，24 表）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。
-两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约+验收纪律（§13：套件清单/隔离实例/审计对账）。现状只看运行中的应用。
+两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约（§13：冒烟纪律/隔离实例/审计对账）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根）
 
@@ -12,15 +12,15 @@
 
 ## 验收纪律（违反 = 白干）
 
-- 套件 `run_p0/p1/p6/p7/p8` + `e2e_run.py`（P8/e2e 必须用 `backend/.venv/bin/python`）。**套件=回归门，只在用户明确要求时执行（2026-11-14 用户铁律）；日常验证=功能冒烟实跑**（真实链路把新功能本身跑通，冒烟先行）——未经要求擅跑套件=违规。
-- 隔离实例：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；跑完删 `data-acceptance`）。跑套件同环境变量三件套：`CS_API_BASE`/`CS_BOOTSTRAP_PASSWORD`/`DATA_DIR`（p0/p6/p7/e2e 直读库文件，漏 DATA_DIR 会摸到默认 data/）。复制库先清继承队列：`UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`。
+- **验收=功能冒烟实跑（2026-11-16 用户裁决：验收套件整目录删除）**：日常验证=真实链路把新功能本身跑通（冒烟先行），生产运行本身承担长周期验证（夜间扫描/调度即真实使用，失败可见于失败中台）。验收脚本不再作为回归门存在。
+- 隔离实例（本地冒烟防污染）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；**收尾必须 pkill 干净 + 删 `data-acceptance`**——漏 DATA_DIR 会摸到默认 data/；复制库先清继承队列 `UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`）。
 - 全线 naive-UTC，SQL 用 `datetime('now')`。测试数据收尾必清（假数据污染选题评分）。
 - 失败是异常不是工作流：瞬时失败走退避梯子 30min→2h→6h→24h→每日慢巡（30 次上限）；确定性失败安静终态；界面只有红徽章+行内重试（后端 failures API 保留）。
 
 ## LLM 硬规矩（GLM Coding Plan，思考型）
 
 - max_tokens=实测输出×2，贴上限→JSON 截断→解析死循环。按值分组：**20000**=editor·adapt_write（全库唯一 thinking=enabled）·script_generate/polish/falsify_script｜**16000**=self_profile_update｜**12000**=section（每节）·self_style_extract｜**8192**=title/outline/kb_polish/deepread_write/adapt_reduce/adapt_revise；8000=script_finalize｜**5000**=benchmark_analyze（struct 未传走默认 4096）｜**4000**=charts/deepread_synth/hotspots（+hotspot_keywords 1024 行内预筛）/leadgen_judge/pool_pick/judge_cards/falsify_hunt/spine_forge（takeaways 并入输出 2026-11-14 实测×2 上调）｜**2048**=weekly_report｜**2000**=kb_miner/deepread_digest/article_style_extract/hook_cast｜**1024**=review_facts/reader/title_score/quality_gate/style_pick/ping。
-- httpx 超时 600s；验收轮询 ≥600s、脚本生成 ≥900s。空正文必须显式报错，禁静默当成功。
+- httpx 超时 600s；长任务轮询 ≥600s、脚本生成 ≥900s。空正文必须显式报错，禁静默当成功。
 - Coding Plan 端点无 web_search → `SEARCH_PROVIDER=ddg` 锁定（按量余额不足报 1113）；密钥/模型/检索走设置页运行时改（存 app_settings，.env 只留引导项）。系统不记录成本，花销看服务商控制台。
 
 ## 前端规矩
@@ -37,7 +37,7 @@
 - 播放数匿名恒拿不到（只有作者后台可见），闸线/评分只落评论与赞；拆解闸=评论≥20 或赞≥300（设置页可调），不过线标 ignored。
 - 出口两条链路：`scrape_proxy`=匿名采集（空=机房直连，实测可用；隧道高抖动只作兜底）；`douyin_proxy`=DDG 出海+创作者中心登录态。**登录态红线：cookie 只用于自有账号数据回流，永不爬他人内容。**
 - DDG：境内全断，唯一通路=住宅隧道+本机 7890；限流=IP 级惩罚窗，每查询 ≤2 发；GLM 搜索不吃 site: 不索引抖音，Bing 中国站不可作备胎。
-- 本机无 data/ 与 .ms-playwright/（本地验收属临时）——重建：`PLAYWRIGHT_BROWSERS_PATH=$PWD/.ms-playwright backend/.venv/bin/playwright install chromium`；ASR 模型同法重下（small 优先）。依赖 av 钉 `<19`（19 断转写）。视频号无网页接口，只支持本地上传。
+- 本机无 data/ 与 .ms-playwright/（本地副本=瘦开发副本，重型依赖按需重建）——重建：`PLAYWRIGHT_BROWSERS_PATH=$PWD/.ms-playwright playwright install chromium`（playwright 来自前端/uv 环境按需装）；ASR 模型同法重下（small 优先）。依赖 av 钉 `<19`（19 断转写）。视频号无网页接口，只支持本地上传。
 
 ## 其他红线
 

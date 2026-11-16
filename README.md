@@ -71,24 +71,10 @@ open http://127.0.0.1:8100
   采集出口、拆解闸线等运行时配置在 **设置页** 修改，存数据库、即时生效。
 - 密钥一律服务端持有、只写不读回（API 仅回报"已配置"标记）。
 
-## 验收测试
+## 验证
 
-```bash
-# 1) 起隔离实例（务必在仓库根执行；完整纪律见 docs/TDD.md §13.3）
-DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 \
-  backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --port 8200
-
-# 2) 跑套件（仓库根执行）
-export CS_API_BASE=http://127.0.0.1:8200 CS_BOOTSTRAP_PASSWORD=accept-12345 DATA_DIR=data-acceptance
-python3 acceptance/run_p0.py                       # …p1/p6/p7（标准库即可）
-backend/.venv/bin/python acceptance/run_p8.py      # P8 白盒 import 需要 sqlmodel，必须走 venv
-backend/.venv/bin/python acceptance/e2e_run.py     # E2E（playwright+PIL，必须走 venv）
-
-# 3) 收尾
-rm -rf data-acceptance
-```
-
-另：`bash acceptance/lint_names.sh` 是 F821 静态门禁（NameError 类 bug 靠它拦）。
+- **功能冒烟实跑**：真实链路把新功能本身跑通（冒烟先行）；隔离实例配方（`DATA_DIR=data-acceptance` 端口 8200）见 [docs/TDD.md](docs/TDD.md) §13。
+- 长周期验证由生产运行承担：调度每日全链路真实跑，失败进入失败中台（指纹聚类+处置）。
 
 ## 部署
 
@@ -102,7 +88,7 @@ rm -rf data-acceptance
 | 文档 | 角色 |
 |---|---|
 | [docs/PRD.md](docs/PRD.md) | **需求** · 需求总账（做什么/不做什么，唯一权威）+ 使用场景 |
-| [docs/TDD.md](docs/TDD.md) | **设计** · 技术契约 + 验收对照与纪律（架构/数据模型/API/部署/验收） |
+| [docs/TDD.md](docs/TDD.md) | **设计** · 技术契约 + 冒烟纪律（架构/数据模型/API/部署） |
 
 [AGENTS.md](AGENTS.md) 是协作者/agent 工作规约（启动命令、验收纪律、红线）。
 
