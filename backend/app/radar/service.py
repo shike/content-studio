@@ -192,8 +192,9 @@ register_concurrent("topic_backfill")
 
 @register_executor("topic_backfill")
 async def topic_backfill(ctx: JobContext, payload: dict) -> dict:
-    """话题 30 天存量回填（2026-11-14）：逐启用话题把精选集全部探一遍——发布时间过滤 30 天
-    + 拆解闸同口径（评论≥20 或赞≥300）→ 未入库的建行自动拆解（拆解自动采高赞评论+分型路由）。
+    """话题存量回填（2026-11-14；2026-11-15 追溯窗参数化）：逐启用话题把精选集全部探一遍
+    ——发布时间过滤 backfill_window_days（设置项，默认 30）+ 拆解闸同口径（评论≥20 或赞≥300）
+    → 未入库的建行自动拆解（拆解自动采高赞评论+分型路由）。
     免登录话题接口为固定精选集（2026-11-02 实测：翻页/排序参数被无视），回填深度=精选集全量；
     已在拆解库的跳过；命中登记进 hits（夜间探测不再重复探同一条）。"""
     from ..benchmarks import service as bms
@@ -201,7 +202,8 @@ async def topic_backfill(ctx: JobContext, payload: dict) -> dict:
 
     cmin = max(1, int(settings.dissect_comment_min or 20))
     dmin = max(1, int(settings.dissect_digg_min or 300))
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+    days = max(1, int(settings.backfill_window_days or 30))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
     with Session(engine) as s:
         topics = s.exec(select(RadarTopic).where(  # type: ignore[attr-defined]
             RadarTopic.enabled == True)).all()  # noqa: E712
@@ -232,7 +234,7 @@ async def topic_backfill(ctx: JobContext, payload: dict) -> dict:
             probed += 1
             probed_local += 1
             if not info.get("create_time") or info["create_time"] < cutoff:
-                continue  # 超 30 天（精选集里也可能混旧内容）
+                continue  # 超追溯窗（精选集里也可能混旧内容）
             c, dg = int(info.get("comment") or 0), int(info.get("digg") or 0)
             followers = int(info.get("followers") or 0)
             if c < cmin and dg < dmin:
@@ -244,7 +246,7 @@ async def topic_backfill(ctx: JobContext, payload: dict) -> dict:
                                    title=str(v.get("desc") or "")[:80],
                                    stats={"comment": c, "digg": dg, "followers": followers},
                                    source="douyin", account_type="persona",
-                                   scan_status="pending", notes="雷达回填（30 天存量）")
+                                   scan_status="pending", notes=f"雷达回填（{days} 天存量）")
                 s.add(b)
                 s.commit()
                 s.refresh(b)
@@ -264,9 +266,9 @@ async def topic_backfill(ctx: JobContext, payload: dict) -> dict:
             queued += n
         notes.append(f"#{trow.name}：精选 {len(vids)}，探 {probed_local}，过闸建行 {len(created_rows)}")
         await asyncio.sleep(2)
-    ctx.set_progress(100, f"回填完成：{len(topics)} 话题 / 探 {probed} / 过闸建行 {created_n} / 排队拆解 {queued}")
+    ctx.set_progress(100, f"回填完成（{days} 天窗）：{len(topics)} 话题 / 探 {probed} / 过闸建行 {created_n} / 排队拆解 {queued}")
     return {"topics": len(topics), "probed": probed, "created": created_n,
-            "queued": queued, "notes": notes[:20]}
+            "queued": queued, "days": days, "notes": notes[:20]}
 
 
 async def check_topic(row: RadarTopic) -> dict:

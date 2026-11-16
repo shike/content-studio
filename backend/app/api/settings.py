@@ -44,6 +44,9 @@ def _status() -> dict:
         "daily_card_limit": settings.daily_card_limit,
         "jail_window_days": settings.jail_window_days,
         "pool_pick_max": settings.pool_pick_max,
+        "pool_peer_window_hours": settings.pool_peer_window_hours,
+        "comment_leadgen_route_min": settings.comment_leadgen_route_min,
+        "backfill_window_days": settings.backfill_window_days,
         "managed_keys": sorted(MANAGED),  # 可在本页修改的键（前端按需展示）
     }
     st.update(stored_secret_state())  # *_set 状态（密钥明文绝不回传）
@@ -80,6 +83,7 @@ class UpdateIn(BaseModel):
     pool_pick_max: int | None = None           # 二手外站精选上限
     pool_peer_window_hours: int | None = None  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
     comment_leadgen_route_min: int | None = None  # 评论区分型：求学占比≥此%判获客矿（默认 60）
+    backfill_window_days: int | None = None    # 存量回填追溯窗（天，默认 30）
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
 
@@ -135,7 +139,10 @@ def update_settings(body: UpdateIn) -> dict:
                 raise HTTPException(400, detail=f"拆解闸{label}必须是 0~100000 的整数")
             values[key] = v
     for key in ("pool_peer_min_comments", "hook_speed_cps", "judge_pass_line",
-                "daily_card_limit", "jail_window_days", "pool_pick_max"):
+                "daily_card_limit", "jail_window_days", "pool_pick_max",
+                # 补 2026-11-15 发现：这两键此前只在 UpdateIn 声明、PUT 从未处理（静默忽略）
+                "pool_peer_window_hours", "comment_leadgen_route_min",
+                "backfill_window_days"):
         v = getattr(body, key)
         if v is not None:
             if not 1 <= v <= 100000:

@@ -54,7 +54,8 @@ def _walk_awemes(obj, out: list) -> None:
             out.append({"id": str(aweme_id),
                         "title": str(obj.get("desc") or "")[:80],
                         "sec_uid": sec,
-                        "stats": _extract_stats(obj)})
+                        "stats": _extract_stats(obj),
+                        "ctime": obj.get("create_time") or 0})
         for v in obj.values():
             _walk_awemes(v, out)
     elif isinstance(obj, list):
@@ -62,7 +63,7 @@ def _walk_awemes(obj, out: list) -> None:
             _walk_awemes(v, out)
 
 
-def _list_author_videos_via_anchor(url: str) -> tuple[Optional[list], Optional[str], bool]:
+def _list_author_videos_via_anchor(url: str, limit: int = _LIST_LIMIT) -> tuple[Optional[list], Optional[str], bool]:
     """锚点视频模式：贴作者任意一条视频链接，从视频页反推作者近期作品。
 
     免登录：detail 给作者身份，mix/aweme（合集流）吐同作者视频（实测 6+ 条）。
@@ -104,8 +105,8 @@ def _list_author_videos_via_anchor(url: str) -> tuple[Optional[list], Optional[s
             deadline = time.time() + 60
             while not detail and time.time() < deadline:
                 page.wait_for_timeout(2000)
-            # 右栏合集流下滑翻页，多拿几批同作者视频
-            for _ in range(3):
+            # 右栏合集流下滑翻页，多拿几批同作者视频（深翻页模式按 limit 加滚动次数）
+            for _ in range(3 if limit <= _LIST_LIMIT else 10):
                 page.mouse.wheel(0, 3200)
                 page.wait_for_timeout(2200)
         except Exception as e:  # noqa: BLE001
@@ -130,24 +131,26 @@ def _list_author_videos_via_anchor(url: str) -> tuple[Optional[list], Optional[s
     if not sec_uid:
         return None, "视频页未吐出作者信息（可能触发验证码，可重试）", True
 
-    # 锚点视频本身 + 合集流里同作者的视频（mix 可能混入他人，按 sec_uid 过滤）
+    # 锚点视频本身 + 合集流里同作者的视频（mix 可能混入他人，按 sec_uid 过滤；
+    # stats/ctime 贯穿——回填线的拆解闸要直接吃列表数据，丢了就得逐条探测）
     entries: list[dict] = [{"id": str(rid), "title": ""}]
     for it in raw_mix:
         if it.get("sec_uid") in (None, sec_uid):
-            entries.append({"id": it["id"], "title": it["title"]})
+            entries.append({"id": it["id"], "title": it["title"],
+                            "stats": it.get("stats") or {}, "ctime": it.get("ctime") or 0})
     seen: set = set()
     uniq = []
     for it in entries:
         if it["id"] not in seen:
             seen.add(it["id"])
             uniq.append(it)
-    uniq = uniq[:_LIST_LIMIT]
+    uniq = uniq[:limit]
     if len(uniq) <= 1:
         return None, "合集流未吐出同作者视频（该作者可能无合集，建议贴主页链接）", True
     return uniq, None, True
 
 
-def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Optional[str], bool]:
+def _list_author_videos_via_share_page(url: str, limit: int = _LIST_LIMIT) -> tuple[Optional[list], Optional[str], bool]:
     """移动分享主页路线：iesdouyin share/user 页零登录墙，拦 aweme/post 拿作品列表。"""
     from ..benchmarks.downloader import is_douyin_url
 
@@ -184,11 +187,22 @@ def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Option
             page.goto(f"https://www.iesdouyin.com/share/user/{sec}",
                       timeout=45000, wait_until="domcontentloaded")
             # 滚动触发分页加载；deadline 轮询到 60s（住宅隧道实测列表 XHR 晚到，
-            # 固定短窗把正常页误判成风控——2026-10-28 复盘）
-            deadline = time.time() + 60
-            while not raw and time.time() < deadline:
+            # 固定短窗把正常页误判成风控——2026-10-28 复盘）。
+            # 2026-11-15 深翻页：此前拿到第一页就停（90 天回填吃不到 30 天前的存量）——
+            # 改为滚动到凑满 limit 或连续两轮无新增（到底了）；深翻页给更长等待窗。
+            deadline = time.time() + (100 if limit > _LIST_LIMIT else 60)
+            prev, stall = 0, 0
+            while time.time() < deadline:
                 page.mouse.wheel(0, 2400)
                 page.wait_for_timeout(2000)
+                got = len({str(a.get("aweme_id") or "")
+                           for d in raw for a in (d.get("aweme_list") or [])})
+                if got >= limit:
+                    break
+                stall = stall + 1 if got == prev else 0
+                prev = got
+                if stall >= 2 and got:
+                    break  # 连续两轮零新增 = 已经到底
         except Exception as e:  # noqa: BLE001
             return None, f"分享页路线失败: {str(e)[:120]}", True
         finally:
@@ -204,7 +218,7 @@ def _list_author_videos_via_share_page(url: str) -> tuple[Optional[list], Option
                 entries.append({"id": aid, "title": str(a.get("desc") or "")[:80],
                                 "stats": _extract_stats(a),
                                 "ctime": a.get("create_time") or 0})
-    entries = entries[:_LIST_LIMIT]
+    entries = entries[:limit]
     if not entries:
         return None, "分享页未吐出作品列表（等待窗内数据未到，可重试）", True
     return entries, None, True
@@ -1039,14 +1053,20 @@ def _hl_crawl_sync(ctx, done_queries: list[str], cities: list[str], keywords: li
 
 @register_executor("watch_backfill")
 async def watch_backfill(ctx, payload: dict) -> dict:
-    """监控号 30 天存量回填（2026-11-14）：逐启用对标账号用锚点路线列近期作品——
-    发布时间 ≤30 天 + 拆解闸同口径（评论≥20 或赞≥300）→ 未入库的建行自动拆解
-    （拆解自动采高赞评论+分型路由）。监控以来只入库增量，存量从未翻账。"""
+    """监控号存量回填（2026-11-14；2026-11-15 追溯窗参数化）：逐启用对标账号列表近期作品——
+    发布时间 ≤backfill_window_days（设置项，默认 30）+ 拆解闸同口径（评论≥20 或赞≥300）
+    → 未入库的建行自动拆解（拆解自动采高赞评论+分型路由）。
+    深翻页模式（列表 60 条/账号）把高频账号 30 天前的旧片也送进闸口。"""
     from ..benchmarks import service as bms
     from ..settings import settings
 
     cmin = max(1, int(settings.dissect_comment_min or 20))
     dmin = max(1, int(settings.dissect_digg_min or 300))
+    days = max(1, int(settings.backfill_window_days or 30))
+    # 深翻页实测（2026-11-16，四路全断）：分享页 UI 滚轮无效+网格 0 渲染、PC 主页匿名登录墙、
+    # aweme/post 接口 a_bogus 签名锁死（原样重放/改参/裸调全空体）→ 匿名深度=首发 XHR ~15 条。
+    # 上限仍留 20（首发批+停手判定），douyin 若放开深度本链路自愈。
+    limit = 20
     with Session(engine) as s:
         accounts = s.exec(select(WatchAccount).where(  # type: ignore[attr-defined]
             WatchAccount.enabled == True,  # noqa: E712
@@ -1055,7 +1075,7 @@ async def watch_backfill(ctx, payload: dict) -> dict:
         ctx.set_progress(100, "无启用对标账号，诚实空过")
         return {"accounts": 0, "created": 0, "queued": 0, "notes": []}
     cap = 100  # 单次建行上限（heavy 串行消化，可重复跑续扫）
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
     created_n = queued = 0
     notes: list[str] = []
     for i, acc in enumerate(accounts, 1):
@@ -1063,9 +1083,9 @@ async def watch_backfill(ctx, payload: dict) -> dict:
             notes.append(f"达单次上限 {cap}，剩余账号下次再跑")
             break
         ctx.set_progress(int(90 * (i - 1) / len(accounts)), f"回填 {acc.name}（{i}/{len(accounts)}）")
-        entries, err, _is_anchor = await asyncio.to_thread(_list_author_videos_via_anchor, acc.url)
+        entries, err, _is_anchor = await asyncio.to_thread(_list_author_videos_via_anchor, acc.url, limit)
         if entries is None:
-            entries, err2, _ = await asyncio.to_thread(_list_author_videos_via_share_page, acc.url)
+            entries, err2, _ = await asyncio.to_thread(_list_author_videos_via_share_page, acc.url, limit)
         if entries is None:
             notes.append(f"{acc.name} 列表未生效：{(err2 or err or '')[:50]}")
             continue
@@ -1081,7 +1101,7 @@ async def watch_backfill(ctx, payload: dict) -> dict:
             c = int(st.get("comment") or 0)
             dg = int(st.get("digg") or 0)
             if ctime and datetime.fromtimestamp(ctime, tz=timezone.utc).replace(tzinfo=None) < cutoff:
-                continue  # 超 30 天
+                continue  # 超追溯窗
             if c < cmin and dg < dmin:
                 continue  # 不过拆解闸（R3.7 同口径）
             url = e.get("url") or f"https://www.douyin.com/video/{vid}"
@@ -1092,7 +1112,7 @@ async def watch_backfill(ctx, payload: dict) -> dict:
                 b = BenchmarkVideo(tenant_id=acc.tenant_id, url=url, author=acc.name,
                                    title=str(e.get("title") or "")[:80], stats=st,
                                    source="douyin", account_type=acc.account_type or "persona",
-                                   scan_status="pending", notes="监控号存量回填（30 天）")
+                                   scan_status="pending", notes=f"监控号存量回填（{days} 天）")
                 s.add(b)
                 s.commit()
                 s.refresh(b)
@@ -1103,8 +1123,9 @@ async def watch_backfill(ctx, payload: dict) -> dict:
             queued += n
         notes.append(f"{acc.name}：列 {len(entries)}，过闸建行 {len(created_rows)}")
         await asyncio.sleep(2)
-    ctx.set_progress(100, f"存量回填完成：{len(accounts)} 账号 / 过闸建行 {created_n} / 排队拆解 {queued}")
-    return {"accounts": len(accounts), "created": created_n, "queued": queued, "notes": notes[:24]}
+    ctx.set_progress(100, f"存量回填完成（{days} 天窗）：{len(accounts)} 账号 / 过闸建行 {created_n} / 排队拆解 {queued}")
+    return {"accounts": len(accounts), "created": created_n, "queued": queued,
+            "days": days, "notes": notes[:24]}
 
 
 @register_executor("hl_search_matrix")

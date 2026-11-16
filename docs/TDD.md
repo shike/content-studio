@@ -104,7 +104,7 @@ content-studio/
 asr_model / scrape_proxy / douyin_proxy / douyin_ua / watch_scan_enabled / watch_scan_hour /
 creator_data_enabled / ima_kb_enabled / dissect_comment_min / dissect_digg_min /
 pool_peer_min_comments / hook_speed_cps / hook_ban_prefixes / coverage_min / judge_pass_line /
-daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（池子线视频新鲜窗，默认 30 小时=只吃新视频；调宽=允许存量真矿进线） / comment_leadgen_route_min（评论区分型路由阈值：求学占比≥此%判获客矿，默认 60）`（选题工场参数，2026-11-14）。
+daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（池子线视频新鲜窗，默认 30 小时=只吃新视频；调宽=允许存量真矿进线） / comment_leadgen_route_min（评论区分型路由阈值：求学占比≥此%判获客矿，默认 60） / backfill_window_days（存量回填追溯窗，天，默认 30；话题/账号两条回填线共用，2026-11-15）`（选题工场参数，2026-11-14）。
 载入时机=启动时（init_db 之后 `settings_store.load_overrides()`）；改 ASR 模型会清进程内模型缓存。
 设置接口/页面只暴露其中一部分（模型/检索通道/扫描计划/拆解闸线/选题工场参数/采集出口），其余键直接改表。
 另有**不在受管登记内的手工配置键**（直接改 app_settings 表，随用随读）：ima 凭证三键
@@ -316,11 +316,17 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - `article_kb_miner` 挂死兜底（2026-11-15）：卡死复发两连（同批 4% 停 9.5h）——逐篇
   asyncio.wait_for（全文 120s/评估 600s，未知挂死转跳过）+ 整批 45min deadline
   （超时 TransientError 游标不推进走梯子）；reaper 看门狗 stuck_after=7200 实测有效（06:30 杀过一次）。
-- `POST /api/watch/backfill` → 202 `{job_id}`（监控号 30 天存量回填，执行器 `watch_backfill`，2026-11-14）：
-  逐启用对标账号锚点路线列近期作品 → 发布时间 ≤30 天 + 拆解闸同口径 → 未入库的建行
-  （notes=监控号存量回填）自动拆解（采高赞评论+分型路由）。单次建行上限 100（可重复跑续扫）。
-- `POST /api/radar/topics/backfill` → 202 `{job_id}`（话题 30 天存量回填，执行器 `topic_backfill`，2026-11-14）：
-  逐启用话题把精选集全部探测（detail 拿发布时间/评论/赞）→ 发布时间 ≤30 天 + 拆解闸同口径
+- `POST /api/watch/backfill` → 202 `{job_id}`（监控号存量回填，执行器 `watch_backfill`，2026-11-14；
+  2026-11-15 追溯窗参数化）：
+  逐启用对标账号列表近期作品（分享主页路线首发 XHR ~15 条=**匿名深度天花板**，2026-11-16 四路
+  实测全断：UI 滚轮无效+网格 0 渲染 / PC 主页登录墙 / 接口 a_bogus 签名锁死（原样重放/改参/裸调
+  全空体）；锚点路线 stats/ctime 贯穿）→ 发布时间 ≤backfill_window_days（设置项，默认 30）+
+  拆解闸同口径 → 未入库的建行（notes=监控号存量回填）自动拆解（采高赞评论+分型路由）。
+  单次建行上限 100（可重复跑续扫）。**90 天追溯的真实增量=低频账号 31~90 天旧片首次过闸**；
+  高频账号 15 条全在 30 天内，追溯窗帮不到——其 90 天深度只有登录态/创作者中心可达（红线内仅自有账号）。
+- `POST /api/radar/topics/backfill` → 202 `{job_id}`（话题存量回填，执行器 `topic_backfill`，2026-11-14；
+  2026-11-15 追溯窗参数化）：
+  逐启用话题把精选集全部探测（detail 拿发布时间/评论/赞）→ 发布时间 ≤backfill_window_days + 拆解闸同口径
   （评论≥20 或赞≥300，不过闸不建行不耗拆解）→ 未入库的建行（notes=雷达回填）走 auto_dissect_rows
   自动拆解（自动采高赞评论+分型路由）。免登录话题接口为固定精选集（翻页参数被无视，2026-11-02 实测），
   回填深度=精选集全量；命中登记进 hits（夜间探测不重复探）。在途去重 dedup_key=1:topic_backfill。
