@@ -62,12 +62,11 @@ def code_routes() -> set[str]:
 
 def check_routes(path: Path) -> set[str]:
     src = path.read_text(encoding="utf-8")
-    # 字符集含 ?=&：带 query 的字面量（如 /api/topics?line=persona）也要整条抓到，
-    # norm() 统一剥 query——2026-11-16 WB 实查：无 ? 时 8 处引用被整条漏抓
-    found = {m.group(1) for m in re.finditer(
-        r'''["'](/api/[A-Za-z0-9_\-{}/\.\?=&]*)["']''', src)}
-    # 过滤 f-string 内层代码碎片（如 /api/scripts/{d.get( 这类跨引号残片）：
-    # 合法路由只含 字母数字_-{}/.，norm 剥 query 后再校验一遍
+    # 宽捕获 [^"']：f-string 内插（如 /api/jobs/failures/{urllib.parse.quote(x)}/resolve）
+    # 也能整条抓到；norm() 剥 query 并把 {...} 归一为 {}（括号随花括号内容一起消掉）；
+    # 最后严格字符校验拦 f-string 碎片（/api/scripts/{d.get( 这类残片过不了关）。
+    # 2026-11-16 两轮修正：仅加 ? 会漏带括号的 1 条活端点；仅宽捕获会放进代码碎片。
+    found = {m.group(1) for m in re.finditer(r'''["'](/api/[^"']*)["']''', src)}
     keep: set[str] = set()
     for r in found:
         if r.endswith((".png", ".jpg", ".json")):
