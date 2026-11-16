@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import text  # noqa: E402
 from sqlmodel import Session, select  # noqa: E402
 
-from app.channels.engine import CHANNEL_SEEDS, ensure_channels  # noqa: E402
+from app.channels.engine import ensure_channels  # noqa: E402
 from app.db import engine  # noqa: E402
 from app.materials.service import content_hash_of  # noqa: E402
 from app.models import Channel, ChannelStyle, Content, Idea, Publication  # noqa: E402
@@ -69,7 +69,6 @@ def main() -> int:
             old_id = int(row["id"])
             if old_id in idea_map:
                 continue
-            dedup = content_hash_of("idea", str(old_id), str(row.get("hook") or ""))
             dup = s.exec(select(Idea).where(Idea.tenant_id == (row.get("tenant_id") or 1))).all()  # type: ignore[attr-defined]
             dup_hit = any((i.payload or {}).get("_legacy_id") == old_id for i in dup)
             if dup_hit:
