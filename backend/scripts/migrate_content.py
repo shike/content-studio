@@ -26,7 +26,6 @@ from sqlmodel import Session, select  # noqa: E402
 
 from app.channels.engine import ensure_channels  # noqa: E402
 from app.db import engine  # noqa: E402
-from app.materials.service import content_hash_of  # noqa: E402
 from app.models import Channel, ChannelStyle, Content, Idea, Publication  # noqa: E402
 
 
