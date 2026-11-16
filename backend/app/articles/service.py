@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from pathlib import Path
 
 from sqlmodel import Session, select
 
@@ -21,9 +20,8 @@ from .quality import banned_hits as _banned_hits  # noqa: F401
 from .quality import content_signature as _content_signature  # noqa: F401
 from .quality import kb_style_violations as _kb_style_violations  # noqa: F401
 from .quality import quality_gate as _quality_gate  # noqa: F401
-from .render_charts import (attach_charts as _attach_charts,  # noqa: F401
-                            attach_cover as _attach_cover,
-                            insert_chart_after_section as _insert_chart_after_section)
+from .render_charts import attach_charts as _attach_charts  # noqa: F401
+from .render_charts import attach_cover as _attach_cover  # noqa: F401
 
 # 长文风格库（R10）：key → 结构骨架。生成时单选，auto 交给模型按素材挑。
 ARTICLE_STYLES: dict[str, str] = {
