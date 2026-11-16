@@ -1,8 +1,7 @@
 # check × openapi 差集（`python3 acceptance/drift/check_vs_openapi.py --md`）
 
 ```
-HEAD e8ef3cf / dirty
-raw 123 条（正则匹配，非行数；按文件去重后 68） / raw 唯一 60
+raw 123 条（正则匹配，非行数） / raw 唯一 69
 norm 唯一 60
 后端路由 85
 ```
