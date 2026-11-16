@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import runner
 from ..auth import require_user
-from ..models import SelfVideo, StyleProfile, WatchAccount, User
+from ..models import ChannelStyle, SelfVideo, WatchAccount, User
 
 router = APIRouter(prefix="/api/style")
 
@@ -17,9 +17,19 @@ def _self_account(s: Session) -> WatchAccount | None:
     ).first()
 
 
-def _profile_dict(p: StyleProfile) -> dict:
+def _profile_dict(p: ChannelStyle) -> dict:
     return {"version": p.version, "digest": p.digest, "traits": p.traits,
             "exemplars": p.exemplars, "based_on": p.based_on, "created_at": p.created_at}
+
+
+def _latest_profile(s):
+    """最新画像（P3 起读 channel_styles，渠道=persona；形状与旧 style_profiles 一致）。"""
+    from ..channels.engine import channel_id_of
+
+    ch = channel_id_of(s, "persona")
+    return s.exec(select(ChannelStyle).where(  # type: ignore[attr-defined]
+        ChannelStyle.channel_id == ch)  # type: ignore[attr-defined]
+        .order_by(ChannelStyle.version.desc())).first()  # type: ignore[attr-defined]
 
 
 class ResolveIn(BaseModel):
@@ -74,9 +84,7 @@ def overview() -> dict:
         total = s.exec(select(_f.count(SelfVideo.id))).one() or 0
         analyzed = s.exec(select(_f.count(SelfVideo.id)).where(
             SelfVideo.analyzed_at is not None)).one() or 0  # type: ignore[attr-defined]
-        profile = s.exec(
-            select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
-        ).first()
+        profile = _latest_profile(s)
 
         return {
             "account": acc.model_dump() if acc else None,

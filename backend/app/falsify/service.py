@@ -20,7 +20,7 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import JobContext, runner
 from ..llm import gateway
-from ..models import Material, Script
+from ..models import Content, Material
 from ..prompts import render
 from ..materials.service import record_usage
 
@@ -119,15 +119,18 @@ async def compose_falsify(*, item_id: int, user=None, length: str = "short") -> 
             raise RuntimeError(f"状态 {m.stage} 不可成稿（先推进到「已实测」并回填结论）")
         if not (m.body or "").strip():
             raise RuntimeError("实测结论为空——没有实测事实，成稿就是编造")
-        dup = s.exec(select(Script).where(  # type: ignore[attr-defined]
-            Script.falsify_item_id == item_id,  # type: ignore[attr-defined]
-            Script.status.in_(["generating", "polishing"]))).first()  # type: ignore[attr-defined]
+        dup = s.exec(select(Content).where(  # type: ignore[attr-defined]
+            Content.payload.op('->>')('falsify_item_id') == str(item_id),  # type: ignore[attr-defined]
+            Content.status == "drafting")).first()  # type: ignore[attr-defined]
         if dup is not None:
             raise RuntimeError(f"该条目正在成稿（脚本 #{dup.id}），等完成或删除后再试")
-        script = Script(falsify_item_id=item_id, account_type="persona",
-                        title_hint=(m.title or "")[:60], status="generating")
-        s.add(script)
-        s.flush()
+        from ..channels.engine import new_script_content
+
+        script = new_script_content(
+            s, tenant_id=m.tenant_id or (user.tenant_id if user else 1),
+            channel_key="persona", title_hint=(m.title or "")[:60],
+            payload={"script_state": "generating", "falsify_item_id": item_id,
+                     "account_type": "persona"})
         record_usage(s, tenant_id=m.tenant_id or (user.tenant_id if user else 1),
                      material_id=item_id, target_type="content",
                      target_id=script.id, role="source")
@@ -137,7 +140,6 @@ async def compose_falsify(*, item_id: int, user=None, length: str = "short") -> 
         m.quality = q
         s.add(m)
         s.commit()
-        s.refresh(script)
         script_id = script.id
     actor = (user.tenant_id, user.id, user.role) if user is not None else None
     job = await runner.submit("script_generate",

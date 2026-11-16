@@ -18,7 +18,7 @@ from ..materials.download import resolve_aweme_id
 from ..db import engine
 from ..jobs.runner import JobContext, register_concurrent, register_executor, runner
 from ..llm import gateway
-from ..models import SelfVideo, StyleProfile, WatchAccount
+from ..models import ChannelStyle, SelfVideo, WatchAccount
 from ..prompts import load
 from ..settings import settings
 from ..materials.collectors.douyin_list import (
@@ -38,11 +38,16 @@ _FALLBACK_STYLE = """- 像跟熟识的老客户面对面聊天，不像站在台
 - 讲完观点就收尾。不喊"关注我"，不让人"评论区扣 1"，不承诺"保证见效\""""
 
 
-def latest_profile() -> Optional[StyleProfile]:
+def latest_profile() -> Optional[ChannelStyle]:
+    """最新风格画像（P3 内容域起读 channel_styles，渠道=persona）。"""
+    from ..channels.engine import channel_id_of
+
     with Session(engine) as s:
+        ch = channel_id_of(s, "persona")
         return s.exec(
-            select(StyleProfile).order_by(StyleProfile.version.desc())  # type: ignore[attr-defined]
-        ).first()
+            select(ChannelStyle).where(  # type: ignore[attr-defined]
+                ChannelStyle.channel_id == ch)  # type: ignore[attr-defined]
+            .order_by(ChannelStyle.version.desc())).first()  # type: ignore[attr-defined]
 
 
 def voice_samples(max_videos: int = 6, max_chars: int = 110) -> list[str]:
@@ -381,13 +386,16 @@ async def self_profile_update(ctx: JobContext, payload: dict) -> dict:
 
     with Session(engine) as s:
         acc = s.exec(select(WatchAccount).where(WatchAccount.kind == "self")).first()  # type: ignore[attr-defined]
-        profile = StyleProfile(
-            account_name=acc.name if acc else "",
+        from ..channels.engine import channel_id_of
+
+        profile = ChannelStyle(
+            tenant_id=1, channel_id=channel_id_of(s, "persona"),
             version=(prev.version + 1) if prev else 1,
             digest=str(data.get("digest") or ""),
             traits=list(data.get("traits") or []),
             exemplars=list(data.get("exemplars") or []),
             based_on=len(marks),
+            payload={"account_name": acc.name if acc else ""},
         )
         s.add(profile)
         s.commit()

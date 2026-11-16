@@ -26,7 +26,7 @@ from sqlmodel import Session, select
 
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
-from ..models import Material, Script, Source, TopicCard
+from ..models import Content, Idea, Material, Source
 from ..settings import settings
 
 # ── C 阶段结构整治（2026-11-16）：归一/闸门/锻造链拆至 norms/gates/forge，本模块留执行器与编排；facade 导入沿用旧名（api/ 既有导入零改动）──
@@ -110,8 +110,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _td(
         hours=max(1, int(settings.pool_peer_window_hours or 30)))
     with Session(engine) as s:
-        recent_cards = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
-            TopicCard.created_at >= datetime.now(timezone.utc).replace(tzinfo=None) - _td(days=14)
+        recent_cards = s.exec(select(Idea).where(  # type: ignore[attr-defined]
+            Idea.created_at >= datetime.now(timezone.utc).replace(tzinfo=None) - _td(days=14)
         )).all()  # type: ignore[attr-defined]
         seen_refs = {str(((c.pool or {}).get("douyin_evidence") or {}).get("ref") or "")
                      for c in recent_cards}
@@ -337,24 +337,27 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     draft_ids: list[int] = []
     n_jail = 0
     n_superseded = 0
+    from ..channels.engine import channel_id_of
+
     with Session(engine) as s:
+        persona_ch = channel_id_of(s, "persona")
         # jail 过期清扫（窗口外物理删——弃卡是生成内容不是用户数据）
-        for c in s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
-                TopicCard.status == "jail",  # type: ignore[attr-defined]
-                TopicCard.created_at < jail_cutoff)).all():  # type: ignore[attr-defined]
+        for c in s.exec(select(Idea).where(  # type: ignore[attr-defined]
+                Idea.status == "jail",  # type: ignore[attr-defined]
+                Idea.created_at < jail_cutoff)).all():  # type: ignore[attr-defined]
             s.delete(c)
         # 批次替代：当日更早批次且无下游的 draft 让位（approved/有 script_id 的不动）
-        old_drafts = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
-            TopicCard.status == "draft",  # type: ignore[attr-defined]
-            TopicCard.created_at < day_start)).all()  # type: ignore[attr-defined]
-        old_ids = [c.id for c in old_drafts if not c.script_id]
+        old_drafts = s.exec(select(Idea).where(  # type: ignore[attr-defined]
+            Idea.status == "draft",  # type: ignore[attr-defined]
+            Idea.created_at < day_start)).all()  # type: ignore[attr-defined]
+        old_ids = [c.id for c in old_drafts if not c.content_id]
         for rank, (_, it) in enumerate(passed):
             judge = dict(it["judge"])
             if rank >= limit:
                 judge["verdict"] = "overflow"
                 judge["reason"] = (judge["reason"] + "｜超出每日上限").strip("｜")
             card = _merge_card(it["i"], {"source": it["source"], "pool": it["pool"]},
-                               it["forged"], it["hook"], it["gates"])
+                               it["forged"], it["hook"], it["gates"], persona_ch)
             card.judge = judge
             card.status = "jail" if rank >= limit else "draft"
             s.add(card)
@@ -365,14 +368,14 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
                 n_jail += 1
         for i, (_, it) in enumerate(killed):
             card = _merge_card(it["i"], {"source": it["source"], "pool": it["pool"]},
-                               it["forged"], it["hook"], it["gates"])
+                               it["forged"], it["hook"], it["gates"], persona_ch)
             card.judge = it["judge"]
             card.status = "jail"
             s.add(card)
             s.flush()
             n_jail += 1
         for oid in old_ids:
-            c = s.get(TopicCard, oid)
+            c = s.get(Idea, oid)
             if c is not None:
                 c.status = "discarded"
                 c.superseded_by = draft_ids[0] if draft_ids else None
@@ -388,20 +391,21 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
 async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
                        angle: str = "", user=None) -> dict:
     """备稿：靶子卡（draft/approved）→ 脚本任务。钩子/主线可被用户改写后传入。"""
+    from ..channels.engine import new_script_content
     from ..scripts.service import SIX_ANGLES
 
     angle = (angle or "").strip()
     if angle not in SIX_ANGLES:
         raise ValueError(f"未知打法：{angle or '（未选主打打法）'}")
     with Session(engine) as s:
-        card = s.get(TopicCard, card_id)
+        card = s.get(Idea, card_id)
         if card is None:
             raise KeyError("card not found")
         if card.status not in ("draft", "approved"):
             raise RuntimeError(f"状态 {card.status} 不可备稿（仅 draft/approved）")
-        dup = s.exec(select(Script).where(  # type: ignore[attr-defined]
-            Script.card_id == card_id,  # type: ignore[attr-defined]
-            Script.status.in_(["generating", "polishing"]))).first()  # type: ignore[attr-defined]
+        dup = s.exec(select(Content).where(  # type: ignore[attr-defined]
+            Content.idea_id == card_id,  # type: ignore[attr-defined]
+            Content.status == "drafting")).first()  # type: ignore[attr-defined]
         if dup is not None:
             raise RuntimeError(f"该卡正在生成脚本（#{dup.id}），等完成或删除后再试")
         hook_v = (hook or card.hook or "").strip()
@@ -409,15 +413,15 @@ async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
         if not hook_v or not spine_v:
             raise RuntimeError("卡上没有钩子/主线，不可备稿")
         spice_v = card.spice if card.spice in ("low", "mid", "high") else "mid"
-        script = Script(card_id=card_id, account_type="persona",
-                        title_hint=(str(hook or card.hook) or "")[:60], status="generating")
-        s.add(script)
-        s.flush()
+        script = new_script_content(
+            s, tenant_id=card.tenant_id or 1, channel_key="persona", idea_id=card.id,
+            title_hint=(str(hook or card.hook) or "")[:60],
+            payload={"script_state": "generating", "hook": hook_v[:60], "spine": spine_v[:40],
+                     "spice": spice_v, "angle": angle, "account_type": "persona"})
         card.status = "approved"
-        card.script_id = script.id
+        card.content_id = script.id
         s.add(card)
         s.commit()
-        s.refresh(script)
         script_id = script.id
     actor = (user.tenant_id, user.id, user.role) if user is not None else None
     from ..jobs.runner import runner

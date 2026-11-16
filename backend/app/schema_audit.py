@@ -17,11 +17,14 @@ from sqlmodel import SQLModel
 
 _IGNORED_TABLES = {"alembic_version"}
 
-# 迁移期白名单（P2 素材域 2026-11-16）：旧素材面 5 表已停止读写，数据已迁 sources/materials，
-# 生产库原地只读保留到 P5 收口统一 DROP（Expand-Contract；模型已删=新库不再建）。
-# P5 删旧表时同步移出本清单，让审计闸拦截任何残留。
+# 迁移期白名单：旧表已停止读写、数据已迁新表，生产库原地只读保留到 P5 收口统一 DROP
+# （Expand-Contract；模型已删=新库不再建）。P5 删旧表时同步移出本清单。
+# P2 素材域（2026-11-16）+ P3 内容域（2026-11-16）。
 _LEGACY_TABLES = {
+    # P2 素材域
     "benchmark_videos", "watch_candidates", "radar_topics", "content_items", "falsify_items",
+    # P3 内容域
+    "topic_cards", "scripts", "articles", "style_profiles",
 }
 
 # 类型只比「家族」：避免 VARCHAR(200) vs VARCHAR、identity INTEGER vs INTEGER 之类误报

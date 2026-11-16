@@ -8,7 +8,7 @@ from sqlmodel import Session
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Material, Script, TopicCard
+from ..models import Content, Idea, Material
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
@@ -46,9 +46,12 @@ def _normalize_versions(raw: list) -> list[dict]:
 
 def _script_generate_fail(payload: dict, _exc: Exception) -> None:
     with Session(engine) as s:  # 失败回退：脚本不得永远卡在"生成中"
-        sc = s.get(Script, int(payload.get("script_id") or 0))
-        if sc is not None and sc.status in ("generating", "polishing"):
+        sc = s.get(Content, int(payload.get("script_id") or 0))
+        if sc is not None and sc.status == "drafting":
             sc.status = "failed"
+            p = dict(sc.payload or {})
+            p["script_state"] = "failed"
+            sc.payload = p
             s.add(sc)
             s.commit()
 
@@ -76,10 +79,10 @@ def _scaffold(*, discipline_mode: str, card_discipline: str, my_style: str,
 async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     script_id = payload["script_id"]
     with Session(engine) as s:
-        script = s.get(Script, script_id)
-        if script is None:
+        script = s.get(Content, script_id)
+        if script is None or script.kind != "video_script":
             raise RuntimeError(f"script {script_id} 不存在")
-        card = s.get(TopicCard, int(payload["card_id"])) if payload.get("card_id") else None
+        card = s.get(Idea, int(payload["card_id"])) if payload.get("card_id") else None
         if payload.get("card_id") and card is None:
             raise RuntimeError(f"card {payload['card_id']} 不存在")
         falsify = (s.get(Material, int(payload["falsify_item_id"]))
@@ -213,10 +216,13 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                                   length=length, cta_rule=_cta_rule_of(account_type))
 
     with Session(engine) as s:
-        script = s.get(Script, script_id)
+        script = s.get(Content, script_id)
         script.versions = versions
-        script.status = "generated"
-        script.account_type = account_type
+        p = dict(script.payload or {})
+        p["script_state"] = "generated"
+        p["account_type"] = account_type
+        script.payload = p
+        script.status = "review"
         s.add(script)
         s.commit()
 
@@ -259,9 +265,12 @@ async def _polish_core(versions: list[dict], cta_rule: str,
 
 def _script_polish_fail(payload: dict, _exc: Exception) -> None:
     with Session(engine) as s:  # 打磨失败回退：版本仍在，退回待定稿
-        sc = s.get(Script, int(payload.get("script_id") or 0))
-        if sc is not None and sc.status == "polishing":
-            sc.status = "generated"
+        sc = s.get(Content, int(payload.get("script_id") or 0))
+        if sc is not None and sc.status == "drafting":
+            p = dict(sc.payload or {})
+            p["script_state"] = "generated"
+            sc.payload = p
+            sc.status = "review"
             s.add(sc)
             s.commit()
 
@@ -274,8 +283,8 @@ async def script_polish(ctx: JobContext, payload: dict) -> dict:
 async def _script_polish(ctx: JobContext, payload: dict) -> dict:
     script_id = payload["script_id"]
     with Session(engine) as s:
-        script = s.get(Script, script_id)
-        if script is None:
+        script = s.get(Content, script_id)
+        if script is None or script.kind != "video_script":
             raise RuntimeError(f"script {script_id} 不存在")
         if not script.versions:
             raise RuntimeError("脚本还没有版本，先生成")
@@ -284,12 +293,15 @@ async def _script_polish(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(30, "批判打磨中")
     merged = await _polish_core(original, use_style=bool(payload.get("use_style", True)),
                                 length=payload.get("length", "short"),
-                                cta_rule=_cta_rule_of(script.account_type or "persona"))
+                                cta_rule=_cta_rule_of((script.payload or {}).get("account_type") or "persona"))
 
     with Session(engine) as s:
-        script = s.get(Script, script_id)
+        script = s.get(Content, script_id)
         script.versions = merged
-        script.status = "generated"
+        p = dict(script.payload or {})
+        p["script_state"] = "generated"
+        script.payload = p
+        script.status = "review"
         s.add(script)
         s.commit()
 
@@ -308,10 +320,10 @@ async def script_finalize(ctx: JobContext, payload: dict) -> dict:
     return {"script_id": script_id, "status": script.status, "title": first_title}
 
 
-async def finalize_script(script_id: int, version_index: int = 0) -> Script:
+async def finalize_script(script_id: int, version_index: int = 0) -> Content:
     """定稿：一次 LLM 调用，产出提词器/分镜/标题三件套（由 script_finalize 任务驱动）。"""
     with Session(engine) as s:
-        script = s.get(Script, script_id)
+        script = s.get(Content, script_id)
         if script is None:
             raise ValueError(f"script {script_id} 不存在")
         versions = script.versions or []
@@ -325,13 +337,24 @@ async def finalize_script(script_id: int, version_index: int = 0) -> Script:
         max_tokens=8000)
 
     with Session(engine) as s:
-        script = s.get(Script, script_id)
-        script.final_text = chosen.get("body", "")
-        script.teleprompter_text = data.get("teleprompter_text", "")
-        script.storyboard = data.get("storyboard") or []
-        script.title_candidates = data.get("title_candidates") or []
-        script.status = "final"
+        script = s.get(Content, script_id)
+        script.body = chosen.get("body", "")
+        p = dict(script.payload or {})
+        p["teleprompter_text"] = data.get("teleprompter_text", "")
+        p["storyboard"] = data.get("storyboard") or []
+        p["title_candidates"] = data.get("title_candidates") or []
+        p["script_state"] = "final"
+        script.payload = p
+        script.title = (script.payload.get("title_hint") or script.title or "")[:60]
+        script.status = "ready"
         s.add(script)
         s.commit()
         s.refresh(script)
+        # 选题 consumed：稿件定稿即闭环（四渠道统一状态机，PRD R0.8）
+        if script.idea_id:
+            idea = s.get(Idea, script.idea_id)
+            if idea is not None and idea.status == "approved":
+                idea.status = "consumed"
+                s.add(idea)
+                s.commit()
     return script

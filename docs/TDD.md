@@ -542,6 +542,16 @@ PY
 
 ## 15. 迁移映射（迁移期专用，P5 收口后删除）
 
+> **P3 内容域已执行（2026-11-16）**：alembic 0003=8994f9eb59c8 建 channels/ideas/contents/
+> publications/channel_styles 五表；`backend/scripts/migrate_content.py` 迁 topic_cards→ideas、
+> scripts→contents(video_script)、articles→contents(long_article)+publications、
+> style_profiles→channel_styles，并重映射 idea.content_id / contents.parent_content_id /
+> materials.quality.article_id+script_id；旧内容面 4 表停读写入白名单。调度改名 4 项：
+> article_hotspots_daily→wechat_hotspot_daily、article_kb_miner_daily→material_kb_mine、
+> article_adapt_daily→wechat_adapt_daily、card_line_daily→persona_idea_daily。
+> API 门面（/api/cards、/api/scripts、/api/articles、/api/style）保持旧契约，前端零改动；
+> 新增 /api/channels（渠道配置+小红书线+发布）、/api/contents（统一稿件+封面服务）。
+> 执行器名维持（card_daily/script_generate/article_generate…），目录结构 P5 统一搬。
 > **P2 素材域已执行（2026-11-16）**：`backend/scripts/migrate_materials.py` 已把旧 5 表迁入
 > sources/materials/material_analyses/material_usages（幂等可重跑），scripts.ore_id/falsify_item_id
 > 重映射为 materials.id（FK 已在 0002 迁移拆除）；旧表停读写、模型已删，生产库原地只读保留

@@ -154,7 +154,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const runFactory = () =>
     guard(async () => {
       setFactoryBusy(true)
-      const d = await api<{ status: string; message: string }>('/schedules/card_line_daily/run', { method: 'POST' })
+      const d = await api<{ status: string; message: string }>('/schedules/persona_idea_daily/run', { method: 'POST' })
       setMsg(`工场已开跑（${d.message || ''}）…`)
       const jobId = Number((d.message || '').match(/#(\d+)/)?.[1] || 0)
       if (jobId) pollJob(jobId, 'card_daily', (st, err) => {

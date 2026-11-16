@@ -11,16 +11,15 @@ from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import Article, Job, Script
+from ..models import Content, Job
 
 # job_type → (实体模型, payload 主键字段, 在途状态)
+# P3 内容域：脚本/长文统一为 Content（drafting=在途；kind 靠 payload 字段区分）
 ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
-    "script_generate": (Script, "script_id", "generating"),
-    "script_polish": (Script, "script_id", "polishing"),
-    "article_generate": (Article, "article_id", "generating"),
-    # adapt/deepread 两条公众号成文线同样产出 Article 且注册了
-    # _article_generate_fail（2026-11-13 补映射：此前它们的失败文章不在复活/孤儿射程）
-    "article_adapt": (Article, "article_id", "generating"),
+    "script_generate": (Content, "script_id", "drafting"),
+    "script_polish": (Content, "script_id", "drafting"),
+    "article_generate": (Content, "article_id", "drafting"),
+    "article_adapt": (Content, "article_id", "drafting"),
 }
 
 
@@ -62,7 +61,9 @@ def entity_orphans() -> list[dict]:
             active_payloads.setdefault(j.type, []).append(j.payload or {})
         for job_type, (model, id_key, _in_flight) in ENTITY_TABLE.items():
             live_ids = {p.get(id_key) for p in active_payloads.get(job_type, [])}
-            for row in s.exec(select(model)).all():
+            kind = "video_script" if id_key == "script_id" else "long_article"
+            for row in s.exec(select(model).where(  # type: ignore[attr-defined]
+                    model.kind == kind)).all():  # type: ignore[attr-defined]
                 if getattr(row, "status", None) != "failed":
                     continue
                 if row.id in live_ids:

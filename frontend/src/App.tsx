@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Activity,
+  Feather,
   Fingerprint,
   LayoutDashboard,
   Magnet,
@@ -9,6 +10,7 @@ import {
   Settings,
 } from 'lucide-react'
 import Today from './pages/Today'
+import Xhs from './pages/Xhs'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
 import { PersonaStage, LeadgenStage, ArticleStage, MaterialsStage } from './pages/Stages'
@@ -22,7 +24,7 @@ import Mobile from './Mobile'
  * （用户批准破「目的地不藏页内 tab」旧规）。
  * 旧产线树 16 叶 + 三段式 3 键 + 更早 4 键经 NAVMAP 全量兼容路由（内嵌页 onNavigate 不断链）。
  */
-type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'materials' | 'tasks' | 'settings'
+type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'xhs' | 'materials' | 'tasks' | 'settings'
 
 interface NavTarget {
   key: SectionKey
@@ -48,7 +50,7 @@ const NAVMAP: Record<string, NavTarget> = {
   articles: { key: 'article', tab: 'workshop' },
 }
 
-const BADGED = new Set<string>(['today', 'persona', 'leadgen', 'article', 'materials', 'tasks'])
+const BADGED = new Set<string>(['today', 'persona', 'leadgen', 'article', 'xhs', 'materials', 'tasks'])
 
 const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
   persona: 'topics',
@@ -110,7 +112,7 @@ export default function App() {
       if (t.tab) setStageTab((m) => ({ ...m, [t.key]: t.tab! }))
       return
     }
-    setActive(['today', 'persona', 'leadgen', 'article', 'materials', 'tasks', 'settings'].includes(k)
+    setActive(['today', 'persona', 'leadgen', 'article', 'xhs', 'materials', 'tasks', 'settings'].includes(k)
       ? (k as SectionKey) : 'today')
   }
 
@@ -176,7 +178,7 @@ export default function App() {
             <div className="truncate text-sm font-semibold tracking-tight text-[#f0e9d5]">
               跃迁内容工作室
             </div>
-            <div className="text-[10px] text-[#9dbba9]/70">素材库 · 四条内容线 · 数据</div>
+            <div className="text-[10px] text-[#9dbba9]/70">四条内容线 · 素材库 · 数据</div>
           </div>
         </div>
 
@@ -186,6 +188,7 @@ export default function App() {
           {renderItem({ key: 'persona', label: '人设号', icon: Fingerprint })}
           {renderItem({ key: 'leadgen', label: '获客', icon: Magnet })}
           {renderItem({ key: 'article', label: '公众号', icon: Newspaper })}
+          {renderItem({ key: 'xhs', label: '小红书', icon: Feather })}
           <div className="pt-3" />
           {renderItem({ key: 'materials', label: '素材库', icon: Package })}
         </nav>
@@ -216,6 +219,7 @@ export default function App() {
             <MaterialsStage tab={stageTab.materials ?? DEFAULT_TAB.materials!}
               onTab={(t) => setStageTab((m) => ({ ...m, materials: t }))} onNavigate={navTo} />
           )}
+          {active === 'xhs' && <Xhs />}
           {active === 'tasks' && <Tasks onNavigate={navTo} />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}
             onLogout={() => { setMe(null); setAuthed(false) }} />}

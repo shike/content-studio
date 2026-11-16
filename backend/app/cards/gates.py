@@ -10,7 +10,7 @@ from difflib import SequenceMatcher
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import TopicCard
+from ..models import Idea
 from ..settings import settings
 from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _COVER_RANK, _coverage_of,
                     _max_chars, _norm, _PREDICT_KW, _pron_len)
@@ -23,8 +23,8 @@ def _gate(gates: list, gate: str, ok: bool, detail: str = "") -> bool:
 def _recent_card_spines(days: int = 14) -> list[str]:
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
     with Session(engine) as s:
-        rows = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
-            TopicCard.created_at >= cutoff)).all()  # type: ignore[attr-defined]
+        rows = s.exec(select(Idea).where(  # type: ignore[attr-defined]
+            Idea.created_at >= cutoff)).all()  # type: ignore[attr-defined]
     return [c.spine for c in rows if c.spine]
 
 
@@ -85,13 +85,14 @@ def _hook_gate(hook: str, gates: list, spine: str = "") -> bool:
 
 
 def _merge_card(i: int, pool_entry: dict, forged: dict, hook: str,
-                gates: list) -> TopicCard:
+                gates: list, channel_id: int) -> Idea:
     pool = dict(pool_entry["pool"])
     role = str(forged.get("role") or pool.get("role") or "").strip()
     spice = forged.get("spice") if forged.get("spice") in ("low", "mid", "high") else "mid"
     pool["role"] = role
     pool["coverage"] = _coverage_of(role)
-    return TopicCard(batch_date=_local_day(), source=pool_entry["source"],
+    return Idea(channel_id=channel_id, tenant_id=1,
+                    batch_date=_local_day(), source=pool_entry["source"],
                      pool=pool, spine=str(forged.get("spine") or "").strip(),
                      hook=hook.strip(), spice=spice,
                      takeaways=list(forged.get("takeaways") or [])[:3],

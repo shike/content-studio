@@ -11,7 +11,8 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, Article, Script
+from ..channels.engine import new_article_content, script_out
+from ..models import AppSetting, Content
 from ..prompts import load, render
 # C 阶段结构整治（2026-11-16）：质量机检/违禁词表拆至 quality.py，配图拆至 render_charts.py；
 # 本模块 facade 导入沿用旧名——api/ 与 adapt/review 的既有导入零改动。
@@ -157,24 +158,30 @@ async def _gen_titles(persona_text: str, length_spec: dict[str, str],
 
 def _finalize_article(article_id: int, *, title: str,
                       kb_sources: list, md_text: str) -> None:
-    """成文落库收尾（各成文执行器共用）：写回标题/素材来源/正文并置 draft。"""
+    """成文落库收尾（各成文执行器共用）：写回标题/素材来源/正文并置 review（旧 draft 态）。"""
     with Session(engine) as s:
-        article = s.get(Article, article_id)
+        article = s.get(Content, article_id)
         if article is None:
             raise RuntimeError(f"article {article_id} 不存在（落稿时已被删除）")
         article.title = title or article.title
-        article.kb_sources = kb_sources
-        article.md = md_text
-        article.status = "draft"
+        p = dict(article.payload or {})
+        p["kb_sources"] = kb_sources
+        p["article_state"] = "draft"
+        article.payload = p
+        article.body = md_text
+        article.status = "review"
         s.add(article)
         s.commit()
 
 
 def _article_generate_fail(payload: dict, _exc: Exception) -> None:
     with Session(engine) as s:  # 失败回退：文章不得永远卡在"生成中"
-        art = s.get(Article, int(payload.get("article_id") or 0))
-        if art is not None and art.status == "generating":
+        art = s.get(Content, int(payload.get("article_id") or 0))
+        if art is not None and art.status == "drafting":
             art.status = "failed"
+            p = dict(art.payload or {})
+            p["article_state"] = "failed"
+            art.payload = p
             s.add(art)
             s.commit()
 
@@ -183,22 +190,22 @@ def _article_generate_fail(payload: dict, _exc: Exception) -> None:
 async def article_generate(ctx: JobContext, payload: dict) -> dict:
     article_id = payload["article_id"]
     with Session(engine) as s:
-        article = s.get(Article, article_id)
-        if article is None:
+        article = s.get(Content, article_id)
+        if article is None or article.kind != "long_article":
             raise RuntimeError(f"article {article_id} 不存在")
         tenant_id = article.tenant_id
         from ..tenant_brand import brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
-        script = s.get(Script, article.script_id) if article.script_id else None
+        script = s.get(Content, article.parent_content_id) if article.parent_content_id else None
         if script is not None:
             material = {
-                "口播脚本终稿（可改写扩写，不要照抄）": script.final_text if script else "",
+                "口播脚本终稿（可改写扩写，不要照抄）": script.body or "",
             }
         else:
             # 无脚本关联的历史草稿（直出链建稿必有脚本；此分支兜底旧数据），报题信息即原料
             material = {
-                "报题": {"标题": article.title, "备注/参考链接": article.note or ""},
+                "报题": {"标题": article.title, "备注/参考链接": (article.payload or {}).get("note") or ""},
             }
         # 公众号独立风格画像（从已发长文提取，app_settings）：有就注入所有 prompt 的素材块
         style_row = s.get(AppSetting, _ARTICLE_STYLE_KEY)
@@ -356,13 +363,14 @@ _ARTICLE_STYLE_KEY = "article_style_note"
 ACTIVE_ARTICLE_STATUSES = ["pending", "generating", "draft", "edited", "rendered"]
 
 
-def find_pending_article(title: str) -> Article | None:
+def find_pending_article(title: str) -> Content | None:
     """同题查重（唯一调用方=article_hotspots 报题直出链）：同标题且仍处于在途/就绪状态的已有草稿；
     命中返回该行（调用方可取 id 报 409），未命中返回 None。"""
     with Session(engine) as s:
-        return s.exec(select(Article).where(
-            Article.title == title[:60],  # type: ignore[attr-defined]
-            Article.status.in_(ACTIVE_ARTICLE_STATUSES),  # type: ignore[attr-defined]
+        return s.exec(select(Content).where(
+            Content.kind == "long_article",  # type: ignore[attr-defined]
+            Content.title == title[:60],  # type: ignore[attr-defined]
+            Content.status.in_(["drafting", "review", "ready"]),  # type: ignore[attr-defined]
         )).first()
 
 
@@ -421,6 +429,7 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
         raise TransientError("热点提炼未产出切角（LLM 空响应），稍后自动重试")
 
     created = []
+    ids = []
     with Session(engine) as s:
         for x in picks:
             title = str(x.get("title") or "").strip()[:60]
@@ -429,26 +438,28 @@ async def article_hotspots(ctx: JobContext, payload: dict) -> dict:
             note = (f"热点：{str(x.get('hotspot') or '')[:80]}｜"
                     f"为什么现在写：{str(x.get('why_now') or '')[:80]}｜"
                     f"切角：{str(x.get('angle') or '')[:80]}")
-            s.add(Article(title=title, note=note, status="pending"))
+            art = new_article_content(
+                s, tenant_id=1, title=title, note=note, state="pending",
+                payload={"hotspot": str(x.get("hotspot") or "")[:80],
+                         "why_now": str(x.get("why_now") or "")[:80]})
             created.append(title)
+            ids.append(art.id)
         s.commit()
     ctx.set_progress(90, f"报题 {len(created)} 篇，链发成文任务")
     # 直出链：报题即自动生成长文（每晚一篇，早晨可发）
     chained = 0
     if created:
         from ..jobs.runner import runner
-        with Session(engine) as s2:
-            rows = s2.exec(select(Article).where(
-                Article.title.in_(created),  # type: ignore[attr-defined]
-                Article.status == "pending")).all()  # type: ignore[attr-defined]
-            ids = [r.id for r in rows]
         for aid in ids:
             await runner.submit("article_generate",
                                 {"article_id": aid, "style": "auto"})
             with Session(engine) as s3:
-                art = s3.get(Article, aid)
+                art = s3.get(Content, aid)
                 if art is not None:
-                    art.status = "generating"
+                    p = dict(art.payload or {})
+                    p["article_state"] = "generating"
+                    art.payload = p
+                    art.status = "drafting"
                     s3.add(art)
                     s3.commit()
             chained += 1
@@ -461,14 +472,15 @@ async def article_style_extract(ctx: JobContext, payload: dict) -> dict:
     """公众号风格画像：从已成文长文提取表达习惯，存 app_settings，长文生成默认注入。"""
     ctx.set_progress(15, "收集已成文长文")
     with Session(engine) as s:
-        rows = s.exec(select(Article).where(
-            Article.status.in_(["draft", "edited", "rendered"]),  # type: ignore[attr-defined]
-        ).order_by(Article.id.desc())  # type: ignore[attr-defined]
+        rows = s.exec(select(Content).where(
+            Content.kind == "long_article",  # type: ignore[attr-defined]
+            Content.status.in_(["review", "ready"]),  # type: ignore[attr-defined]
+        ).order_by(Content.id.desc())  # type: ignore[attr-defined]
         ).all()
         samples = []
         for a in rows:
-            if a.md and len(a.md.strip()) > 300:
-                samples.append(a.md[:3000])
+            if a.body and len(a.body.strip()) > 300:
+                samples.append(a.body[:3000])
             if len(samples) >= 4:
                 break
     if not samples:

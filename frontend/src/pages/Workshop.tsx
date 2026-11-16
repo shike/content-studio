@@ -34,6 +34,8 @@ export default function Workshop() {
   const [justDone, setJustDone] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [pubFor, setPubFor] = useState<number | null>(null)
+  const [apiPubFor, setApiPubFor] = useState<number | null>(null)
+  const [apiPubBusy, setApiPubBusy] = useState(false)
   const [pubUrl, setPubUrl] = useState('')
   const [rfFor, setRfFor] = useState<number | null>(null)
   const [rf, setRf] = useState({ reads: '', welook: '', follows: '', leads: '' })
@@ -114,6 +116,21 @@ export default function Workshop() {
     setRefreshing(true)
     try { await load() } finally { setRefreshing(false) }
   }
+
+  /** 公众号 API 发布（PRD R4.5，人工触发）：渲染稿 → 官方建草稿；失败显式回退人工复制。 */
+  const apiPublish = (a: Article, mode: 'wechat_draft' | 'wechat_submit') =>
+    (async () => {
+      setApiPubBusy(true); setApiPubFor(a.id); setError('')
+      try {
+        const r = await api<{ publication_id: number; external_id: string }>(
+          `/channels/wechat/contents/${a.id}/publish`,
+          { method: 'POST', body: JSON.stringify({ mode }) })
+        await load()
+        setError(`API 发布成功：草稿 ${r.external_id || r.publication_id} 已${mode === 'wechat_submit' ? '提交群发' : '进公众号后台草稿箱'}——请到公众号里确认版式`)
+      } catch (e) {
+        setError(`API 发布失败：${apiErrText(e)}（回退：复制公众号格式后人工发布）`)
+      } finally { setApiPubBusy(false); setApiPubFor(null) }
+    })()
 
   const readyN = items.filter((a) => ['draft', 'edited', 'rendered'].includes(a.status)).length
   const writingN = items.filter((a) => ['pending', 'generating'].includes(a.status)).length
@@ -248,6 +265,13 @@ export default function Workshop() {
                             <button className="btn-ghost btn-sm" disabled={!!busy}
                               onClick={(e) => { e.stopPropagation(); setPubFor(a.id); setPubUrl('') }}>
                               已发布 · 登记
+                            </button>
+                          )}
+                          {a.status === 'rendered' && apiPubFor !== a.id && (
+                            <button className="btn-ghost btn-sm" disabled={!!busy || apiPubBusy}
+                              onClick={(e) => { e.stopPropagation(); apiPublish(a, 'wechat_draft') }}
+                              title="调公众号官方接口建草稿（人工触发；凭证未配置会显式报错并回退人工复制）">
+                              {apiPubBusy ? 'API 发布中…' : 'API 建草稿'}
                             </button>
                           )}
                           {a.status === 'published' && rfFor !== a.id && (

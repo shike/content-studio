@@ -41,15 +41,18 @@ def _card_matches(tenant_id: int) -> tuple[list[dict], int]:
     import re as _re
     from difflib import SequenceMatcher
 
-    from ..models import TopicCard
+    from ..models import Idea
 
     def _norm(t: str) -> str:
         return _re.sub(r"[\s「」『』《》\"'：:，,。！!？?·|()（）\-+#]", "", str(t)).lower()
 
     with Session(engine) as s:
-        cards = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
-            TopicCard.tenant_id == tenant_id,  # type: ignore[attr-defined]
-            TopicCard.status == "approved")).all()  # type: ignore[attr-defined]
+        from ..channels.engine import channel_id_of
+
+        cards = s.exec(select(Idea).where(  # type: ignore[attr-defined]
+            Idea.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            Idea.channel_id == channel_id_of(s, "persona"),  # type: ignore[attr-defined]
+            Idea.status == "approved")).all()  # type: ignore[attr-defined]
         vids = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
             SelfVideo.tenant_id == tenant_id,  # type: ignore[attr-defined]
             SelfVideo.published_at != "")).all()  # type: ignore[attr-defined]

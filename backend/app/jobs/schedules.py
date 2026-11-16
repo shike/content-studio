@@ -196,7 +196,7 @@ async def _run_article_hotspots() -> str:
 
 
 # 钟点 0 点（错峰窗 0-6 内最前，与 1:00 扫描错开；不可 hour_from_settings，同 watch_discover 理由）
-register_schedule(Schedule(key="article_hotspots_daily", label="公众号热点报题（独立提炼）",
+register_schedule(Schedule(key="wechat_hotspot_daily", label="公众号热点报题（独立提炼）",
                            daily_hour=0, run=_run_article_hotspots))
 async def _run_kb_miner() -> str:
     """挖掘器（2026-11-11 源文改编产线）：每日评一批 ima 源文，高质量入内容清单。"""
@@ -208,7 +208,7 @@ async def _run_kb_miner() -> str:
 
 
 # 挖掘器（2026-11-11）：4 点承接深读线时段；只评估入清单，不成文
-register_schedule(Schedule(key="article_kb_miner_daily", label="知识库挖掘（源文评估入清单）",
+register_schedule(Schedule(key="material_kb_mine", label="知识库挖掘（源文评估入清单）",
                            daily_hour=4, enabled_by="ima_kb_enabled",
                            run=_run_kb_miner))
 async def _run_article_adapt() -> str:
@@ -221,7 +221,7 @@ async def _run_article_adapt() -> str:
 
 
 # 改编器（2026-11-11）：5 点改编，与 4 点挖掘错峰；清单空=诚实空过，宁缺勿滥
-register_schedule(Schedule(key="article_adapt_daily", label="源文改编成文（清单取项·进待发）",
+register_schedule(Schedule(key="wechat_adapt_daily", label="源文改编成文（清单取项·进待发）",
                            daily_hour=5, enabled_by="ima_kb_enabled",
                            run=_run_article_adapt))
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
@@ -237,7 +237,7 @@ async def _run_card_line_daily() -> str:
 
 
 # 6 点承接原 trending/self_story 两调度（2026-11-14 选题工场定版合并）
-register_schedule(Schedule(key="card_line_daily", label="人设号选题工场（靶子卡生产线）",
+register_schedule(Schedule(key="persona_idea_daily", label="人设号选题工场（靶子卡生产线）",
                            daily_hour=6, run=_run_card_line_daily))
 
 

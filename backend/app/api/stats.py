@@ -28,13 +28,18 @@ def _count(s: Session, tid: int, table: str, **eq) -> int:
 def todo_stats(user: User = Depends(require_user)) -> dict:
     tid = user.tenant_id
     with Session(engine) as s:
-        pending_scripts_persona = _count(s, tid, "scripts",
-                                         status="generated", account_type="persona")
-        pending_scripts_leadgen = _count(s, tid, "scripts",
-                                         status="generated", account_type="leadgen")
+        # P3 内容域：脚本待定稿 = contents(video_script, review, script_state=generated) 按渠道
+        pending_scripts_persona = s.execute(text(
+            "SELECT COUNT(*) FROM contents WHERE tenant_id=:tid AND kind='video_script' "
+            "AND status='review' AND COALESCE(payload->>'account_type','persona')='persona'"),
+            {"tid": tid}).scalar() or 0
+        pending_scripts_leadgen = s.execute(text(
+            "SELECT COUNT(*) FROM contents WHERE tenant_id=:tid AND kind='video_script' "
+            "AND status='review' AND COALESCE(payload->>'account_type','persona')='leadgen'"),
+            {"tid": tid}).scalar() or 0
         pending_articles = s.execute(text(
-            "SELECT COUNT(*) FROM articles WHERE tenant_id=:tid AND status IN "
-            "('pending','draft','edited','rendered')"), {"tid": tid}).scalar() or 0
+            "SELECT COUNT(*) FROM contents WHERE tenant_id=:tid AND kind='long_article' "
+            "AND status IN ('drafting','review','ready')"), {"tid": tid}).scalar() or 0
         # 候选账号待定夺（P2 素材域：sources candidate，account_type 在 config）
         cand_open_persona = s.execute(text(
             "SELECT COUNT(*) FROM sources WHERE tenant_id=:tid AND status='candidate' "
@@ -47,7 +52,10 @@ def todo_stats(user: User = Depends(require_user)) -> dict:
             "AND COALESCE(config->>'dismissed','false') NOT IN ('true','True','1')"),
             {"tid": tid}).scalar() or 0
         # 今日靶子（2026-11-14 选题工场 R1.4）：靶子卡待备稿数——叶子徽章口径
-        targets_persona = _count(s, tid, "topic_cards", status="draft")
+        targets_persona = s.execute(text(
+            "SELECT COUNT(*) FROM ideas WHERE tenant_id=:tid AND status='draft' "
+            "AND channel_id=(SELECT id FROM channels WHERE key='persona')"),
+            {"tid": tid}).scalar() or 0
         # 素材收件箱待定夺（P2 素材域：抖音采集新视频入口）
         materials_inbox = s.execute(text(
             "SELECT COUNT(*) FROM materials WHERE tenant_id=:tid AND status='inbox' "

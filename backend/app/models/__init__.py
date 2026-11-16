@@ -89,29 +89,6 @@ class FailurePattern(TimestampMixin, table=True):
     sample_error: str = ""  # 最近一次完整错误（诊断线索）
 
 
-class TopicCard(TenantScoped, TimestampMixin, table=True):
-    """人设号靶子卡（选题工场，PRD R1.4 三原则定版 2026-11-14）。
-
-    一张卡四面：池子证据（pool）/主线半句话（spine，写作纪律不出口）/三秒钩子（hook，
-    观众听到的第一句）/裁决记录（gates 程序闸 + judge 法官三维与理由，可追溯）。
-    status：draft 待定夺 | approved 已备稿 | discarded 不做 | jail 法官弃卡（窗口内可捞）。"""
-    __tablename__ = "topic_cards"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    batch_date: str = Field(default="", index=True)  # YYYY-MM-DD 批次（本地自然日）
-    source: str = ""  # douyin_peer | radar | douyin_hot | external | self_story | manual
-    pool: dict = Field(default_factory=dict, sa_column=Column(JSONB))
-    spine: str = ""  # 主线半句话（单判断；台词里禁止出现）
-    hook: str = ""   # 三秒钩子（≤3秒×语速口径字数线，观点说清+抓人）
-    spice: str = ""  # low | mid | high（辣度不设限，如实标注，传生成端）
-    takeaways: list = Field(default_factory=list, sa_column=Column(JSONB))  # 评论要点（主线原料留痕：从高赞评论提炼的大众关注点，可检验）
-    judge: dict = Field(default_factory=dict, sa_column=Column(JSONB))
-    gates: list = Field(default_factory=list, sa_column=Column(JSONB))
-    status: str = Field(default="draft", index=True)
-    superseded_by: Optional[int] = None  # 批次替代链（当日无下游旧卡让位）
-    script_id: Optional[int] = None  # 备稿后回填（与 scripts.card_id 双向锚）
-
-
 class Tenant(TimestampMixin, table=True):
     """租户（单用户版退化为「工作室档案」）：承载名称与品牌九字段。
     credits/status 两列已废（积分拆除、单管理员无禁用通道）：模型不再声明，
@@ -142,46 +119,6 @@ class UserSession(TimestampMixin, table=True):
     user_id: int = Field(index=True)
     tenant_id: int = Field(index=True)
     expires_at: datetime = Field(index=True)
-
-
-class Script(TenantScoped, TimestampMixin, table=True):
-    __tablename__ = "scripts"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    card_id: Optional[int] = Field(default=None, foreign_key="topic_cards.id", index=True)  # 靶子卡备稿（选题工场 R1.4）
-    falsify_item_id: Optional[int] = Field(default=None, index=True)  # 实测素材锚（P2 起=materials.id，test_record；FK 已随素材域迁移拆除）
-    ore_id: Optional[int] = Field(default=None, index=True)  # 获客矿建稿锚（P2 起=materials.id，leadgen_ore；FK 已随素材域迁移拆除）
-    title_hint: str = Field(default="")  # 生成来源标题快照（列表显示用；topics 退役后不再 join）
-    versions: list = Field(default_factory=list, sa_column=Column(JSONB))
-    final_text: str = ""
-    teleprompter_text: str = ""
-    storyboard: list = Field(default_factory=list, sa_column=Column(JSONB))
-    title_candidates: list = Field(default_factory=list, sa_column=Column(JSONB))
-    status: str = "generating"  # generating | polishing | generated（待定稿，徽章计数依赖）| final
-    account_type: str = Field(default="persona")  # persona | leadgen（两类号：内容看板过滤/风格分叉）
-
-
-class Article(TenantScoped, TimestampMixin, table=True):
-    __tablename__ = "articles"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
-    md: str = ""
-    title: str = ""  # 公众号主标题
-    note: str = ""  # 产线注记（热点：/改编：/深读： 来源标签 + 审校未过记录）
-    kb_sources: list = Field(default_factory=list, sa_column=Column(JSONB))  # ima 知识库素材来源（2026-11-08 取材写文）
-    publish_url: str = ""  # 发布登记：公众号文章链接（发布永远人工，系统只记账，2026-11-11 源文改编产线）
-    published_at: str = ""  # 发布登记时间
-    stats: dict = Field(default_factory=dict, sa_column=Column(JSONB))  # 48h 回流 {reads,welook,follows,leads,filled_at}
-    html: str = ""
-    status: str = "draft"  # pending 待写 | generating | failed | draft | edited | rendered | published
-
-
-# kb_documents / kb_topics 两表（2026-11-09 知识库选题线）模型已随选题池整池退役删除
-# （2026-11-13 用户裁决）：模型删=新库不再建，生产库旧表不动，对齐 harvest_profiles 划线口径。
-# 同批划线退役的列：research_reports.tokens_in/tokens_out/cost_est（成本台账）、
-# tenants.status、watch_candidates.leadgen_comments/recent_same、radar_topics.recent/
-# new_since_last、articles.title_alts/kb_doc_ids——生产库旧列原地保留，新库不再建。
 
 
 class DailyLedger(TenantScoped, TimestampMixin, table=True):
@@ -272,24 +209,6 @@ class SelfVideo(TenantScoped, TimestampMixin, table=True):
     duration: int = 0                      # 时长秒
 
 
-class StyleProfile(TenantScoped, TimestampMixin, table=True):
-    """风格画像版本快照（R9.3）。保留历史，看风格演化。"""
-    __tablename__ = "style_profiles"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    account_name: str = ""
-    version: int = 1
-    digest: str = ""  # 200~300 字可执行风格描述
-    traits: list = Field(default_factory=list, sa_column=Column(JSONB))
-    exemplars: list = Field(default_factory=list, sa_column=Column(JSONB))
-    based_on: int = 0  # 基于多少条视频
-
-
-# ── 素材域（重构 P2，2026-11-16）：sources/materials/material_analyses/material_usages ──
-# 旧素材表（benchmark_videos/watch_candidates/radar_topics/content_items/falsify_items）
-# 模型已删：数据迁到新表后原地只读保留（schema_audit 白名单，P5 收口统一 DROP）。
-
-
 class Source(TenantScoped, TimestampMixin, table=True):
     """采集源（素材域唯一来源登记，PRD R1.3）：同行账号/话题雷达/知识库目录/热点源/手动。
     账号候选=同一张表 status=candidate（发现产出，人工定夺后转 active）；dismissed 走 config 标记。"""
@@ -367,3 +286,106 @@ class MaterialUsage(TenantScoped, TimestampMixin, table=True):
     target_type: str = Field(default="content", index=True)  # idea|content
     target_id: int = Field(default=0, index=True)
     role: str = "source"  # source|evidence|quote|inspiration
+
+
+# ── 内容域（重构 P3，2026-11-16）：channels/ideas/contents/publications/channel_styles ──
+# 旧内容表（topic_cards/scripts/articles/style_profiles）模型已删：数据迁新表后原地只读保留
+# （schema_audit 白名单，P5 收口统一 DROP）。内容状态机（四渠道共用，PRD R0.8）：
+# idea: draft→approved→consumed（discarded/jail 旁路）；content: drafting→review→ready→published（failed 可重试）。
+
+
+class Channel(TimestampMixin, table=True):
+    """渠道注册表（PRD R8.2）：四条内容线的差异全部进 config（取料规则/提示词组/闸线/
+    产物形态/发布方式/节奏），新增渠道不改代码结构。种子 4 行（migrate_content 播种）。"""
+    __tablename__ = "channels"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(unique=True)  # persona|leadgen|wechat|xhs
+    name: str = ""
+    platform: str = "douyin"  # douyin|wechat|xiaohongshu
+    enabled: bool = True
+    config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # config 约定：{positioning, audience, persona_note, prompt_set, gates:{...},
+    #   publish_mode: manual|wechat_api, cadence, cta_policy}
+
+
+class Idea(TenantScoped, TimestampMixin, table=True):
+    """统一选题/靶子卡（PRD R0.8）：四渠道共用一条「素材→选题→稿件」链的选题层。
+    status：draft 待定夺 | approved 已备稿 | consumed 稿件已定稿 | discarded 不做 |
+    jail 法官弃卡（窗口内可捞）。人设号字段语义与旧靶子卡一致（judge/gates/spice）。"""
+    __tablename__ = "ideas"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channels.id", index=True)
+    batch_date: str = Field(default="", index=True)  # YYYY-MM-DD 批次（本地自然日）
+    source: str = ""  # douyin_peer|radar|douyin_hot|external|self_story|manual|hotspot|kb_item|material
+    title_hint: str = ""  # 选题标题快照（手动/热点/笔记线；人设线空=钩子即题）
+    angle: str = ""  # 打法/切角（手动选题可带）
+    spine: str = ""  # 主线半句话（写作纪律不出口）
+    hook: str = ""  # 三秒钩子
+    spice: str = ""  # low|mid|high
+    takeaways: list = Field(default_factory=list, sa_column=Column(JSONB))
+    judge: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    gates: list = Field(default_factory=list, sa_column=Column(JSONB))
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # payload 约定：persona={pool 四证}；wechat={hotspot, why_now, angle_note}；xhs={material_id}
+    status: str = Field(default="draft", index=True)
+    superseded_by: Optional[int] = None
+    content_id: Optional[int] = Field(default=None, index=True)  # 备稿产出的稿件（原 script_id 语义）
+    note: str = ""
+
+
+class Content(TenantScoped, TimestampMixin, table=True):
+    """统一稿件（PRD R0.8）：kind=video_script|long_article|note。
+    status：drafting 生成/打磨中 | review 待定稿/待决策 | ready 定稿/待发 |
+    published 已发布登记 | failed 失败可重试 | archived 归档。
+    渠道旧状态串保存在 payload.*_state（门面输出零漂移；迁移映射见 TDD §15）。"""
+    __tablename__ = "contents"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channels.id", index=True)
+    idea_id: Optional[int] = Field(default=None, foreign_key="ideas.id", index=True)
+    parent_content_id: Optional[int] = Field(default=None, index=True)  # 派生来源（脚本→长文）
+    kind: str = Field(default="video_script", index=True)
+    title: str = ""  # 主标题（脚本=title_hint 快照；长文=正题；笔记=笔记标题）
+    body: str = ""  # 正文（脚本=终稿台词；长文=md；笔记=正文）
+    versions: list = Field(default_factory=list, sa_column=Column(JSONB))  # 脚本多版本
+    status: str = Field(default="drafting", index=True)
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # payload 约定：
+    #   video_script: {script_state(generating/polishing/generated/final/failed), teleprompter_text,
+    #     storyboard, title_candidates, hook, spine, spice, angle, falsify_item_id, ore_id,
+    #     account_type, title_hint}
+    #   long_article: {article_state(pending/generating/draft/edited/rendered/published/failed),
+    #     note, kb_sources, html, stats(48h 回流), edited}
+    #   note: {note_state(drafting/review/ready/published/failed), tags, cover, material_ids}
+    note: str = ""
+
+
+class Publication(TenantScoped, TimestampMixin, table=True):
+    """发布登记（PRD R0.4/R4.5/R5.4）：人工发布登记链接，或公众号 API 发布回执。
+    发布永远可回退人工；external_id=公众号 draft media_id（API 路径）。"""
+    __tablename__ = "publications"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    content_id: int = Field(foreign_key="contents.id", index=True)
+    platform: str = "wechat"  # wechat|xiaohongshu|douyin|channels
+    url: str = ""
+    external_id: str = ""  # 平台侧 id（公众号 draft media_id）
+    published_at: str = ""  # 发布时间（YYYY-MM-DD HH:MM，登记口径与旧 articles 一致）
+    publish_mode: str = "manual"  # manual|wechat_draft|wechat_submit
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+
+
+class ChannelStyle(TenantScoped, TimestampMixin, table=True):
+    """渠道风格画像版本（PRD X12）：按渠道版本化，历史可回溯。
+    （迁移自 style_profiles；account_name 进 payload——画像按渠道不再按账号名区分。）"""
+    __tablename__ = "channel_styles"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channels.id", index=True)
+    version: int = 1
+    digest: str = ""  # 200~300 字可执行风格描述
+    traits: list = Field(default_factory=list, sa_column=Column(JSONB))
+    exemplars: list = Field(default_factory=list, sa_column=Column(JSONB))
+    based_on: int = 0  # 基于多少条视频
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))

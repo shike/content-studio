@@ -15,7 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Article, DailyLedger, Material
+from ..models import Content, DailyLedger, Material
 from ..prompts import load, render
 from .service import (
     _article_generate_fail,
@@ -129,16 +129,25 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
 
         # 建稿（复用同源遗留行，防梯子重试堆行）
         with Session(engine) as s:
-            stale = [a for a in s.exec(select(Article).where(  # type: ignore[attr-defined]
-                Article.status.in_(["generating", "failed"]))).all()  # type: ignore[attr-defined]
-                if (a.note or "").startswith(f"改编：{src_title[:20]}")]
-            art = stale[0] if stale else Article(title="", status="pending", note="")
-            if art.id is None:
-                s.add(art)
-                s.commit()
-                s.refresh(art)
-            art.note = (f"改编：{src_title[:40]}（源文评分 {score}）｜角度：{angle[:80]}")
-            art.status = "generating"
+            stale = [a for a in s.exec(select(Content).where(  # type: ignore[attr-defined]
+                Content.kind == "long_article",  # type: ignore[attr-defined]
+                Content.status.in_(["drafting", "failed"]))).all()  # type: ignore[attr-defined]
+                if ((a.payload or {}).get("note") or "").startswith(f"改编：{src_title[:20]}")]
+            from ..channels.engine import new_article_content
+
+            if stale:
+                art = stale[0]
+                p0 = dict(art.payload or {})
+                p0["article_state"] = "generating"
+                art.payload = p0
+                art.status = "drafting"
+            else:
+                art = new_article_content(
+                    s, tenant_id=1, state="generating",
+                    note=f"改编：{src_title[:40]}（源文评分 {score}）｜角度：{angle[:80]}")
+            p = dict(art.payload or {})
+            p["note"] = (f"改编：{src_title[:40]}（源文评分 {score}）｜角度：{angle[:80]}")
+            art.payload = p
             s.add(art)
             s.commit()
             s.refresh(art)
@@ -186,12 +195,15 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         if ratio > _DUP_LINE:
             _release(f"改编稿重复率 {ratio}% 超 {_DUP_LINE}% 线（重写一次仍超），退回清单 #{item_id}")
             with Session(engine) as s:
-                art = s.get(Article, article_id)
+                art = s.get(Content, article_id)
                 if art is not None:
                     art.status = "failed"
                     art.title = title
-                    art.md = md_text
-                    art.note = (art.note or "") + f"｜原创度未过（重复率 {ratio}%），不进待发"
+                    art.body = md_text
+                    p = dict(art.payload or {})
+                    p["article_state"] = "failed"
+                    p["note"] = (p.get("note") or "") + f"｜原创度未过（重复率 {ratio}%），不进待发"
+                    art.payload = p
                     s.add(art)
                     s.commit()
             ctx.set_progress(100, f"原创度未过（{ratio}%），本项退回清单")
@@ -231,12 +243,15 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                      f"事实审校未过（{'；'.join(issues[:2])}），退回清单 #{item_id}",
                      item_status="low" if fails >= 1 else "pending", tag=tag)
             with Session(engine) as s:
-                art = s.get(Article, article_id)
+                art = s.get(Content, article_id)
                 if art is not None:
                     art.status = "failed"
                     art.title = title
-                    art.md = md_text
-                    art.note = (art.note or "") + f"｜事实审校未过（{issues[0][:40]}），不进待发"
+                    art.body = md_text
+                    p = dict(art.payload or {})
+                    p["article_state"] = "failed"
+                    p["note"] = (p.get("note") or "") + f"｜事实审校未过（{issues[0][:40]}），不进待发"
+                    art.payload = p
                     s.add(art)
                     s.commit()
             ctx.set_progress(100, f"事实审校未过（{len(issues)} 项），本篇不进待发")
@@ -269,13 +284,16 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                       kb_sources=[{"media_id": mid, "title": src_title}], md_text=md_text)
     from .renderer import render_wechat_html
     with Session(engine) as s:
-        art = s.get(Article, article_id)
-        if art is not None and (art.md or "").strip():
-            art.html = render_wechat_html(art.md)
-            art.status = "rendered"
+        art = s.get(Content, article_id)
+        if art is not None and (art.body or "").strip():
+            p = dict(art.payload or {})
+            p["html"] = render_wechat_html(art.body)
+            p["article_state"] = "rendered"
             if reader_points:  # 读者审校=编辑口味建议，落 note 给用户终审参考，不拦发布
-                art.note = (art.note or "") + "｜读者审校建议：" + "；".join(
-                    p[:44] for p in reader_points[:2])[:200]
+                p["note"] = (p.get("note") or "") + "｜读者审校建议：" + "；".join(
+                    x[:44] for x in reader_points[:2])[:200]
+            art.payload = p
+            art.status = "ready"
             s.add(art)
             s.commit()
         it = s.get(Material, item_id)
