@@ -76,8 +76,8 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
         kb_id = topic_kb_id(s)
         idx, pos = _load_cursor(s)
         line = _gen_line(s)
-        existing = {r.origin_id for r in s.exec(select(Material.origin_id).where(  # type: ignore[attr-defined]
-            Material.origin_type == "kb_doc")).all()}  # type: ignore[attr-defined]
+        existing = {r for r in s.exec(select(Material.origin_id).where(  # type: ignore[attr-defined]
+            Material.origin_type == "kb_doc")).all() if r}  # type: ignore[attr-defined]  # 单列 select 返回标量行（P2 owed 同坑：r.origin_id 必炸）
     if not folders:
         raise RuntimeError("挖掘目录为空：请配置 ima_topic_folders")
     client_id, api_key = cfg["client_id"], cfg["api_key"]
