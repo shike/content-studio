@@ -77,7 +77,6 @@ def overview(days: int = 30, user: User = Depends(require_user)) -> dict:
 @router.get("/channels")
 def channels_compare(days: int = 30, user: User = Depends(require_user)) -> dict:
     """渠道对比：每渠道的内容量/发布量/账号指标合计（自有账号渠道才有指标）。"""
-    since = _days_param(days)
     with Session(engine) as s:
         from ..models import Channel
 

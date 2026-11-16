@@ -98,7 +98,6 @@ def main() -> int:
             old_id = int(row["id"])
             status = row.get("status") or "generating"
             canon, state = SCRIPT_STATUS_MAP.get(status, ("drafting", status))
-            dedup = content_hash_of("script", str(old_id), str(row.get("title_hint") or ""))
             dup = s.exec(select(Content).where(  # type: ignore[attr-defined]
                 Content.kind == "video_script")).all()  # type: ignore[attr-defined]
             dup_hit = next((c for c in dup if (c.payload or {}).get("_legacy_id") == old_id), None)
