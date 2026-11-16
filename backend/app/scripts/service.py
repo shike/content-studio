@@ -69,6 +69,21 @@ async def script_generate(ctx: JobContext, payload: dict) -> dict:
     return await _script_generate(ctx, payload)
 
 
+def _scaffold(*, discipline_mode: str, card_discipline: str, my_style: str,
+              length_spec: str, version_label: str, version_note: str,
+              compliance_extra: str = "") -> str:
+    """共享脚手架注入（2026-11-16 收敛：falsify_script/script_generate 两模板的
+    主线/说话方式/合规/反模板/格式五段逐字同构，改规则曾需同步两处且已在漂移）。"""
+    from ..prompts import load as _load
+    out = _load("_script_scaffold")
+    for k, v in (("DISCIPLINE_MODE", discipline_mode), ("CARD_DISCIPLINE", card_discipline),
+                 ("MY_STYLE", my_style), ("COMPLIANCE_EXTRA", compliance_extra),
+                 ("LENGTH", length_spec), ("VERSION_LABEL", version_label),
+                 ("VERSION_NOTE", version_note)):
+        out = out.replace("{{%s}}" % k, v)
+    return out
+
+
 async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     script_id = payload["script_id"]
     with Session(engine) as s:
@@ -174,9 +189,12 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             "- 判词落在实测证据上：结论必须被你的数据撑住；结尾自然收束，禁引导话术"
         )
         prompt = render("falsify_script", LENGTH=length_spec,
-                        MY_STYLE=build_my_style(use_style),
                         PERSONA=brand_of(1)["persona"],
-                        DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline,
+                        SCAFFOLD=_scaffold(
+                            discipline_mode=discipline_mode, card_discipline=card_discipline,
+                            my_style=build_my_style(use_style), length_spec=length_spec,
+                            version_label="实测打假", version_note="一句话",
+                            compliance_extra="- 对被测对象的指控必须与实测事实一一对应——不夸大、不株连、不给没测过的环节编细节"),
                         EVIDENCE=json.dumps(topic_info, ensure_ascii=False))
     else:
         if card is not None:
@@ -193,11 +211,13 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             discipline_mode = "常规备稿"
             card_discipline = "- 开场按上方「口播结构」硬规则（前 3 秒直接甩判断或喊话受众）；主切角以 angle 字段为准"
         prompt = render("script_generate", LENGTH=length_spec,
-                        MY_STYLE=build_my_style(use_style),
                         ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
                         PERSONA=brand_of(1)["persona"],
                         ACCOUNT_MODE=account_mode,
-                        DISCIPLINE_MODE=discipline_mode, CARD_DISCIPLINE=card_discipline)
+                        SCAFFOLD=_scaffold(
+                            discipline_mode=discipline_mode, card_discipline=card_discipline,
+                            my_style=build_my_style(use_style), length_spec=length_spec,
+                            version_label="打法名", version_note="打法一句话"))
     # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
     ctx.set_progress(20, "生成精品脚本（单版全预算）")
     data = await gateway.complete_json(

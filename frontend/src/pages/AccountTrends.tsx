@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { TrendingUp } from 'lucide-react'
 import { api } from '../api'
-import { PageHeader } from '../components'
+import { PageHeader, Spark } from '../components'
 import StyleSection from './Style'
 
 interface MetricsRow {
@@ -20,30 +20,6 @@ interface MetricsRow {
 
 interface MetricsSummary {
   days: number
-}
-
-/** 30 天迷你趋势线：纯 SVG，每项指标一条（2026-11-08 用户定版：所有数据加趋势图）。 */
-function Spark({ data }: { data: number[] }) {
-  const vals = data.filter((v) => v != null)
-  if (vals.length < 2) return <div className="mt-2 h-6 text-[11px] text-slate-300">数据不足</div>
-  const w = 120, h = 28
-  const max = Math.max(...vals)
-  const min = Math.min(...vals)
-  const span = max - min || 1
-  const pts = vals
-    .map((v, i) => {
-      const x = 2 + (i * (w - 4)) / (vals.length - 1)
-      const y = h - 4 - ((v - min) / span) * (h - 8)
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(" ")
-  const last = pts.split(" ").pop()!.split(",")
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="mt-1.5 h-7 w-full" preserveAspectRatio="none" role="img" aria-label="30 天趋势">
-      <polyline points={pts} fill="none" stroke="#0a2f24" strokeWidth="1.5" strokeLinejoin="round" />
-      <circle cx={last[0]} cy={last[1]} r="2" fill="#0a2f24" />
-    </svg>
-  )
 }
 
 const METRICS: { key: keyof MetricsRow; label: string; stock: boolean }[] = [
@@ -107,7 +83,7 @@ function AccountMetricsCard() {
               <div className={`text-[10px] ${delta != null && delta > 0 ? "text-emerald-600" : delta != null && delta < 0 ? "text-red-500" : "text-slate-300"}`}>
                 {delta != null && label !== "粉丝总量" ? `较上一周 ${delta > 0 ? "+" : ""}${delta}%` : "\u00A0"}
               </div>
-              <Spark data={vals} />
+              <Spark data={vals} wide />
             </div>
           )
         })}

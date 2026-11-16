@@ -215,3 +215,43 @@ export function safeHref(url?: string | null): string | undefined {
   const u = url.trim().toLowerCase()
   return u.startsWith('http://') || u.startsWith('https://') ? url.trim() : undefined
 }
+
+/** 迷你趋势条（Spark 单点，2026-11-16 合并 Today/AccountTrends 两份同构实现）。
+ *  compact（默认）= Today 口径：固定 96px、currentColor（继承父级文字色）、无数据返回 null；
+ *  wide = AccountTrends 口径：viewBox 全宽自适应、墨绿固定色、不足 2 点占位「数据不足」。*/
+export function Spark({ data, w = 96, h = 28, wide = false }: {
+  data: number[]; w?: number; h?: number; wide?: boolean
+}) {
+  const vals = data.filter((v) => v != null)
+  if (wide && vals.length < 2) return <div className="mt-2 h-6 text-[11px] text-slate-300">数据不足</div>
+  if (!vals.length) return null
+  if (wide) {
+    const W = 120, H = 28
+    const max = Math.max(...vals)
+    const min = Math.min(...vals)
+    const span = max - min || 1
+    const pts = vals.map((v, i) => {
+      const x = 2 + (i * (W - 4)) / (vals.length - 1)
+      const y = H - 4 - ((v - min) / span) * (H - 8)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+    const last = pts.split(' ').pop()!.split(',')
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-1.5 h-7 w-full" preserveAspectRatio="none" role="img" aria-label="30 天趋势">
+        <polyline points={pts} fill="none" stroke="#0a2f24" strokeWidth="1.5" strokeLinejoin="round" />
+        <circle cx={last[0]} cy={last[1]} r="2" fill="#0a2f24" />
+      </svg>
+    )
+  }
+  const max = Math.max(...vals, 1)
+  const min = Math.min(...vals, 0)
+  const span = max - min || 1
+  const step = w / Math.max(vals.length - 1, 1)
+  const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
+  return (
+    <svg width={w} height={h} className="overflow-visible">
+      <polyline points={pts.join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1].split(',')[0]} cy={pts[pts.length - 1].split(',')[1]} r="2" fill="currentColor" />
+    </svg>
+  )
+}

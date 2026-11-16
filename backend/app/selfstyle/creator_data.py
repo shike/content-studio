@@ -12,13 +12,13 @@ from datetime import date as _date
 import httpx
 from sqlmodel import Session, select
 
+from ..browser import ua
 from ..db import engine
 from ..models import AccountMetricsDaily, WatchAccount
 from ..settings import settings
 
 _OVERVIEW_URL = "https://creator.douyin.com/aweme/janus/creator/data/overview/all/"
-_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
 # 接口字段 → 库列
 _FIELDS = {
     "fans": "fans", "new_fans": "new_fans", "cancel_fans": "cancel_fans",
@@ -36,7 +36,7 @@ def fetch_account_overview(cookie: str, timeout: float = 15.0) -> dict:
     from ..browser import httpx_proxy
 
     r = httpx.get(_OVERVIEW_URL, params={"period_days": 28},
-                  headers={"User-Agent": _UA, "Cookie": cookie,
+                  headers={"User-Agent": ua(), "Cookie": cookie,
                            "Referer": "https://creator.douyin.com/creator-micro/home"},
                   timeout=timeout, proxy=httpx_proxy(login=True))
     r.raise_for_status()

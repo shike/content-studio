@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
+import { Spark } from '../components'
 import { fetchMenuStats } from '../counts'
 
 interface MetricsResp {
@@ -16,22 +17,6 @@ const PIPE_LABEL: Record<string, string> = {
   card_line_daily: '选题工场',
   article_hotspots_daily: '公众号直出',
   hl_search_daily: '组局挖掘（获客）',
-}
-
-/** 迷你趋势条：纯 SVG，无依赖，数据=近 N 天数值。 */
-function Spark({ data, w = 96, h = 28 }: { data: number[]; w?: number; h?: number }) {
-  if (!data.length) return null
-  const max = Math.max(...data, 1)
-  const min = Math.min(...data, 0)
-  const span = max - min || 1
-  const step = w / Math.max(data.length - 1, 1)
-  const pts = data.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
-  return (
-    <svg width={w} height={h} className="overflow-visible">
-      <polyline points={pts.join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-      <circle cx={pts[pts.length - 1].split(',')[0]} cy={pts[pts.length - 1].split(',')[1]} r="2" fill="currentColor" />
-    </svg>
-  )
 }
 
 export default function Today({ onNavigate }: { onNavigate: (k: string) => void }) {

@@ -147,6 +147,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
+                                                PERSONA=persona_text,
                                                 SOURCE=source, ANGLE=angle,
                                                 QUOTES=quotes_block)}],
             max_tokens=20000, thinking="enabled")
@@ -208,7 +209,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         from .review import review_facts, review_reader, revise_once, score_titles
         ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
         issues = await review_facts(md_text, source)
-        reader_points = await review_reader(md_text)
+        reader_points = await review_reader(md_text, persona_text)
         if issues:
             revised = await revise_once(md_text, issues)
             if revised and _content_signature(revised) == _content_signature(md_text):
@@ -240,7 +241,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         cands = [title] + [t for t in (title_alts or []) if t]
         if title_from_call and title_from_call not in cands:
             cands.append(title_from_call)
-        ranked = await score_titles(cands)
+        ranked = await score_titles(cands, persona_text)
         if ranked and ranked[0][1] > 0:
             title = ranked[0][0]
     except TransientError:

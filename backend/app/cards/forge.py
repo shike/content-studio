@@ -40,18 +40,34 @@ def _fewshot_lines(limit: int = 14) -> str:
         rows = sorted((b for b in rows if b.analysis or b.title),
                       key=lambda b: -(b.quality_score or 0))
         for b in rows:
+            # 夹具（2026-11-16 修）：拆解 JSON 的 hook 是 dict（type/position_text/position_sec）、
+            # highlights 是英文键——旧逻辑只认「键名含 hook/钩/开场/高光/金句且值是字符串」，
+            # 两个字段因此从未进过 few-shot（拆解白产）。现按结构取：hook.position_text 优先，
+            # 兼容字符串形态；highlights/高光/金句键收列表字符串。
             taken = False
-            for k, v in (b.analysis or {}).items():
-                key = str(k).lower()
-                if any(w in key for w in ("hook", "钩", "开场", "高光", "金句")):
+            an = b.analysis or {}
+            hook_v = an.get("hook")
+            hook_text = ""
+            if isinstance(hook_v, dict):
+                hook_text = str(hook_v.get("position_text") or "").strip()
+            elif isinstance(hook_v, str):
+                hook_text = hook_v.strip()
+            if hook_text:
+                lines.append(f"- 「{hook_text[:44]}」（拆解库 {b.author or '?'}）")
+                taken = True
+            if not taken:
+                for k, v in an.items():
+                    key = str(k).lower()
+                    if not any(w in key for w in ("highlight", "高光", "金句", "钩", "开场")):
+                        continue
                     vals = v if isinstance(v, list) else [v]
                     for x in vals:
                         if isinstance(x, str) and x.strip():
                             lines.append(f"- 「{x.strip()[:44]}」（拆解库 {b.author or '?'}）")
                             taken = True
                             break
-                if taken:
-                    break
+                    if taken:
+                        break
             if not taken and b.title:
                 lines.append(f"- 「{b.title[:44]}」（拆解库 {b.author or '?'}）")
             if len(lines) >= limit:

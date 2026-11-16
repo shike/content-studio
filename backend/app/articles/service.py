@@ -19,7 +19,6 @@ from .quality import CTA_PATTERNS as _CTA_PATTERNS  # noqa: F401
 from .quality import banned_hits as _banned_hits  # noqa: F401
 from .quality import content_signature as _content_signature  # noqa: F401
 from .quality import kb_style_violations as _kb_style_violations  # noqa: F401
-from .quality import quality_gate as _quality_gate  # noqa: F401
 from .render_charts import attach_charts as _attach_charts  # noqa: F401
 from .render_charts import attach_cover as _attach_cover  # noqa: F401
 
@@ -93,7 +92,7 @@ ARTICLE_LENGTHS: dict[str, dict[str, str]] = {
     # feed 档 2026-11-02 三线定版退役（公众号做深度内容，唯一档位 deep），
     # 2026-11-13 清除死规格（此前 payload.length 传 feed 会命中不存在键静默回落）
     "deep": {
-        "words": "700~1100",
+        "words": "700~1100",   # 每节字数（全文规格 3000~5000=5~7 节折算，与 PRD R5.1 一致）
         "title": (
             "- 微信公众号标题，≤32 字（展示上限）\n"
             "- 首选判决句式：一个完整的结论宣告（示范：「AI 让数学再也回不去那个旧世界了」——"

@@ -66,7 +66,8 @@ SSH "$HOST" "sudo systemctl restart content-studio"
 
 echo "→ 健康检查"
 sleep 3
-code=$(SSH "$HOST" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8100/api/health" || echo 000)
+HEALTH_PORT="${CS_HEALTH_PORT:-8100}"   # 与部署端口一致时无需设置；改端口部署须同步
+code=$(SSH "$HOST" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${HEALTH_PORT}/api/health" || echo 000)
 if [ "$code" = "200" ]; then
   echo "✓ 同步并重启完成，服务健康"
 else

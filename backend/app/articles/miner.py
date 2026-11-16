@@ -64,6 +64,8 @@ def _today() -> str:
 @register_executor("article_kb_miner")
 async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
     """每日挖一批源文：全文拉取 → 逐篇评估 → ≥生成线入内容清单。"""
+    from ..tenant_brand import brand_of
+    persona = brand_of(1)["persona"]
     from .ima_kb import fetch_full_doc, kb_config, list_folder_docs, topic_folders, topic_kb_id
 
     with Session(engine) as s:
@@ -128,6 +130,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
             note = await asyncio.wait_for(
                 gateway.complete_json(
                     [{"role": "user", "content": render("article_kb_miner_eval",
+                                                        PERSONA=persona,
                                                         DOC=f"《{title}》\n\n{text}",
                                                         # 2026-11-13：评分线可被 AppSetting.adapt_gen_line
                                                         # 覆盖，prompt 内同步注入真实线（原写死 7.5）

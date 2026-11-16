@@ -12,9 +12,7 @@ import re
 from pathlib import Path
 
 from ..jobs.errors import TransientError
-from ..llm import gateway
 from ..models import AppSetting
-from ..prompts import render
 
 # 违禁词表（程序化合规红线）抽单一数据源 banned_words.json：
 # 共用同一 JSON，改表只改文件，不再双处同步。裸「最好的」已移除——误杀「千万别挑最好的
@@ -122,43 +120,3 @@ def kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
     return out
 
 
-async def quality_gate(md_text: str) -> tuple[float | None, str]:
-    """质量自评闸门（2026-11-10 用户定版「系统做全部工作，用户只做最终决策」）：
-    模型主编按 5 维打分；低于 7 分用评审意见定向重写一次（签名守卫防数字/图被改）。
-    返回 (最终分, 正文)——正文可能是重写后的版本（2026-11-16 修复：此前重写稿被丢弃，
-    落库仍是 <7 分原稿）；评审失败返回 (None, 原文)，不阻塞成文。"""
-    try:
-        verdict = await gateway.complete_json(
-            [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
-            max_tokens=1024, thinking="disabled")
-        score = float(verdict.get("overall") or 0)
-        worst = str(verdict.get("worst") or "")[:80]
-    except Exception as e:  # noqa: BLE001 自评失败不阻塞
-        print(f"[kb-write] 质量自评失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
-        return None, md_text
-    if score >= 7.0:
-        print(f"[kb-write] 质量自评 {score:.1f}，过闸")
-        return score, md_text
-    print(f"[kb-write] 质量自评 {score:.1f} 未过闸（{worst}），定向重写一次")
-    try:
-        polished = await gateway.complete(
-            [{"role": "user", "content": render("article_kb_polish",
-                                                VIOLATIONS=f"主编评审 {score:.1f} 分，最大问题：{worst}。按此意见改写全文，其余要求不变。",
-                                                DRAFT=md_text)}],
-            max_tokens=8192, thinking="disabled")
-        polished = (polished or "").strip()
-        if polished and content_signature(polished) == content_signature(md_text):
-            md_text = polished
-            try:
-                verdict2 = await gateway.complete_json(
-                    [{"role": "user", "content": render("article_quality_gate", DRAFT=md_text[:9000])}],
-                    max_tokens=1024, thinking="disabled")
-                score = float(verdict2.get("overall") or score)
-                print(f"[kb-write] 重写后自评 {score:.1f}")
-            except Exception:  # noqa: BLE001
-                pass
-        else:
-            print("[kb-write] 重写稿签名不符（数字/图片变化），保留原稿分")
-    except Exception as e:  # noqa: BLE001 重写失败不阻塞
-        print(f"[kb-write] 质量重写失败，保留原稿: {type(e).__name__}: {str(e)[:80]}")
-    return score, md_text

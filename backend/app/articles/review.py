@@ -24,7 +24,7 @@ async def review_facts(md: str, source: str) -> list[str]:
         return []
 
 
-async def review_reader(md: str) -> list[str]:
+async def review_reader(md: str, persona: str) -> list[str]:
     """读者审校：以目标读者身份标弃读点，返回问题清单（空=过）。审失败返回空。"""
     try:
         v = await gateway.complete_json(
@@ -36,7 +36,7 @@ async def review_reader(md: str) -> list[str]:
         return []
 
 
-async def score_titles(candidates: list[str]) -> list[tuple[str, float]]:
+async def score_titles(candidates: list[str], persona: str) -> list[tuple[str, float]]:
     """标题五维评分，返回按分降序的 (标题, 分数)。失败返回原序 0 分（不阻塞）。"""
     cands = [c.strip() for c in candidates if c and c.strip()]
     if not cands:
