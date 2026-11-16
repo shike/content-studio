@@ -290,6 +290,63 @@ def _migrate(engine) -> None:
                 "INSERT INTO research_reports (created_at, updated_at, tenant_id, id, topic_id,"
                 " content, model) SELECT created_at, updated_at, tenant_id, id, topic_id,"
                 " content, model FROM research_reports_legacy")
+        # 2026-11-16 死列清算（schema 漂移闸上线后最后一波库有模型无）：七列四表
+        if _has_legacy_col(conn, "tenants", "credits") or _has_legacy_col(conn, "tenants", "status"):
+            _rebuild_drop_legacy(conn, "tenants",
+                "CREATE TABLE tenants ("
+                "created_at DATETIME, updated_at DATETIME, id INTEGER PRIMARY KEY,"
+                " name VARCHAR DEFAULT '', brand JSON)",
+                "INSERT INTO tenants (created_at, updated_at, id, name, brand) "
+                "SELECT created_at, updated_at, id, name, brand FROM tenants_legacy")
+        if _has_legacy_col(conn, "topics", "sharpness"):
+            _rebuild_drop_legacy(conn, "topics",
+                "CREATE TABLE topics ("
+                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
+                " id INTEGER PRIMARY KEY, line VARCHAR DEFAULT 'persona', title VARCHAR DEFAULT '',"
+                " angle VARCHAR DEFAULT '', audience VARCHAR DEFAULT 'both',"
+                " source_type VARCHAR DEFAULT 'manual', source_ref VARCHAR DEFAULT '',"
+                " evidence JSON, score REAL, score_breakdown JSON, status VARCHAR DEFAULT 'draft')",
+                "INSERT INTO topics (created_at, updated_at, tenant_id, id, line, title, angle,"
+                " audience, source_type, source_ref, evidence, score, score_breakdown, status) "
+                "SELECT created_at, updated_at, tenant_id, id, line, title, angle, audience,"
+                " source_type, source_ref, evidence, score, score_breakdown, status FROM topics_legacy")
+        if _has_legacy_col(conn, "articles", "title_alts") or _has_legacy_col(conn, "articles", "kb_doc_ids"):
+            _rebuild_drop_legacy(conn, "articles",
+                "CREATE TABLE articles ("
+                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
+                " id INTEGER PRIMARY KEY, topic_id INTEGER, script_id INTEGER,"
+                " md VARCHAR DEFAULT '', title VARCHAR DEFAULT '', note VARCHAR DEFAULT '',"
+                " kb_sources JSON, publish_url VARCHAR DEFAULT '', published_at VARCHAR DEFAULT '',"
+                " stats JSON, html VARCHAR DEFAULT '', status VARCHAR DEFAULT 'draft')",
+                "INSERT INTO articles (created_at, updated_at, tenant_id, id, topic_id, script_id,"
+                " md, title, note, kb_sources, publish_url, published_at, stats, html, status) "
+                "SELECT created_at, updated_at, tenant_id, id, topic_id, script_id,"
+                " md, title, note, kb_sources, publish_url, published_at, stats, html, status FROM articles_legacy")
+        if _has_legacy_col(conn, "watch_candidates", "leadgen_comments") or _has_legacy_col(conn, "watch_candidates", "recent_same"):
+            # 重建前先把模型列补进老表（老库可能还没有 account_type/leadgen_density，
+            # 由后置 ADD COLUMN 兜底的列不在此刻）——copy_select 引用的列必须先存在
+            _wccols_old = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(watch_candidates)"))]
+            for _col, _ddl in (("account_type", "VARCHAR NOT NULL DEFAULT 'persona'"),
+                                ("leadgen_density", "REAL DEFAULT 0")):
+                if _col not in _wccols_old:
+                    conn.execute(sqlalchemy.text(f"ALTER TABLE watch_candidates ADD COLUMN {_col} {_ddl}"))
+            _rebuild_drop_legacy(conn, "watch_candidates",
+                "CREATE TABLE watch_candidates ("
+                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
+                " id INTEGER PRIMARY KEY, keyword VARCHAR DEFAULT '', direction VARCHAR DEFAULT '',"
+                " name VARCHAR DEFAULT '', sec_uid VARCHAR DEFAULT '', url VARCHAR DEFAULT '',"
+                " signature VARCHAR DEFAULT '', follower_count INTEGER DEFAULT 0,"
+                " sample_video_id VARCHAR DEFAULT '', sample_title VARCHAR DEFAULT '',"
+                " sample_stats VARCHAR DEFAULT '', account_type VARCHAR NOT NULL DEFAULT 'persona',"
+                " leadgen_density REAL DEFAULT 0, pure_reason VARCHAR DEFAULT '',"
+                " status VARCHAR NOT NULL DEFAULT 'open')",
+                "INSERT INTO watch_candidates (created_at, updated_at, tenant_id, id, keyword,"
+                " direction, name, sec_uid, url, signature, follower_count, sample_video_id,"
+                " sample_title, sample_stats, account_type, leadgen_density, pure_reason, status) "
+                "SELECT created_at, updated_at, tenant_id, id, keyword, direction, name, sec_uid,"
+                " url, signature, follower_count, sample_video_id, sample_title, sample_stats,"
+                " COALESCE(account_type,'persona'), COALESCE(leadgen_density,0), pure_reason,"
+                " COALESCE(status,'open') FROM watch_candidates_legacy")
 
         fpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(failure_patterns)"))]
         if fpcols and "kind" in fpcols:
