@@ -13,7 +13,7 @@
 ## 验收纪律（违反 = 白干）
 
 - **验收=功能冒烟实跑（2026-11-16 用户裁决：验收套件整目录删除）**：日常验证=真实链路把新功能本身跑通（冒烟先行），生产运行本身承担长周期验证（夜间扫描/调度即真实使用，失败可见于失败中台）。验收脚本不再作为回归门存在。
-- **冒烟必须覆盖执行器全路径（2026-11-16 cards 拆分教训）**：重构挪函数后，只冒烟一个入口会漏其余执行器的 NameError（实测 card_seed 绿、card_daily 因漏导入门面名在调度时必炸）。改完用 `dis` 全量扫描涉及执行器全部嵌套 code object 的 LOAD_GLOBAL，逐一核对模块 globals 可解析；调度类执行器（如 card_daily）在隔离实例至少触发一次真实调度。
+- **冒烟必须覆盖执行器全路径（2026-11-16 cards 拆分教训）**：重构挪函数后，只冒烟一个入口会漏其余执行器的 NameError（实测 card_seed 绿、card_daily 因漏导入门面名在调度时必炸）。改完用 `dis` 全量扫描**本次拆分涉及的每个模块、每个顶层函数及全部嵌套 code object** 的 LOAD_GLOBAL，逐一核对模块 globals 可解析；调度类执行器（如 card_daily）在隔离实例至少触发一次真实调度。
 - 隔离实例（本地冒烟防污染）：`DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 uvicorn app.main:app --app-dir backend --port 8200`（加 `CS_REAPER_SEC=5` 加速快巡；**收尾必须 pkill 干净 + 删 `data-acceptance`**——漏 DATA_DIR 会摸到默认 data/；复制库先清继承队列 `UPDATE jobs SET status='failed' WHERE status IN ('queued','running','parked')`）。
 - 全线 naive-UTC，SQL 用 `datetime('now')`。测试数据收尾必清（假数据污染选题评分）。
 - 失败是异常不是工作流：瞬时失败走退避梯子 30min→2h→6h→24h→每日慢巡（30 次上限）；确定性失败安静终态；界面只有红徽章+行内重试（后端 failures API 保留）。
