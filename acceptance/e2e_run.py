@@ -137,45 +137,90 @@ def main() -> int:
         check("正确密码进入工作台（侧栏「今天」在位）", "今天" in page.inner_text("nav"))
 
         # ---------- 全站逐页零报错 + 页头断言 ----------
-        section("E2E · 全站逐页零报错（17 页）")
+        section("E2E · 全站逐页零报错（7 顶层 + 页内 tab）")
 
-        def goto_page(label: str) -> None:
-            """locator 点击侧栏菜单（evaluate 的 .click() 不触发 React 导航，勿用）。"""
-            page.locator('aside button', has_text=label).first.click(timeout=6000)
+        # 2026-11-16 对齐 11-14 导航改版：侧栏 7 顶层（今天/人设号/获客/公众号/监控/任务/设置），
+        # 目的地由页内 tab 承载（AGENTS.md 前端规矩）。旧「写死 17 页」断言退役——
+        # 17 个旧叶标签里 14 个已不是侧栏按钮（DSH #57 施工单①）。
+        # 有 PageHeader 的页面期望=第一个 main h2（只写实测确认过的）；未知 tab 只验 main 非空且无错误。
+        NAV = {
+            "今天": [],
+            "人设号": ["选题", "视频稿", "经营"],
+            "获客": ["获客选题", "视频稿"],
+            "公众号": ["工场", "清单", "画像"],
+            "监控": ["监控号", "话题雷达", "拆解库", "账号候选"],
+            "任务": [],
+            "设置": [],
+        }
+        WANT_H2 = {
+            ("人设号", "选题"): "今日靶子",
+            ("人设号", "经营"): "账号经营",
+            ("获客", "获客选题"): "获客选题",
+            ("公众号", "工场"): "公众号内容工场",
+            ("公众号", "清单"): "内容清单",
+            ("公众号", "画像"): "公众号风格画像",
+            ("监控", "监控号"): "监控的账号",
+            ("监控", "拆解库"): "拆解库",
+        }
+
+        def goto_top(top: str) -> None:
+            """locator 点击侧栏顶层菜单（evaluate 的 .click() 不触发 React 导航，勿用）。"""
+            page.locator('aside button', has_text=top).first.click(timeout=6000)
             page.wait_for_timeout(900)
 
-        # （侧栏叶按钮, 页头期望）：现行侧栏=今天 + 产线树三组（App.tsx TREE，默认全展开）+ 任务/设置。
-        # 2026-11-13 对齐 11-11/11-12 改版：选题库→今日靶子（人设号第一叶）、新增内容清单；
-        # 有 PageHeader 的页面期望=第一个 main h2（title 常与侧栏叶不同名，如 内容看板→脚本工场）；
-        # 候选两页（DiscoveredAccounts）无页级标题，改验页内签名文本。
-        PAGES = [
-            ("今天", "今天要拍"),
-            ("今日靶子", "今日靶子"),
-            ("内容看板", "脚本工场"),
-            ("账号经营", "账号经营"),
-            ("对标拆解", "拆解库"),
-            ("候选定夺", "开始搜索"),
-            ("监控清单", "监控的账号"),
-            ("获客选题", "选题库"),
-            ("脚本工场", "脚本工场"),
-            ("纯获客候选", "开始搜索"),
-            ("获客监控", "监控的账号"),
-            ("打法卡库", "拆解库"),
-            ("内容清单", "内容清单"),
-            ("内容工场", "公众号内容工场"),
-            ("风格画像", "公众号风格画像"),
-            ("任务", "任务"),
-            ("设置", "设置"),
-        ]
-        for label, want in PAGES:
-            goto_page(label)
-            h2 = page.locator("main h2")
-            if h2.count():
-                got = h2.first.inner_text().strip()
-                check(f"页面打开：{label}", got == want, f"页头={got!r} 期望={want!r}")
+        NAVMAP = {
+            "今天": ("今天", None),
+            "今日靶子": ("人设号", "选题"),
+            "脚本工场": ("人设号", "视频稿"),
+            "账号经营": ("人设号", "经营"),
+            "获客选题": ("获客", "获客选题"),
+            "获客视频稿": ("获客", "视频稿"),
+            "内容工场": ("公众号", "工场"),
+            "内容清单": ("公众号", "清单"),
+            "风格画像": ("公众号", "画像"),
+            "监控号": ("监控", "监控号"),
+            "话题雷达": ("监控", "话题雷达"),
+            "拆解库": ("监控", "拆解库"),
+            "账号候选": ("监控", "账号候选"),
+            "任务": ("任务", None),
+            "设置": ("设置", None),
+        }
+
+        def goto_page(label: str) -> None:
+            """按 NAVMAP 两级导航：先侧栏顶层，再页内 tab（无 tab 的顶层直接落）。"""
+            top, tab = NAVMAP[label]
+            goto_top(top)
+            if tab:
+                page.locator("main button", has_text=tab).first.click(timeout=6000)
+                page.wait_for_timeout(900)
+
+        for top, tabs in NAV.items():
+            goto_top(top)
+            page.wait_for_timeout(400)
+            for tab in tabs:
+                tb = page.locator("main button", has_text=tab).first
+                if not tb.count():
+                    continue
+                tb.click(timeout=6000)
+                page.wait_for_timeout(900)
+                main_txt = page.inner_text("main")
+                want = WANT_H2.get((top, tab))
+                if want:
+                    check(f"页面可达：{top}·{tab}", want in main_txt,
+                          f"页内未见签名 {want!r}")
+                else:
+                    check(f"页面可达：{top}·{tab}", bool(main_txt.strip()) and "出错了" not in main_txt,
+                          f"main 前 60 字={main_txt[:60]!r}")
+            main_txt = page.inner_text("main")
+            if top == "今天":
+                ok = "今日工作台" in main_txt
+            elif top == "任务":
+                ok = "任务" in main_txt
+            elif top == "设置":
+                ok = "设置" in main_txt
             else:
-                check(f"页面打开：{label}", want in page.inner_text("main"),
-                      f"页内未见签名 {want!r}（该页无页级标题）")
+                ok = bool(main_txt.strip()) and "出错了" not in main_txt
+            check(f"页面可达：{top}", ok, f"main 前 60 字={main_txt[:60]!r}")
 
         # ---------- 今日靶子卡（选题工场 R1.4） ----------
         section("E2E · 今日靶子卡四面渲染")
@@ -193,14 +238,15 @@ def main() -> int:
               "开场钩子（说给观众听的第一句，可改）" in body2 and "反常识判断" in body2
               and "一手评论实数 55" in body2)
 
-        # ---------- 今天页快速记选题 ----------
-        section("E2E · 今天页快速记选题")
+        # ---------- 今天页一句话投喂（2026-11-16 对齐靶子卡线：投喂 → 靶子卡） ----------
+        section("E2E · 今天页一句话投喂")
         goto_page("今天")
-        page.fill('input[placeholder*="快速记选题"]', f"E2E 快速记选题 {stamp}")
-        page.click('button:has-text("入库")')
+        page.fill('input[placeholder*="一句话投喂选题"]', f"E2E 投喂选题 {stamp}")
+        page.locator('button:has-text("投喂")').first.click()
         page.wait_for_timeout(1500)
-        check("快速记选题成功回显（待拍清单出现）",
-              f"E2E 快速记选题 {stamp}" in page.inner_text("main"))
+        # DSH #57①：断点必须用成功文案（Today.tsx:99），95 行 busy 在 await 前就 set，断它=假绿
+        check("投喂受理回显（成功文案出现）",
+              "投喂已排队，靶子卡稍后进「选题」页" in page.inner_text("main"))
 
         # ---------- 内容工场：文章展开与渲染 ----------
         section("E2E · 内容工场文章展开与渲染")

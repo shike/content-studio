@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""P1 内容核心验收：选题中心（idea深研/定审与否决）+ 脚本工场 + 公众号流水线。
+"""P1 内容核心验收：靶子卡备稿 → 脚本工场（一版精品+打磨+定稿）→ 公众号流水线。
 
 对应《docs/TDD.md》§13 P1。需 ZHIPU_API_KEY。
+2026-11-16 重写：选题池线（R1.1/R1.1b/R1.1c，/api/topics/*）已按用户裁决退役，
+本套件改走 R1.4 靶子卡线——直插 approved 夹具卡 → /api/scripts/generate(card_id)
+→ /api/articles/generate(script_id)。备稿受理契约不依赖 LLM，无 key 实例也验。
 运行：python3 acceptance/run_p1.py
 """
 import os
@@ -17,73 +20,51 @@ if server_down():
 _, health = request("GET", "/api/health")
 llm_ready = (health.get("llm") or {}).get("configured") is True
 
-section("P1 · idea 深度研究")
-if not llm_ready:
-    skip("idea→深研→选题入库", "未配置 ZHIPU_API_KEY")
-    topic_id = None
-else:
-    status, r = request("POST", "/api/topics/ideas",
-                        body={"text": "给制造业企业主讲AI质检怎么落地，先做试点产线再谈推广"})
-    if not check("深研任务受理（202 + topic_id/job_id）",
-                 status == 202 and r.get("topic_id") and r.get("job_id"),
-                 f"status={status}, {str(r)[:120]}"):
-        sys.exit(finish("P1 内容核心"))
-    topic_id = r["topic_id"]
-    job = poll_job(r["job_id"], timeout=600)
-    check("深研任务完成", job is not None and job.get("status") == "succeeded",
-          (job or {}).get("error") or ("" if job else "600s 超时"))
-    status, t = request("GET", f"/api/topics/{topic_id}")
-    ok = (status == 200 and t.get("title") and t.get("angle")
-          and t.get("audience") in ("boss", "fde", "both")
-          and len(str(t.get("research_report") or "")) > 200)
-    check("选题入库：标题/角度/受众/研究报告齐备", ok, f"status={status}")
-    score = t.get("score")
-    check("评分为 0-10 数字", isinstance(score, (int, float)) and 0 <= score <= 10,
-          f"score={score}")
-    status, _ = request("POST", f"/api/topics/{topic_id}/approve")
-    check("选题定审（approve）", status == 200, f"status={status}")
+section("P1 · 靶子卡夹具（直插 approved 卡，白盒不动 LLM）")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
+from app.db import engine as _eng  # noqa: E402
+from app.models import TopicCard as _TC  # noqa: E402
+from sqlmodel import Session as _S  # noqa: E402
+with _S(_eng) as _s:
+    _card = _TC(tenant_id=1, batch_date="2000-01-01", source="manual", pool={},
+                spine="P1 夹具主线：把交付标准写进合同，验收合格再扩展",
+                hook="P1 夹具钩子：培训费打水漂之前，先看这篇",
+                spice="mid", takeaways=[],
+                judge={"verdict": "pass", "reason": "P1 夹具"},
+                status="approved")
+    _s.add(_card)
+    _s.commit()
+    card_id = _card.id
+check("夹具卡入库（approved，可备稿）", bool(card_id), f"card_id={card_id}")
 
-section("P1 · 快速记选题（R1.1b，不触发 LLM）")
-status, r = request("POST", "/api/topics/quick",
-                    body={"title": "验收-快速选题", "audience": "boss"})
-check("快速选题入库（201，source=manual）",
-      status == 201 and (r.get("id") or r.get("topic_id")),
-      f"status={status}, {str(r)[:100]}")
-quick1 = r.get("id") or r.get("topic_id")
-status, r2 = request("POST", "/api/topics/quick",
-                     body={"title": "验收-快速选题（重复）", "audience": "boss"})
-quick2 = r2.get("id") or r2.get("topic_id")
-similar = (r2.get("evidence") or {}).get("similar_to") or []
-check("相似选题自动标记（R1.1c：第二次入库带 similar_to）",
-      status == 201 and quick2 and quick1 in similar,
-      f"status={status}, similar_to={similar}")
-
-section("P1 · 快速选题与选题否决")
-csv_line = "验收专用-快速选题测试题"
-status, r = request("POST", "/api/topics/quick", body={"title": csv_line})
-check("快速选题入库 201", status == 201, f"status={status}, {str(r)[:120]}")
-quick_id = r.get("id") if status == 201 else None
-if quick_id:
-    status, _ = request("POST", f"/api/topics/{quick_id}/reject")
-    status2, t = request("GET", f"/api/topics/{quick_id}")
-    check("选题否决（reject）", status == 200 and t.get("status") == "rejected",
-          f"status={status}, status2={status2}")
-    check("已移除的飞瓜导入端点不再存在（405/404）",
-          request("POST", "/api/topics/import/feigua", body={"csv": "x"})[0] in (404, 405))
-
-section("P1 · 脚本工场")
+section("P1 · 靶子卡备稿受理（card_id → 202，不触发 LLM）")
 script_id = None
-if not llm_ready:
-    skip("脚本生成/打磨/终稿", "未配置 ZHIPU_API_KEY")
+_job_id = None
+status, r = request("POST", "/api/scripts/generate",
+                    body={"card_id": card_id, "angles": ["反常识判断"]})
+check("脚本生成任务受理（202 + script_id/job_id）",
+      status == 202 and r.get("script_id") and r.get("job_id"),
+      f"status={status}, {str(r)[:120]}")
+if status == 202:
+    script_id = r.get("script_id")
+    _job_id = r.get("job_id")
 else:
-    status, r = request("POST", "/api/scripts/generate", body={"topic_id": topic_id})
-    if not check("脚本生成任务受理", status == 202 and r.get("script_id"),
-                 f"status={status}, {str(r)[:120]}"):
-        sys.exit(finish("P1 内容核心"))
-    script_id = r["script_id"]
+    sys.exit(finish("P1 内容核心"))
+# 备稿回填：卡转 approved 且 script_id 双向锚（白盒核）
+with _S(_eng) as _s:
+    _row = _s.get(_TC, card_id)
+    check("备稿后卡状态 approved 且回填 script_id",
+          _row is not None and _row.status == "approved" and _row.script_id == script_id,
+          f"status={getattr(_row, 'status', None)}, script_id={getattr(_row, 'script_id', None)}")
+
+section("P1 · 脚本工场（一版精品直出+自动打磨+定稿）")
+if not llm_ready or not script_id:
+    skip("脚本生成/打磨/终稿", "未配置 ZHIPU_API_KEY" if not llm_ready else "无受理到的 script_id")
+else:
     # 生成=一版精品直出+自动打磨一轮（两次 LLM 调用，思考型模型实测可达 ~10 分钟）
-    job = poll_job(r.get("job_id"), timeout=900)
-    check("一版精品脚本生成完成", job is not None and job.get("status") == "succeeded")
+    job = poll_job(_job_id, timeout=900)
+    check("一版精品脚本生成完成", job is not None and job.get("status") == "succeeded",
+          (job or {}).get("error") or ("" if job else "900s 超时"))
     status, s = request("GET", f"/api/scripts/{script_id}")
     versions = s.get("versions") or []
     ok = (status == 200 and len(versions) == 1
@@ -117,14 +98,16 @@ else:
           and len(s.get("title_candidates") or []) >= 3)
     check("终稿三产物：提词器文本/分镜/标题候选≥3", ok, f"status={status}")
 
-section("P1 · 公众号流水线")
-if not llm_ready:
-    skip("长文生成/改稿/渲染", "未配置 ZHIPU_API_KEY")
+section("P1 · 已移除的飞瓜导入端点（负断言）")
+check("已移除的飞瓜导入端点不再存在（405/404）",
+      request("POST", "/api/topics/import/feigua", body={"csv": "x"})[0] in (404, 405))
+
+section("P1 · 公众号流水线（script_id → 深度长文）")
+if not llm_ready or not script_id:
+    skip("长文生成/改稿/渲染", "未配置 ZHIPU_API_KEY" if not llm_ready else "无受理到的 script_id")
 else:
-    # 深度版唯一档位（2026-11-02 三线定版：公众号做深度内容，feed 退役）。
-    # P1 端到端跑的就是用户拿到的默认产物：报题/选题 → 深度长文。
     status, r = request("POST", "/api/articles/generate",
-                        body={"topic_id": topic_id, "style": "auto"})
+                        body={"script_id": script_id, "style": "auto"})
     if not check("长文生成任务受理", status == 202 and r.get("article_id"),
                  f"status={status}, {str(r)[:120]}"):
         sys.exit(finish("P1 内容核心"))

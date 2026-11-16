@@ -10,7 +10,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from runner import check, finish, request, section, server_down
+from runner import check, finish, request, section, server_down, skip
 
 if server_down():
     sys.exit(finish("P8 功能补全"))
@@ -113,6 +113,10 @@ code, d = request("POST", "/api/cards/seed", body={"text": f"P8 投喂受理测�
 check("手动投喂受理 202（card_seed 任务）", code == 202 and bool(d.get("job_id")), f"code={code}")
 # 卡备稿→脚本全链（真实 LLM；投喂文案自带判词词根与大盘主语，降低被闸拦的概率；
 # 模型锻出不合闸的主线=如实失败也是契约行为，compose 段以 card_id 在位为前提）
+# card_id/sid/jid 提到外层：后续「自动透镜受理与去重」段（2026-11-16 改走 script_id）
+# 在无 LLM/未成卡时也要有确定的空值可引用（2026-11-16 修 NameError 隐患）
+card_id = None
+sid, jid = None, None
 if llm_ready:
     from runner import poll_job as _pj2
     code, d = request("POST", "/api/cards/seed",
@@ -249,49 +253,48 @@ check("空覆盖回落中性默认（栏目=跃迁/内容，口号空）",
       brand.get("label_line1") == "跃迁" and brand.get("cover_slogan") == "",
       f"label_line1={brand.get('label_line1')}, slogan={brand.get('cover_slogan')!r}")
 
-section("P8 · 自动透镜受理与去重（R5.1）")
-code, d = request("POST", "/api/topics/quick", body={"title": f"P8 自动透镜验收选题 {os.urandom(3).hex()}", "audience": "both"})
-check("快速记选题入库", code == 201 and d.get("id"), f"code={code}, {str(d)[:80]}")
-topic_id = d.get("id")
-code, d = request("POST", "/api/articles/generate", body={"topic_id": topic_id, "length": "deep", "style": "auto"})
-check("自动透镜生成受理 202", code == 202 and d.get("article_id"), f"code={code}, {str(d)[:80]}")
-article_id = d.get("article_id") if isinstance(d, dict) else None
-code, d = request("POST", "/api/articles/generate", body={"topic_id": topic_id, "length": "deep", "style": "auto"})
-check("同源在途去重 409", code == 409, f"code={code}")
-# 等自动透镜文章生成完成（后续单配图位/kg400 契约需要真实文章）
-from runner import poll_job as _pj
+section("P8 · 自动透镜受理与去重（R5.1，卡备稿脚本 → 长文；topics/quick 已退役）")
+if not (llm_ready and sid):
+    skip("自动透镜受理与去重", "无 LLM 或卡备稿脚本未产出")
+else:
+    code, d = request("POST", "/api/articles/generate", body={"script_id": sid, "length": "deep", "style": "auto"})
+    check("自动透镜生成受理 202", code == 202 and d.get("article_id"), f"code={code}, {str(d)[:80]}")
+    article_id = d.get("article_id") if isinstance(d, dict) else None
+    code, d = request("POST", "/api/articles/generate", body={"script_id": sid, "length": "deep", "style": "auto"})
+    check("同源在途去重 409", code == 409, f"code={code}")
+    # 等自动透镜文章生成完成（后续单配图位/kg400 契约需要真实文章）
+    from runner import poll_job as _pj
 
-gen_job = (d.get("job_id") if isinstance(d, dict) else None) if article_id else None
-# 注意：上一步 409 的 d 覆盖了变量，重取生成 job
-st, jobs = request("GET", "/api/jobs?limit=50")
-gen_job = next((j["id"] for j in (jobs.get("items") or [])
-                if j.get("type") == "article_generate" and j.get("status") in ("queued", "running")),
-               None)
-if gen_job and llm_ready:
-    done = _pj(gen_job, timeout=600)
-    check("自动透镜生成完成", (done or {}).get("status") == "succeeded",
-          f"status={(done or {}).get('status')}")
-# 慢 LLM 防抖（无条件）：首稿离开 generating/polishing 后才打非法 style，
-# 否则同源在途去重会把「非法 style 回落」探测误伤成 409 假红（慢 LLM 日实测踩中）
-for _ in range(180):
-    _, art = request("GET", f"/api/articles/{article_id}")
-    if (art or {}).get("status") not in ("generating", "polishing"):
-        break
-    time.sleep(2)
-
-# 非法 style 回落受理（内部回落 deep_dive，不崩溃即契约）
-if article_id and not llm_ready:
-    # 无 key 实例：上面提交的生成任务会失败但未必立刻离开 generating——
-    # 不等就走实体级在途去重（409）会造成假阴性，先轮询到状态流转
-    import time as _t
-    for _ in range(45):
+    # 注意：上一步 409 的 d 覆盖了变量，重取生成 job
+    st, jobs = request("GET", "/api/jobs?limit=50")
+    gen_job = next((j["id"] for j in (jobs.get("items") or [])
+                    if j.get("type") == "article_generate" and j.get("status") in ("queued", "running")),
+                   None)
+    if gen_job:
+        done = _pj(gen_job, timeout=600)
+        check("自动透镜生成完成", (done or {}).get("status") == "succeeded",
+              f"status={(done or {}).get('status')}")
+    # 慢 LLM 防抖（无条件）：首稿离开 generating/polishing 后才打非法 style，
+    # 否则同源在途去重会把「非法 style 回落」探测误伤成 409 假红（慢 LLM 日实测踩中）
+    for _ in range(180):
         _, art = request("GET", f"/api/articles/{article_id}")
-        if (art or {}).get("status") != "generating":
+        if (art or {}).get("status") not in ("generating", "polishing"):
             break
-        _t.sleep(2)
-code, d = request("POST", "/api/articles/generate",
-                  body={"topic_id": topic_id, "length": "deep", "style": "bogus_style"})
-check("非法 style 回落受理 202", code == 202, f"code={code}")
+        time.sleep(2)
+
+    # 非法 style 回落受理（内部回落 deep_dive，不崩溃即契约）
+    if not llm_ready:
+        # 无 key 实例：上面提交的生成任务会失败但未必立刻离开 generating——
+        # 不等就走实体级在途去重（409）会造成假阴性，先轮询到状态流转
+        import time as _t
+        for _ in range(45):
+            _, art = request("GET", f"/api/articles/{article_id}")
+            if (art or {}).get("status") != "generating":
+                break
+            _t.sleep(2)
+    code, d = request("POST", "/api/articles/generate",
+                      body={"script_id": sid, "length": "deep", "style": "bogus_style"})
+    check("非法 style 回落受理 202", code == 202, f"code={code}")
 
 
 # ---------- 产线闸白盒（2026-11-13 补覆盖：拆解质量闸/改编原创度闸/调度硬超时/深读下线） ----------
