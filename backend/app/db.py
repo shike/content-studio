@@ -289,7 +289,7 @@ def _migrate(engine) -> None:
                 " name VARCHAR DEFAULT '', brand JSON)",
                 "INSERT INTO tenants (created_at, updated_at, id, name, brand) "
                 "SELECT created_at, updated_at, id, name, brand FROM tenants_legacy")
-        if _has_legacy_col(conn, "articles", "title_alts") or _has_legacy_col(conn, "articles", "kb_doc_ids"):
+        if any(_has_legacy_col(conn, "articles", c) for c in ("title_alts", "kb_doc_ids", "topic_id")):
             _rebuild_drop_legacy(conn, "articles",
                 "CREATE TABLE articles ("
                 "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
