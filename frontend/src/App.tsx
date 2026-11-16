@@ -38,15 +38,15 @@ const NAVMAP: Record<string, NavTarget> = {
   p_topics: { key: 'persona', tab: 'topics' },
   p_content: { key: 'persona', tab: 'scripts' },
   l_scripts: { key: 'leadgen', tab: 'scripts' },
-  // 旧「监控」四键 → 素材库四 tab（重构 P2：监控页退役，目的地=素材库）
-  p_bench: { key: 'materials', tab: 'inbox' },
-  l_bench: { key: 'materials', tab: 'inbox' },
-  l_cand: { key: 'materials', tab: 'cand' },
-  p_watch: { key: 'materials', tab: 'sources' },
-  benchmarks: { key: 'materials', tab: 'all' },
-  watch: { key: 'materials', tab: 'sources' },
-  cand: { key: 'materials', tab: 'cand' },
-  radar: { key: 'materials', tab: 'sources' },
+  // 旧「监控」四键 → 素材库（重构 P2 监控页退役；2026-11-17 素材库改三 tab：推荐选题/监控清单/知识库）
+  p_bench: { key: 'materials', tab: 'topics' },
+  l_bench: { key: 'materials', tab: 'topics' },
+  l_cand: { key: 'materials', tab: 'watch' },
+  p_watch: { key: 'materials', tab: 'watch' },
+  benchmarks: { key: 'materials', tab: 'topics' },
+  watch: { key: 'materials', tab: 'watch' },
+  cand: { key: 'materials', tab: 'watch' },
+  radar: { key: 'materials', tab: 'watch' },
   article: { key: 'article', tab: 'workshop' },
   scripts: { key: 'persona', tab: 'scripts' },
   articles: { key: 'article', tab: 'workshop' },
@@ -58,7 +58,7 @@ const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
   persona: 'topics',
   leadgen: 'topics',
   article: 'workshop',
-  materials: 'inbox',
+  materials: 'topics',
 }
 
 export default function App() {

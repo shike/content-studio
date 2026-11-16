@@ -124,14 +124,6 @@ export function ArticleStage(props: { tab: string; onTab: (t: string) => void; o
 
 /** 素材库（唯一进料口，重构 P2）：收件箱 / 全部素材 / 采集源 / 账号候选 */
 export function MaterialsStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
-  return (
-    <StageShell tab={props.tab} onTab={props.onTab} tabs={[
-      { id: 'inbox', label: '素材库' },
-      { id: 'all', label: '全部素材' },
-      { id: 'sources', label: '采集源' },
-      { id: 'cand', label: '账号候选' },
-    ]}>
-      {({ id }) => <Materials onNavigate={props.onNavigate} tabId={id} />}
-    </StageShell>
-  )
+  // 素材库自带三 tab（推荐选题/监控清单/知识库），不再叠 StageShell——旧版双排 tab 即用户指的「菜单重复」
+  return <Materials onNavigate={props.onNavigate} tabId={props.tab} onTabChange={props.onTab} />
 }
