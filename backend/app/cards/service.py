@@ -41,7 +41,7 @@ from .forge import (_forge_with_retry, _llm_cast, _llm_forge, _llm_judge,
                     _llm_pick, _norm_takeaways)
 from .gates import (_hook_gate, _merge_card, _recent_card_spines,
                     _spine_gate)
-from .norms import _kw_hit, _norm
+from .norms import (_COVER_RANK, _kw_hit, _norm)
 
 
 def _pool_dict(*, domain: str, heat: str, level: str, role: str = "", coverage: str = "",
