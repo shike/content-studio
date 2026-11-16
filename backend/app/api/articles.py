@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlmodel import func, or_, Session, select
+from sqlmodel import func, Session, select
 
 from ..articles.images import sign_image, valid_image_name
 from ..articles.renderer import render_wechat_html, sanitize_html
@@ -223,33 +223,14 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
 
 
 @router.get("")
-def list_articles(status: str = "", limit: int = 50, offset: int = 0,
-                  source: str = "") -> dict:
-    """source='trending'：只看热点切角来源的文章（按选题来源 join 过滤，服务端计数）。"""
-    from ..models import Topic as _Topic
-
+def list_articles(status: str = "", limit: int = 50, offset: int = 0) -> dict:
     with Session(engine) as s:
         q = select(Article).order_by(Article.id.desc())  # type: ignore[arg-type]
-        # 双视角互斥：trending=仅热点切角来源；topic=非热点来源（含无选题关联的文章）——空=全部
-        if source == "trending":
-            q = q.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
-                _Topic.source_type == "trending")  # type: ignore[attr-defined]
-        elif source == "topic":
-            q = q.outerjoin(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
-                or_(_Topic.id.is_(None),  # type: ignore[attr-defined]
-                    _Topic.source_type != "trending"))  # type: ignore[attr-defined]
         if status:
             q = q.where(Article.status == status)
         total = len(s.exec(q).all())
         rows = s.exec(q.offset(max(0, offset)).limit(max(1, min(limit, 500)))).all()  # type: ignore[attr-defined]
         cq = select(Article.status, func.count(Article.id)).group_by(Article.status)  # type: ignore[arg-type]
-        if source == "trending":
-            cq = cq.join(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
-                _Topic.source_type == "trending")  # type: ignore[attr-defined]
-        elif source == "topic":
-            cq = cq.outerjoin(_Topic, Article.topic_id == _Topic.id).where(  # type: ignore[attr-defined]
-                or_(_Topic.id.is_(None),  # type: ignore[attr-defined]
-                    _Topic.source_type != "trending"))  # type: ignore[attr-defined]
         counts = {st: n for st, n in s.exec(cq).all()}
         return {"items": [r.model_dump() for r in rows], "total": total, "counts": counts}
 

@@ -63,7 +63,7 @@ content-studio/
 │   │   ├── models/             # SQLModel 表定义（§5）
 │   │   ├── jobs/               # 任务框架：提交/轮询/线程池执行器
 │   │   ├── llm/                # GLM 网关：max_tokens 预算、ping
-│   │   ├── topics/             # idea深研 / 评分
+│   │   ├── topics/             # 热源抓取（hotlist.py：百度/知乎/抖音榜/科技RSS/GitHub/AIHot）
 │   │   ├── benchmarks/         # 同行拆解：下载→ASR→LLM拆解
 │   │   ├── scripts/            # 脚本工场：模板库 / 一版精品直出 / 批判打磨
 │   │   ├── articles/           # 长文生成 / renderer.py 渲染器 / ima 知识库取材与源文改编线
@@ -131,7 +131,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `account_metrics_daily` | tenant_id, date, fans/new_fans/cancel_fans, profile_views, play, digg, comment, share, account_search, post_search | 自有账号日级运营指标（创作者中心 overview 回流，按日列合并不整行覆盖；每日 4 点轻活，kill switch=creator_data_enabled）（R9.7） |
 | `video_weekly_reports` | tenant_id, week_start, report(JSON) | 视频表现周报（质量分=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3；LLM 解读按周缓存）（R9.8） |
 | `style_profiles` | tenant_id, account_name, version, digest, traits(JSON), exemplars(JSON), based_on | 风格画像版本快照，保留历史（R9.3） |
-| `scripts` | topic_id?(FK), card_id?(FK 靶子卡备稿), falsify_item_id?(FK 实测稿备稿), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
+| `scripts` | card_id?(FK 靶子卡备稿), falsify_item_id?(FK 实测稿备稿), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
 | `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
 | `articles` | topic_id?(FK), script_id?(FK), title, note(素材备注), md, html, kb_sources(JSON ima 素材来源), status(pending/generating/failed/draft/edited/rendered/published) | 公众号文章（pending=直出链建稿，failed 可重试） |
 | `content_items` | media_id(索引防重), kb_id/folder, title, source_author, quality_score, why_good, adapt_angle, best_quotes(JSON), category, priority, status(pending/running/done/published/dismissed/low), article_id | 内容清单=知识库挖出的高质量源文（挖掘器≥线入清单，改编器取项成文；低分落 low 防回卷重评）（R5.6b 源文改编流） |
@@ -140,7 +140,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `users` | tenant_id(FK), username(全局唯一), password_hash(scrypt), role(platform_admin/tenant_admin/member), display_name, status | 租户成员 |
 | `user_sessions` | token_hash(唯一), user_id, tenant_id, expires_at | 服务端会话（Cookie 只带明文 token） |
 | `radar_topics` | tenant_id, ch_id(全局唯一), enabled, notify, seen_ids/recent/hits(JSON), last_checked_at | 话题雷达监控项 |
-| `failure_patterns` | fp(唯一), kind, fail_class, label, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
+| `failure_patterns` | fp(唯一), fail_class, label, root_cause, count, sample_error, status(open/fixed/ignored) | 错误指纹库（失败中台） |
 | `schedules` | key, label, enabled, hour 覆盖, last/next_run_at, last_status, run_count | 统一调度中心运行态 |
 | `app_settings` | key(主键), value(JSON) | 平台运行时配置（LLM/检索/ASR/采集出口；密钥只写不读） |
 | `watch_accounts` | tenant_id, platform, name, url, note, kind(competitor/self), creator_cookie(self 创作者中心登录态), enabled, last_scan_at | 对标/自有账号（R3.1/R9.1）。评分口径（§6 scores 解析按此执行）：相关性=贴合「赛道主题×口播×短视频获客」三要素；质量=近期互动（近 10 条作品均赞/峰值）+内容实质与可模仿度；综合=相关性×0.6＋质量×0.4；监控门槛：质量分低于阈值（示例 7.5）移除监控 |
@@ -152,8 +152,9 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 **内容资产状态机**（串联各表的状态流转）：
 
 ```
-topic:      draft ──approve──► approved ──产出脚本──► produced
-                └──reject───► rejected
+topic:      （2026-11-16 退役划线：仅历史行，sink 停写/API 下线/回退分支已删；
+             Script.topic_id 列已随迁移清除）
+
 script:     generating ──► polishing ──► final
 article:    pending（直出链建稿）──► generating ──► draft ──► edited ──► rendered ──► published
                 └──失败──► failed（可重试回 generating）
@@ -337,13 +338,13 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - `GET /api/metrics/weekly` → 视频表现周报（按周聚合视频质量分榜=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3 + 账号日级归因「发布日 vs 停更日」；LLM 解读按周缓存；任务 video_weekly_report 每日 5 点自愈、按周幂等）（R9.8）。**校准回路（R1.4 M3，2026-11-14）**：report.cards=备稿卡↔已发视频模糊匹配对照（发布日∈[卡创建日,+14天] 且标题归一化相似 ≥0.40 或互含 ≥8 字；一卡取最高分一条）+cards_unmatched 未匹配计数——只出对照表，不回写评分（R1.6 边界内）
 
 ### 脚本工场
-- `POST /api/scripts/generate` `{topic_id | card_id, hook?, spine?, angle?}` → 202 `{script_id, job_id}`（一版精品直出，含自动打磨一轮；card_id=靶子卡备稿，三段纪律见选题工场节）
+- `POST /api/scripts/generate` `{card_id | ore_id, hook?, spine?, angle?}` → 202 `{script_id, job_id}`（一版精品直出，含自动打磨一轮；card_id=靶子卡备稿、ore_id=获客矿建稿；topic 分支已随 topics 退役删除——2026-11-16）
 - `GET /api/scripts?limit=` / `GET /api/scripts/{id}`
 - `POST /api/scripts/{id}/polish` → 202 `{job_id}`（批判打磨，≤2 轮）
 - `POST /api/scripts/{id}/finalize` → 终稿 + `teleprompter_text` + `storyboard` + `title_candidates`
 - `GET/POST /api/scripts/templates`（结构模板库 CRUD）
 - `DELETE /api/scripts/templates/{id}`（护栏：至少保留一个模板，删最后一个 400）
-- `DELETE /api/scripts/{id}` → 解绑视频项目/文章引用不删下游；选题仅剩此脚本被删时 produced→approved 回退
+- `DELETE /api/scripts/{id}` → 解绑文章引用不删下游（topics 回退分支已退役删除）
 
 ### 公众号
 - `GET /api/articles/style-summary` → `{note}`（公众号独立风格画像，存 app_settings.article_style_note）
@@ -446,7 +447,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
   雷达飙升（新增视频速度）兼作选题工场一手池子信号（R1.4）；`/api/radar` 仅保留查看域 4 端点（契约见 §6 雷达节）；独立话题雷达面与 topic_radar 任务并入每日热点。
 - **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，表源=banned_words.json 单一数据源）；均只在命中时多花一次 LLM 调用。
 - **媒体即用即弃**：`benchmark_analyze` 成功即删视频文件（转写/拆解已入库；重拆解自动重新下载，本地拆解的原文件删后需重新上传）；reaper 巡检兜底清扫已完成/已忽略条目的遗留媒体，进行中任务的媒体不动。
-- **实体级去重**：同选题已有 generating/polishing 脚本 → 拒绝再生成（409）；同选题/同脚本已有 generating 长文 → 拒绝（409）；相同原文正在深研 → 拒绝（409）。
+- **实体级去重**：同靶子卡已有 generating/polishing 脚本 → 拒绝再生成（409）；同脚本已有 generating 长文 → 拒绝（409）。（同选题/深研去重已随 topics/idea_research 退役删除。）
 - **任务归属（租户链）**：`jobs.tenant_id/user_id` 由 `auth.ACTOR`（(tenant,user,role) contextvar）在提交时自动落库——请求上下文由 `require_user` 设值；执行器运行期由 runner 从任务行恢复上下文（**同步执行器必须经 `asyncio.to_thread` 派发——`run_in_executor` 不传播 contextvars**）；人工重试继承原任务归属，系统调度与自动重试归 0（系统）。执行器内的一切查询、实体创建随任务租户。
 - **按租户队列**：heavy 消费者跨租户轮转（租户内 FIFO）；每租户活跃任务上限（提交配额 `_check_tenant_quota`）在提交时先查后建（超限 429）。
 
@@ -455,7 +456,6 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 ## 9. 模块设计要点
 
 ### 9.1 选题中心
-- 深研链：`idea → LLM 多轮（检索增强可选）→ 结构化报告 → 评分入库`。评分 = 相关度×0.4 + 痛点强度×0.4 + 差异化×0.2（各 0~10，加权总分）。
 - 同行监控链：对标账号扫描（锚点视频反推作者作品）→ 新视频自动排队拆解 → 高赞评论存档+分型路由（人设矿/获客矿）。全网热榜不在范围（PRD R1.2）。
 - 选题工场链（R1.4）：新模块 `backend/app/cards/`（service.py 五段流水线+三闸+总法官）+ `api/cards.py`；
   热源抓取复用 topics/hotlist.py，雷达巡检复用 radar/service.py，监控号新视频复用 watch 采集链。
@@ -554,7 +554,7 @@ DATA_DIR=data-acceptance CS_BOOTSTRAP_PASSWORD=accept-12345 \
 ### 13.7 审计对账清单
 
 - [ ] openapi 端点 ↔ §6 逐条一致；反向：前端 api() 每个路径都有后端实现
-- [ ] 页面零报错/未登录业务页被门禁拦截/队列仅手动进入（e2e 自动化覆盖）
+- [ ] 页面零报错/未登录业务页被门禁拦截/队列仅手动进入（冒烟实跑逐页过）
 - [ ] 生产库无测试残留（隔离实例纪律贯彻，残留面=0）
 - [ ] 选题评分无发布数据回流残留（R1.6 边界）
 - [ ] 思考型模型调用无 JSON 截断（输出未贴 max_tokens 上限）
