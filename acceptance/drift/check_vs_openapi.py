@@ -78,14 +78,15 @@ def main_module_names() -> set[str]:
     return {alias2mod.get(a, a) for a in re.findall(r"app\.include_router\((\w+)\.router", src)}
 
 
-def check_routes(path: Path) -> tuple[set[str], int]:
-    """返回 (入库端点集合, raw 匹配条数)。raw 是正则匹配条数，不是行数（跨行 f-string 时两者不同）。"""
+def check_routes(path: Path) -> tuple[set[str], int, set[str]]:
+    """返回 (入库端点集合, raw 匹配条数, 原始字面量去重集)。raw 是正则匹配条数，不是行数（跨行 f-string 时两者不同）。"""
     src = path.read_text(encoding="utf-8")
     # 宽捕获 [^"']：f-string 内插（如 /api/jobs/failures/{urllib.parse.quote(x)}/resolve）
     # 也能整条抓到；norm() 剥 query 并把 {...} 归一为 {}（括号随花括号内容一起消掉）；
     # 最后严格字符校验拦 f-string 碎片（/api/scripts/{d.get( 这类残片过不了关）。
     # 2026-11-16 两轮修正：仅加 ? 会漏带括号的 1 条活端点；仅宽捕获会放进代码碎片。
     found = [m.group(1) for m in re.finditer(r'''["'](/api/[^"']*)["']''', src)]
+    found_set = set(found)
     keep: set[str] = set()
     for r in found:
         if r.endswith((".png", ".jpg", ".json")):
@@ -93,7 +94,7 @@ def check_routes(path: Path) -> tuple[set[str], int]:
         n = norm(r)
         if re.fullmatch(r"/api/[\w\-{}/\.]*", n):
             keep.add(n)
-    return keep, len(found)
+    return keep, len(found), found_set
 
 
 def head_line() -> str:
@@ -127,13 +128,11 @@ def main() -> int:
     rows = []
     all_eps: set[str] = set()
     raw_all = 0
-    raw_in_eps = 0
     raw_uniq: set[str] = set()
     for name in CHECK_FILES:
-        eps, raw_n = check_routes(ROOT / "acceptance" / name)
+        eps, raw_n, found_set = check_routes(ROOT / "acceptance" / name)
         raw_all += raw_n
-        raw_in_eps += len(eps)
-        raw_uniq |= eps
+        raw_uniq |= found_set
         normed = {norm(e) for e in eps}
         all_eps |= normed
         # 三类按 norm 后分别数：在线 / 负断言 / 前缀豁免；剩下才是死端点。
@@ -154,8 +153,8 @@ def main() -> int:
     total = len(all_eps)
     assert total == len(live_all) + len(neg_all) + len(pre_all) + len(dead_all)
     pct = round(len(dead_all) / total * 100, 1) if total else 0.0
-    summary = (f"HEAD {head_line()[5:]}\n"
-               f"raw {raw_all} 条（正则匹配，非行数；按文件去重后 {raw_in_eps}） / "
+    summary = (
+               f"raw {raw_all} 条（正则匹配，非行数） / "
                f"raw 唯一 {len(raw_uniq)}\n"
                f"norm 唯一 {total}\n"
                f"后端路由 {len(live)}")
@@ -182,6 +181,7 @@ def main() -> int:
             for k in pre_all:
                 print(f"- `{k}` — 命中 IGNORE_PREFIX")
     else:
+        print(head_line())
         print(summary)
         for name, n, up, in_neg, in_pre, dead in rows:
             print(f"{name}: {n} endpoints, {len(up)} live + {len(in_neg)} neg + "
