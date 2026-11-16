@@ -12,8 +12,8 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..models import SelfVideo, TopicCard
 from ..settings import settings
-from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _COVER_RANK, _max_chars,
-                    _norm, _PREDICT_KW, _pron_len)
+from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _COVER_RANK, _coverage_of,
+                    _max_chars, _norm, _PREDICT_KW, _pron_len)
 
 def _gate(gates: list, gate: str, ok: bool, detail: str = "") -> bool:
     gates.append({"gate": gate, "pass": bool(ok), "detail": str(detail)[:160]})
