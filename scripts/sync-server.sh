@@ -1,5 +1,6 @@
 #!/bin/bash
-# 发服务器唯一正规流程：rsync 代码 → 重启服务 → 健康检查，三步一体不可拆。
+# 发服务器唯一正规流程：rsync 代码 → 在途检查 → 迁移前备份 → Alembic 升级 →
+# schema 审计 → 重启 → 健康检查。三步一体不可拆。
 # 背景（2026-09-27 头图乱码复发）：手工 rsync 后忘了重启，旧进程一直跑旧代码——
 # 文件落盘在服务启动之后，Python 不会热加载；"同步过"不等于"生效了"。
 # 用法：仓库根目录执行 scripts/sync-server.sh（前端已构建则直接同步，否则拒绝）
@@ -26,10 +27,30 @@ if [ -n "$(find frontend/src frontend/index.html -newer frontend/dist/index.html
   exit 1
 fi
 
+echo "→ rsync backend/app"
+rsync -az --delete -e "$RSH" backend/app/ "$HOST:$REMOTE_ROOT/backend/app/"
+echo "→ rsync frontend/dist"
+rsync -az --delete -e "$RSH" frontend/dist/ "$HOST:$REMOTE_ROOT/frontend/dist/"
+# 文档也同步：服务器上可能要查口径，别让副本漂移
+rsync -az --delete -e "$RSH" docs/ "$HOST:$REMOTE_ROOT/docs/"
+# Alembic 配置与迁移脚本：单独同步（backend/app 之外）
+rsync -az -e "$RSH" backend/alembic.ini "$HOST:$REMOTE_ROOT/backend/alembic.ini"
+rsync -az -e "$RSH" backend/requirements.txt "$HOST:$REMOTE_ROOT/backend/requirements.txt"
+rsync -az --delete -e "$RSH" backend/migrations/ "$HOST:$REMOTE_ROOT/backend/migrations/"
+
+# 远端 python 优先用仓库 venv；退回 python3（需系统装有 sqlalchemy/psycopg）
+AUDIT_PY="$REMOTE_ROOT/backend/.venv/bin/python"
+SSH "$HOST" "test -x $AUDIT_PY" || AUDIT_PY=python3
+REMOTE_PY="cd $REMOTE_ROOT && PYTHONPATH=$REMOTE_ROOT/backend $AUDIT_PY"
+if ! SSH "$HOST" "$AUDIT_PY -c 'import psycopg, alembic'"; then
+  echo "✗ 远端缺 psycopg/alembic：先 uv pip install -r $REMOTE_ROOT/backend/requirements.txt" >&2
+  exit 1
+fi
+
 echo "→ 在途任务检查（有 running/queued 就拒重启：会打断用户正在跑的任务）"
-INFLIGHT=$(SSH "$HOST" "sqlite3 $REMOTE_ROOT/data/studio.db \"SELECT count(*) FROM jobs WHERE status IN ('running','queued')\"" 2>/dev/null || echo "?")
-if [ "$INFLIGHT" = "?" ]; then
-  echo "✗ 取不到生产库在途任务数（ssh/sqlite 异常）——按保守拒绝：不知情就别打断" >&2
+INFLIGHT=$(SSH "$HOST" "$REMOTE_PY -m app.ops inflight" 2>/dev/null | tr -dc '0-9' || true)
+if [ -z "$INFLIGHT" ]; then
+  echo "✗ 取不到生产库在途任务数（DATABASE_URL/psycopg/远端库异常）——按保守拒绝：不知情就别打断" >&2
   [ "${CS_FORCE_RESTART:-0}" = "1" ] || { echo "  确认无任务在跑再发：CS_FORCE_RESTART=1 scripts/sync-server.sh" >&2; exit 1; }
 elif [ "$INFLIGHT" != "0" ] && [ "${CS_FORCE_RESTART:-0}" != "1" ]; then
   echo "✗ 生产库有 $INFLIGHT 个在途任务——重启会打断它们（内核 90s 自动重试，但要白烧一次 LLM 额度）" >&2
@@ -37,26 +58,22 @@ elif [ "$INFLIGHT" != "0" ] && [ "${CS_FORCE_RESTART:-0}" != "1" ]; then
   exit 1
 fi
 
-echo "→ rsync backend/app"
-rsync -az --delete -e "$RSH" backend/app/ "$HOST:$REMOTE_ROOT/backend/app/"
-echo "→ rsync frontend/dist"
-rsync -az --delete -e "$RSH" frontend/dist/ "$HOST:$REMOTE_ROOT/frontend/dist/"
-# 文档也同步：服务器上可能要查口径，别让副本漂移
-rsync -az --delete -e "$RSH" docs/ "$HOST:$REMOTE_ROOT/docs/"
-# migrations 在 backend/ 下（schema 审计闸 B 阶段，2026-11-16）：单独同步，别进根级循环
-rsync -az --delete -e "$RSH" backend/migrations/ "$HOST:$REMOTE_ROOT/backend/migrations/"
+echo "→ 迁移前 pg_dump 快照（保留 5 份）"
+if ! SSH "$HOST" "$REMOTE_PY -m app.ops backup pre-migrate 5"; then
+  echo "✗ 迁移前备份失败：中止发版（没有安全网不动库）" >&2
+  exit 1
+fi
 
-# schema 审计闸（B 阶段 2026-11-16）：新代码模型 ↔ 生产库 DDL 只读 diff。
-# 漂移=中止重启（代码已同步、旧进程继续服务，生产零影响）；修漂移后重跑本脚本。
-# 远端 python 优先用仓库 venv（有 sqlalchemy），退回 python3（需系统装有 sqlalchemy）。
-# --db 直指生产库文件（与上方在途任务检查同一库），不经 settings 解析——
-# 防止 CWD/.env 差异导致审错库（WB #95 高危 1 的根治）。
+echo "→ Alembic 升级（backend/migrations → head）"
+if ! SSH "$HOST" "cd $REMOTE_ROOT && PYTHONPATH=$REMOTE_ROOT/backend $AUDIT_PY -m alembic -c backend/alembic.ini upgrade head"; then
+  echo "✗ Alembic 升级失败：代码已在服务器、旧进程继续服务；先修迁移再重跑本脚本" >&2
+  exit 1
+fi
+
 echo "→ schema 审计（新代码模型 ↔ 生产库，只读）"
-AUDIT_PY="$REMOTE_ROOT/backend/.venv/bin/python"
-SSH "$HOST" "test -x $AUDIT_PY" || AUDIT_PY=python3
-if ! SSH "$HOST" "cd $REMOTE_ROOT/backend && $AUDIT_PY -m app.schema_audit --db $REMOTE_ROOT/data/studio.db --quiet"; then
+if ! SSH "$HOST" "$REMOTE_PY -m app.schema_audit --quiet"; then
   echo "✗ schema 漂移：中止重启（代码已同步、旧进程继续服务，生产零影响）。修漂移后重跑本脚本；漂移明细：" >&2
-  SSH "$HOST" "cd $REMOTE_ROOT/backend && $AUDIT_PY -m app.schema_audit --db $REMOTE_ROOT/data/studio.db" >&2 || true
+  SSH "$HOST" "$REMOTE_PY -m app.schema_audit" >&2 || true
   exit 1
 fi
 echo "✓ schema 审计通过（模型与生产库一致）"

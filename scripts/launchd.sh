@@ -17,6 +17,8 @@ LOG="/tmp/content-studio-8100.log"
 PY="$ROOT/backend/.venv/bin/python"
 
 install_plist() {
+  echo "→ Alembic 升级（backend/migrations → head）"
+  (cd "$ROOT" && PYTHONPATH="$ROOT/backend" "$PY" -m alembic -c backend/alembic.ini upgrade head)
   mkdir -p "$(dirname "$PLIST")"
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -77,6 +79,10 @@ install_watchdog() {
     <string>${WDSCRIPT}</string>
   </array>
   <key>StartInterval</key><integer>300</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CS_REPO_ROOT</key><string>${ROOT}</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>/tmp/content-studio-watchdog.log</string>
   <key>StandardErrorPath</key><string>/tmp/content-studio-watchdog.log</string>

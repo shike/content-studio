@@ -41,23 +41,17 @@ echo "$n" > "$STATE"
 # 任务保护（2026-10-07 内存事故复盘）：有 running 任务时，health 失败/变慢多半是资源高峰
 # （ASR 转写/批量下载），重启会打断任务并可能进入"重启→拾起任务→再爆"的循环。
 # 策略：running>0 时连续 6 次（约 30 分钟）失败才强拉（任务自身硬超时最长 60min 会先自愈）；
-# running=0 或探测失败（sqlite 不可用）按原逻辑立即拉起。
+# running=0 或探测失败（数据库不可用）按原逻辑立即拉起。
 run_guard() {
-  # 库位置探测顺序（2026-11-16 收敛）：显式 CS_DATA_DIR 优先（systemd unit 必设）；
-  # 其余两条仅作兜底——按运行平台各取一条，生产/开发机各自只用得上其中之一。
-  set --
-  [ -n "${CS_DATA_DIR:-}" ] && set -- "$CS_DATA_DIR/studio.db"
-  case "$(uname)" in
-    Linux)  set -- "$@" "/srv/content-studio/data/studio.db" ;;
-    Darwin) set -- "$@" "$HOME/Desktop/code/content-studio/data/studio.db" ;;
-  esac
-  for DB in "$@"; do
-    [ -f "$DB" ] || continue
-    v=$(sqlite3 "$DB" "SELECT COUNT(*) FROM jobs WHERE status='running'" 2>/dev/null) || return 1
-    echo "$v"
-    return 0
-  done
-  return 1
+  # 业务库已切 PostgreSQL：经应用引擎查在途数（不依赖 psql/库文件路径）。
+  # CS_REPO_ROOT 由 LaunchAgent/systemd 显式注入；取不到就放弃任务保护（立即拉起）。
+  [ -n "${CS_REPO_ROOT:-}" ] || return 1
+  PY="$CS_REPO_ROOT/backend/.venv/bin/python"
+  [ -x "$PY" ] || PY=python3
+  [ -f "$CS_REPO_ROOT/backend/app/ops.py" ] || return 1
+  v=$(cd "$CS_REPO_ROOT" && PYTHONPATH="$CS_REPO_ROOT/backend" "$PY" -m app.ops inflight 2>/dev/null) || return 1
+  case "$v" in ''|*[!0-9]*) return 1 ;; esac
+  echo "$v"
 }
 if v=$(run_guard); then
   if [ "${v:-0}" -gt 0 ] && [ "$n" -lt 6 ]; then

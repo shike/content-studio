@@ -3,7 +3,7 @@
 设计要点：
 - 只在 DB 有该键时才覆盖内存 settings（无行 = 沿用 .env/默认值）——存量部署零迁移成本；
 - 写入即落库 + 同步刷新内存（读取方全是调用时动态读 `settings.x`，无需重启）；
-- 密钥类值只写不读（GET 只回报"是否已配置"），值存 data/studio.db（每日备份覆盖）。
+- 密钥类值只写不读（GET 只回报"是否已配置"），值存 PostgreSQL（每日 pg_dump 备份覆盖）。
 """
 from __future__ import annotations
 

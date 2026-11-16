@@ -25,6 +25,14 @@ fi
 
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8100}"
+if ! grep -q '^DATABASE_URL=' .env 2>/dev/null; then
+  echo "[dev] 缺 DATABASE_URL：业务库已切 PostgreSQL。"
+  echo "      本地开发可：uv pip install pgserver，并参考 docs/TDD.md §12 启动本地库；"
+  echo "      然后在 .env 写 DATABASE_URL=postgresql+psycopg://..."
+  exit 1
+fi
+echo "[dev] Alembic 升级（幂等）..."
+PYTHONPATH=backend backend/.venv/bin/python -m alembic -c backend/alembic.ini upgrade head
 echo "[dev] Content Studio → http://${HOST}:${PORT}"
 exec backend/.venv/bin/python -m uvicorn app.main:app \
   --app-dir backend --host "$HOST" --port "$PORT"

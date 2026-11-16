@@ -1,63 +1,81 @@
-"""schema 审计：SQLModel 模型 DDL ↔ 库实际 DDL 只读 diff（B 阶段护栏，2026-11-16）。
+"""schema 审计：SQLModel 模型 DDL ↔ 生产 PostgreSQL 只读 diff。
 
-背景：2026-11-15 连出两起 schema 漂移（failure_patterns.kind、content_items.kb_id/
-folder_id）——第三轮减负删模型字段时未查生产表残留 NOT NULL 无默认列，INSERT 必炸。
-本模块提供只读对账：模型有库无、库有模型无、列集差异三类，任一非空即漂移。
+发布口护栏：模型有库无 / 库有模型无 / 列集差异 / 列类型家族不符，任一非空即漂移。
+只读，不执行任何 DDL。
 
-用法（发布口/CI 闸，只读不写）：
-    python -m app.schema_audit            # 人类可读报告，漂移时退出码 1
-    python -m app.schema_audit --quiet    # 只输出漂移行（给脚本判断）
-
-口径：
-- 表级：模型 24 张 ↔ 库实际表（legacy 表已清零，出现新差集即漂移）。
-- 列级：列名集合比对（类型/约束差异由迁移脚本负责，不在此误报）；
-  漂移=模型有库无、库有模型无两类。
+用法：
+    python -m app.schema_audit                 # 读 settings.database_url，人类可读报告
+    python -m app.schema_audit --quiet         # 只输出漂移行（供脚本判断）
+    python -m app.schema_audit --url postgresql+psycopg://...
 """
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from sqlalchemy import create_engine, inspect as sa_inspect
 from sqlmodel import SQLModel
 
+_IGNORED_TABLES = {"alembic_version"}
 
-def model_tables() -> dict[str, set[str]]:
-    """模型侧：表 → 列名集合（来自 SQLModel metadata，单一真相=模型）。"""
+# 类型只比「家族」：避免 VARCHAR(200) vs VARCHAR、identity INTEGER vs INTEGER 之类误报
+_TYPE_FAMILY = {
+    "VARCHAR": "STRING", "TEXT": "STRING", "CHAR": "STRING", "STRING": "STRING",
+    "AUTOSTRING": "STRING",  # SQLModel 的 str 列类型
+    "INTEGER": "INT", "BIGINT": "INT", "SMALLINT": "INT", "INT": "INT",
+    "BOOLEAN": "BOOL", "BOOL": "BOOL",
+    "JSONB": "JSON", "JSON": "JSON",
+    "TIMESTAMP": "DATETIME", "DATETIME": "DATETIME",
+    "DATE": "DATE",
+    "FLOAT": "FLOAT", "DOUBLE_PRECISION": "FLOAT", "REAL": "FLOAT",
+    "NUMERIC": "FLOAT", "DECIMAL": "FLOAT",
+    "BYTEA": "BINARY", "BLOB": "BINARY",
+}
+
+
+def _family(t) -> str:  # noqa: ANN001
+    name = type(t).__name__.upper()
+    return _TYPE_FAMILY.get(name, name)
+
+
+def model_tables() -> dict[str, dict[str, str]]:
+    """模型侧：表 → {列名: 类型家族}（单一真相=模型）。"""
     from . import models  # noqa: F401  确保全部表模型注册
 
-    out: dict[str, set[str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for name, table in SQLModel.metadata.tables.items():
-        out[name] = {c.name for c in table.columns}
+        out[name] = {c.name: _family(c.type) for c in table.columns}
     return out
 
 
-def db_tables(engine) -> dict[str, set[str]]:
-    """库侧：表 → 列名集合（PRAGMA 只读）。"""
+def db_tables(engine) -> dict[str, dict[str, str]]:  # noqa: ANN001
+    """库侧：表 → {列名: 类型家族}（information_schema / inspector 只读）。"""
     insp = sa_inspect(engine)
-    out: dict[str, set[str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for name in insp.get_table_names():
-        out[name] = {c["name"] for c in insp.get_columns(name)}
+        if name in _IGNORED_TABLES:
+            continue
+        out[name] = {c["name"]: _family(c["type"]) for c in insp.get_columns(name)}
     return out
 
 
-def audit(engine) -> tuple[list[str], bool]:
-    """返回 (漂移行列表, 是否干净)。只读，不执行任何 DDL。"""
+def audit(engine) -> tuple[list[str], bool]:  # noqa: ANN001
     mtab, dtab = model_tables(), db_tables(engine)
     drifts: list[str] = []
 
     for t in sorted(set(mtab) - set(dtab)):
-        drifts.append(f"缺表：模型有 `{t}`，库无（create_all 未生效或库被手改）")
+        drifts.append(f"缺表：模型有 `{t}`，库无（Alembic 未跑到 head）")
     for t in sorted(set(dtab) - set(mtab)):
         drifts.append(f"多表：库有 `{t}`，模型无（退役未删或手建表）")
 
     for t in sorted(set(mtab) & set(dtab)):
         mcols, dcols = mtab[t], dtab[t]
-        for c in sorted(mcols - dcols):
-            drifts.append(f"缺列：`{t}.{c}` 模型有库无（新字段未迁移到旧库）")
-        for c in sorted(dcols - mcols):
-            drifts.append(f"残留列：`{t}.{c}` 库有模型无（删字段未清生产残留，"
-                          "若为 NOT NULL 无默认列，INSERT 必炸）")
+        for c in sorted(set(mcols) - set(dcols)):
+            drifts.append(f"缺列：`{t}.{c}` 模型有库无（迁移未落库）")
+        for c in sorted(set(dcols) - set(mcols)):
+            drifts.append(f"残留列：`{t}.{c}` 库有模型无（退役字段未清）")
+        for c in sorted(set(mcols) & set(dcols)):
+            if mcols[c] != dcols[c]:
+                drifts.append(f"类型不符：`{t}.{c}` 模型 {mcols[c]} / 库 {dcols[c]}")
 
     return drifts, (not drifts)
 
@@ -67,20 +85,16 @@ def main(argv: list[str] | None = None) -> int:
 
     from .settings import settings
 
-    ap = argparse.ArgumentParser(description="schema 审计：模型 DDL ↔ 库 DDL 只读 diff")
+    ap = argparse.ArgumentParser(description="schema 审计：模型 DDL ↔ PostgreSQL 只读 diff")
     ap.add_argument("--quiet", action="store_true", help="只输出漂移行（供脚本判断）")
-    ap.add_argument("--db", type=str, default="",
-                    help="指定库文件路径（默认读 settings.data_dir/studio.db）")
+    ap.add_argument("--url", type=str, default="", help="覆盖 DATABASE_URL（默认读 settings）")
     args = ap.parse_args(argv)
 
-    db_file = Path(args.db) if args.db else settings.db_path
-    if not db_file.exists():
-        if args.quiet:
-            return 0  # 全新部署：库未建，create_all 会按模型建，视为对齐
-        print(f"库文件不存在：{db_file}（全新部署由 create_all 建表，视为对齐）")
-        return 0
-
-    eng = create_engine(f"sqlite:///{db_file}")
+    url = args.url or settings.database_url
+    if not url:
+        print("缺少 DATABASE_URL（或 --url）", file=sys.stderr)
+        return 2
+    eng = create_engine(url)
     try:
         drifts, clean = audit(eng)
     finally:
@@ -91,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             print(d)
         return 0 if clean else 1
 
-    print(f"schema 审计：{db_file}")
+    print("schema 审计：PostgreSQL")
     if clean:
         print("  ✓ 模型与库 DDL 一致（无漂移）")
         return 0

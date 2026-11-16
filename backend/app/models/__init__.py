@@ -2,15 +2,16 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import Column, Index, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
 def utcnow() -> datetime:
     """统一 naive UTC（不带时区）。
 
-    全库按 naive UTC 比较/做差；写入若带时区，Sqlite 存成带偏移的字符串，
-    且新版 SQLModel 读回带 tzinfo——与其它 naive 值比较即抛
+    全库按 naive UTC 比较/做差；Postgres 列类型为 timestamp without time zone，
+    写入/读回均为 naive；若混入带时区值，比较即抛
     "can't compare offset-naive and offset-aware"，被后台循环吞掉后静默失效。"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -43,14 +44,19 @@ class AppSetting(TimestampMixin, table=True):
 
 class Job(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "jobs"
+    # 活跃任务去重唯一（部分索引）：同租户同类型同 dedup_key 只能有一个 in-flight
+    __table_args__ = (
+        Index("ix_jobs_active_dedup", "tenant_id", "type", "dedup_key", unique=True,
+              postgresql_where=text("dedup_key <> '' AND status IN ('queued','running')")),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     type: str = Field(index=True)
     status: str = Field(default="queued", index=True)  # queued|running|succeeded|failed(parked 已退役→failed)|superseded(重启后已被新任务承接)
     progress: int = 0
     message: str = ""
-    payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    result: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    history: list = Field(default_factory=list, sa_column=Column(JSON))  # 阶段轨迹 [{p,m,t}]
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    result: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    history: list = Field(default_factory=list, sa_column=Column(JSONB))  # 阶段轨迹 [{p,m,t}]
     error: Optional[str] = None
     # 任务体系五要素（P1 骨架）：去重键 / 分道 / 重试策略状态
     dedup_key: str = Field(default="", index=True)  # 类型内去重键（空=不去重）；活跃任务(queued/running)中唯一（部分唯一索引兜底）
@@ -96,13 +102,13 @@ class TopicCard(TenantScoped, TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     batch_date: str = Field(default="", index=True)  # YYYY-MM-DD 批次（本地自然日）
     source: str = ""  # douyin_peer | radar | douyin_hot | external | self_story | manual
-    pool: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    pool: dict = Field(default_factory=dict, sa_column=Column(JSONB))
     spine: str = ""  # 主线半句话（单判断；台词里禁止出现）
     hook: str = ""   # 三秒钩子（≤3秒×语速口径字数线，观点说清+抓人）
     spice: str = ""  # low | mid | high（辣度不设限，如实标注，传生成端）
-    takeaways: list = Field(default_factory=list, sa_column=Column(JSON))  # 评论要点（主线原料留痕：从高赞评论提炼的大众关注点，可检验）
-    judge: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    gates: list = Field(default_factory=list, sa_column=Column(JSON))
+    takeaways: list = Field(default_factory=list, sa_column=Column(JSONB))  # 评论要点（主线原料留痕：从高赞评论提炼的大众关注点，可检验）
+    judge: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    gates: list = Field(default_factory=list, sa_column=Column(JSONB))
     status: str = Field(default="draft", index=True)
     superseded_by: Optional[int] = None  # 批次替代链（当日无下游旧卡让位）
     script_id: Optional[int] = None  # 备稿后回填（与 scripts.card_id 双向锚）
@@ -134,10 +140,10 @@ class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
     url: str = ""
     author: str = ""
     title: str = ""
-    stats: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    stats: dict = Field(default_factory=dict, sa_column=Column(JSONB))
     transcript: str = ""
-    analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    top_comments: list = Field(default_factory=list, sa_column=Column(JSON))  # 高赞评论原文 [{t,d}]（拆解时抓取存档——评论区=观点的矿脉，R1.4 进料）
+    analysis: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    top_comments: list = Field(default_factory=list, sa_column=Column(JSONB))  # 高赞评论原文 [{t,d}]（拆解时抓取存档——评论区=观点的矿脉，R1.4 进料）
     comment_kind: str = Field(default="")  # 评论区分型：persona_ore(人设矿)|leadgen_ore(获客矿，求学打卡型→归获客线)；''=未采评论未分型
     comment_leadgen_share: float = Field(default=0.0)  # 求学密度 0~1（求学词根命中占比，分型依据留痕）
     media_path: str = ""
@@ -155,7 +161,7 @@ class Tenant(TimestampMixin, table=True):
     __tablename__ = "tenants"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = ""
-    brand: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 租户品牌/人设：栏目名、署名、人设描述（SaaS 产品化，2026-09-30）
+    brand: dict = Field(default_factory=dict, sa_column=Column(JSONB))  # 租户品牌/人设：栏目名、署名、人设描述（SaaS 产品化，2026-09-30）
 
 
 class User(TimestampMixin, table=True):
@@ -192,8 +198,8 @@ class RadarTopic(TenantScoped, TimestampMixin, table=True):
     name: str = ""
     enabled: bool = True
     notify: bool = True
-    seen_ids: list = Field(default_factory=list, sa_column=Column(JSON))  # 已见视频 id（尾端截断 300）
-    hits: list = Field(default_factory=list, sa_column=Column(JSON))  # 低粉高赞清单 [{id, desc, author, digg, followers, ratio}]
+    seen_ids: list = Field(default_factory=list, sa_column=Column(JSONB))  # 已见视频 id（尾端截断 300）
+    hits: list = Field(default_factory=list, sa_column=Column(JSONB))  # 低粉高赞清单 [{id, desc, author, digg, followers, ratio}]
     last_checked_at: Optional[datetime] = None
 
 
@@ -205,11 +211,11 @@ class Script(TenantScoped, TimestampMixin, table=True):
     falsify_item_id: Optional[int] = Field(default=None, foreign_key="falsify_items.id", index=True)  # 实测稿备稿（R1.4③）
     ore_id: Optional[int] = Field(default=None, foreign_key="benchmark_videos.id", index=True)  # 获客矿建稿锚（分型路由消费面，2026-11-14）
     title_hint: str = Field(default="")  # 生成来源标题快照（列表显示用；topics 退役后不再 join）
-    versions: list = Field(default_factory=list, sa_column=Column(JSON))
+    versions: list = Field(default_factory=list, sa_column=Column(JSONB))
     final_text: str = ""
     teleprompter_text: str = ""
-    storyboard: list = Field(default_factory=list, sa_column=Column(JSON))
-    title_candidates: list = Field(default_factory=list, sa_column=Column(JSON))
+    storyboard: list = Field(default_factory=list, sa_column=Column(JSONB))
+    title_candidates: list = Field(default_factory=list, sa_column=Column(JSONB))
     status: str = "generating"  # generating | polishing | generated（待定稿，徽章计数依赖）| final
     account_type: str = Field(default="persona")  # persona | leadgen（两类号：内容看板过滤/风格分叉）
 
@@ -227,10 +233,10 @@ class Article(TenantScoped, TimestampMixin, table=True):
     md: str = ""
     title: str = ""  # 公众号主标题
     note: str = ""  # 产线注记（热点：/改编：/深读： 来源标签 + 审校未过记录）
-    kb_sources: list = Field(default_factory=list, sa_column=Column(JSON))  # ima 知识库素材来源（2026-11-08 取材写文）
+    kb_sources: list = Field(default_factory=list, sa_column=Column(JSONB))  # ima 知识库素材来源（2026-11-08 取材写文）
     publish_url: str = ""  # 发布登记：公众号文章链接（发布永远人工，系统只记账，2026-11-11 源文改编产线）
     published_at: str = ""  # 发布登记时间
-    stats: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 48h 回流 {reads,welook,follows,leads,filled_at}
+    stats: dict = Field(default_factory=dict, sa_column=Column(JSONB))  # 48h 回流 {reads,welook,follows,leads,filled_at}
     html: str = ""
     status: str = "draft"  # pending 待写 | generating | failed | draft | edited | rendered | published
 
@@ -255,7 +261,7 @@ class ContentItem(TenantScoped, TimestampMixin, table=True):
     quality_score: float = 0.0            # 挖掘器评分（≥生成线才入清单；低分不落行只记日账）
     why_good: str = ""                    # 为什么值得发（一句）
     adapt_angle: str = ""                 # 改编角度（保什么骨架/换什么口径/接什么钩子）
-    best_quotes: list = Field(default_factory=list, sa_column=Column(JSON))  # 逐字原话 [str]（改编时保留引用）
+    best_quotes: list = Field(default_factory=list, sa_column=Column(JSONB))  # 逐字原话 [str]（改编时保留引用）
     category: str = Field(default="", index=True)  # 栏目：转行真话|交付现场|行业拆局|变现报价|现场实录
     priority: int = Field(default=0, index=True)  # 人工置顶权重（「明天改编」=9，取项先看它再看质量分）
     status: str = Field(default="pending", index=True)  # pending 待改编 | running 改编中 | done 已改编 | published 已发布 | dismissed 不做
@@ -331,7 +337,7 @@ class WeeklyReport(TenantScoped, TimestampMixin, table=True):
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
     week_start: str = Field(default="", index=True)  # 周一日期 YYYY-MM-DD
-    report: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    report: dict = Field(default_factory=dict, sa_column=Column(JSONB))
 
 
 class AccountMetricsDaily(TenantScoped, TimestampMixin, table=True):
@@ -365,9 +371,9 @@ class SelfVideo(TenantScoped, TimestampMixin, table=True):
     media_path: str = ""
     transcript: str = ""
     scan_status: str = Field(default="approved")  # pending | approved | ignored
-    style_analysis: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    style_analysis: dict = Field(default_factory=dict, sa_column=Column(JSONB))
     analyzed_at: Optional[datetime] = None
-    stats: dict = Field(default_factory=dict, sa_column=Column(JSON))  # 互动数（扫描时捕获）
+    stats: dict = Field(default_factory=dict, sa_column=Column(JSONB))  # 互动数（扫描时捕获）
     published_at: str = Field(default="")  # 发布时间（创作者中心回写；周报用）
     duration: int = 0                      # 时长秒
 
@@ -380,6 +386,6 @@ class StyleProfile(TenantScoped, TimestampMixin, table=True):
     account_name: str = ""
     version: int = 1
     digest: str = ""  # 200~300 字可执行风格描述
-    traits: list = Field(default_factory=list, sa_column=Column(JSON))
-    exemplars: list = Field(default_factory=list, sa_column=Column(JSON))
+    traits: list = Field(default_factory=list, sa_column=Column(JSONB))
+    exemplars: list = Field(default_factory=list, sa_column=Column(JSONB))
     based_on: int = 0  # 基于多少条视频

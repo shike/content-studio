@@ -8,10 +8,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        # 绝对路径锚定仓库根：CLI/Alembic/uvicorn 从任何 CWD 启动都读同一份 .env
+        env_file=str(_REPO_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore"
     )
 
     data_dir: Path = _REPO_ROOT / "data"  # 相对 DATA_DIR 也锚定仓库根，不随进程 CWD 漂移
+    # 业务库（PostgreSQL）：唯一数据源；媒体/配图/备份仍在 DATA_DIR
+    database_url: str = ""
 
     zhipu_api_key: str = ""
     llm_model: str = "glm-5.3-flash"
@@ -60,10 +63,6 @@ class Settings(BaseSettings):
     pool_peer_window_hours: int = 30   # 池子线视频新鲜窗（小时）：只读窗口内的监控号新视频（"新视频"口径；调宽=允许存量真矿进线）
     comment_leadgen_route_min: int = 60  # 评论区分型路由：求学词根占比 ≥此百分比(%) 判获客矿→归获客线，人设号不吃（元角度口子另限每批1张）
     backfill_window_days: int = 30     # 存量回填追溯窗（天）：话题/账号两条回填线的日期闸（2026-11-15 用户定版追溯 90 天）
-
-    @property
-    def db_path(self) -> Path:
-        return self.data_dir / "studio.db"
 
 
 settings = Settings()
