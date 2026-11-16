@@ -31,7 +31,9 @@ from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
 from .fetch import (_list_account_videos_playwright,
                     _list_author_videos_via_anchor,
                     _list_author_videos_via_share_page,
-                    _probe_video_author)
+                    _probe_video_author,
+                    _resolve_author_via_share_page,
+                    _resolve_author_via_video)
 from .hl import hl_search_matrix  # noqa: F401  执行器注册随导入生效
 
 

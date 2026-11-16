@@ -5,11 +5,22 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import random
+import re
+import time
+from urllib.parse import quote
 
+from sqlmodel import Session, select
+
+from ..browser import launch, ua
+from ..db import engine
 from ..jobs.runner import register_executor
 from ..llm import gateway
+from ..models import AppSetting, WatchCandidate
 from ..settings import settings
+
 
 def _harvest_budget(key: str, default: int) -> int:
     """战役模式预算覆盖：app_settings.harvest_hl_search / harvest_hl_verify 可临时调大
