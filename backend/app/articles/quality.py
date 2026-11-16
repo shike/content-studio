@@ -2,7 +2,7 @@
 
 2026-11-16 从 service.py 拆出（C 阶段结构整治，只挪不改行为）：
 违禁词表单一数据源 banned_words.json 由本模块加载（单一数据源 JSON）；
-service.py 经 facade 导入继续可用，deepread.py 的既有导入不受影响。
+service.py/review.py/adapt.py 经导入继续可用（deepread 线已随产线退役删除）。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _KB_BAN_CONNECTORS = ("综上所述", "由此可见", "说到底", "总而言之
 
 
 def strip_fence(body: str) -> str:
-    """剥 LLM 输出的 ``` 围壳（adapt/review/deepread 三线共用，2026-11-16 合并）。"""
+    """剥 LLM 输出的 ``` 围壳（adapt/review 两线共用，2026-11-16 合并）。"""
     body = (body or "").strip()
     if body.startswith("```"):
         body = re.sub(r"^```[a-z]*\n?", "", body)
@@ -36,7 +36,7 @@ def strip_fence(body: str) -> str:
 
 
 def load_cursor(s, key: str) -> tuple[int, int]:
-    """AppSetting 游标 "idx:pos"（miner/deepread 两线共用，2026-11-16 合并）。"""
+    """AppSetting 游标 "idx:pos"（miner 线专用，2026-11-16 合并；deepread 线已退役）。"""
     from sqlmodel import Session  # noqa: F401 仅类型位
     row = s.get(AppSetting, key)
     raw = (row.value or "").strip() if row is not None else ""
@@ -56,7 +56,7 @@ def save_cursor(s, key: str, idx: int, pos: int) -> None:
 
 
 def min_chars_or_raise(md_text: str, label: str) -> int:
-    """1500 字下限守卫（adapt/deepread 两线共用，2026-11-16 合并；文案里的规格数字随线不同勿写死）。"""
+    """1500 字下限守卫（adapt 线专用，2026-11-16 合并；文案里的规格数字随线不同勿写死）。"""
     n_chars = len(re.sub(r"\s", "", md_text))
     if n_chars < 1500:
         raise TransientError(f"{label}仅 {n_chars} 字（下限 1500），疑似截断，稍后自动重试")

@@ -29,7 +29,7 @@ from ..jobs.runner import JobContext, register_executor
 from ..models import BenchmarkVideo, RadarTopic, Script, TopicCard
 from ..settings import settings
 
-# ── C 阶段结构整治（2026-11-16）：归一/闸门/锻造链拆至 norms/gates/forge，本模块留执行器与编排；facade 导入沿用旧名（api/、deepread 等零改动）──
+# ── C 阶段结构整治（2026-11-16）：归一/闸门/锻造链拆至 norms/gates/forge，本模块留执行器与编排；facade 导入沿用旧名（api/ 既有导入零改动）──
 
 
 from .forge import (_forge_with_retry, _llm_cast, _llm_judge,
