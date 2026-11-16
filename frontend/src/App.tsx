@@ -79,8 +79,12 @@ export default function App() {
     document.title = '跃迁内容工作室'
   }, [])
 
-  // 菜单待办计数：徽章落在阶段页自身（counts.ts 求和），60s 静默刷新
+  // 菜单待办计数：徽章落在阶段页自身（counts.ts 求和），60s 静默刷新。
+  // 依赖 authed（2026-11-16 修）：此前只在 App 挂载时跑一次——那时未登录，整组
+  // fetchMenuStats 401 被 catch 静默吞掉，登录后要等 60s 定时器才显示真值
+  // （实测登录后前 60 秒侧栏徽章全 0，看起来像"今天没活"）。
   useEffect(() => {
+    if (authed !== true) return
     let alive = true
     const load = () =>
       fetchMenuStats()
@@ -92,7 +96,7 @@ export default function App() {
       alive = false
       clearInterval(timer)
     }
-  }, [])
+  }, [authed])
 
   /** 跳转：新键直达，旧键走 NAVMAP（页+页内 tab），未知键落工作台。 */
   const navTo = (k: string) => {
