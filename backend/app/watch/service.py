@@ -28,11 +28,10 @@ from ..models import BenchmarkVideo, WatchAccount, WatchCandidate
 
 # ── C 阶段结构整治（2026-11-16）：抓取层拆至 fetch.py、同城线拆至 hl.py；
 # 本模块留执行器与发现管线；facade 再导出沿用旧名（selfstyle/api 既有导入零改动）──
-from .fetch import (_extract_stats,  # noqa: F401
-                    _list_account_videos_playwright,
+from .fetch import (_list_account_videos_playwright,
                     _list_author_videos_via_anchor,
                     _list_author_videos_via_share_page,
-                    _probe_video_author, _walk_awemes)
+                    _probe_video_author)
 from .hl import hl_search_matrix  # noqa: F401  执行器注册随导入生效
 
 
