@@ -115,6 +115,6 @@ async def compose_falsify(*, item_id: int, user=None, length: str = "short") -> 
     job = await runner.submit("script_generate",
                               {"script_id": script_id, "falsify_item_id": item_id,
                                "length": length, "account_type": "persona",
-                               "use_style": True, "angles": [], "template_id": 0},
+                               "use_style": True, "angles": []},
                               actor=actor)
     return {"script_id": script_id, "job_id": job.id, "item_id": item_id}

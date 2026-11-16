@@ -358,9 +358,9 @@ def _migrate(engine) -> None:
                 " COALESCE(account_type,'persona'), COALESCE(leadgen_density,0), pure_reason,"
                 " COALESCE(status,'open') FROM watch_candidates_legacy")
 
-        # 2026-11-16 二次裁决：老选题库 topics / idea 深研 research_reports 死档案全清
-        # （唯二读者=老文章详情回显/watch 周报 topics_7d 已删；DROP 前有全库备份）
-        for _dead_table in ("topics", "research_reports"):
+        # 2026-11-16 二次/三度裁决：老选题库 topics / idea 深研 research_reports /
+        # 结构模板库 script_templates 三张整表退役（读者已全删；DROP 前有全库备份）
+        for _dead_table in ("topics", "research_reports", "script_templates"):
             conn.execute(sqlalchemy.text(f"DROP TABLE IF EXISTS {_dead_table}"))
 
         fpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(failure_patterns)"))]

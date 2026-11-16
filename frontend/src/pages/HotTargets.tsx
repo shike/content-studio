@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ChevronDown, ChevronRight, Crosshair, Flame, RefreshCw, Sparkles, X,
+  ChevronDown, ChevronRight, Crosshair, Flame, RefreshCw, X,
 } from 'lucide-react'
 import { api, apiErrText } from '../api'
 import { Busy, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
@@ -69,7 +69,6 @@ const SOURCES: Record<string, { label: string; cls: string }> = {
   douyin_hot: { label: '抖音热点榜', cls: 'bg-red-100 text-red-700' },
   external: { label: '外站热榜', cls: 'bg-slate-100 text-slate-500' },
   self_story: { label: '一线交付', cls: 'bg-indigo-100 text-indigo-700' },
-  manual: { label: '手动投喂', cls: 'bg-violet-100 text-violet-700' },
 }
 
 const SPICE: Record<string, { label: string; cls: string }> = {
@@ -103,8 +102,6 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const [fExpanded, setFExpanded] = useState<number | null>(null)
   const [fForm, setFForm] = useState({ evidence_note: '', result_note: '' })
   const [form, setForm] = useState({ hook: '', spine: '', angle: ANGLES[0] })
-  const [seedOpen, setSeedOpen] = useState(false)
-  const [seedText, setSeedText] = useState('')
   const [fAddOpen, setFAddOpen] = useState(false)
   const [fNew, setFNew] = useState({ claim: '', target: '', evidence_note: '' })
   const [msg, setMsg] = useState('')
@@ -152,22 +149,6 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
       } catch { /* 下轮再取 */ }
     }, 3000)
   }
-
-  /** 手动投喂：一句话 → card_seed（锻主线→铸钩子→法官）→ 成 draft 卡或落 jail 带判词 */
-  const feed = () =>
-    guard(async () => {
-      const d = await api<{ job_id: number }>('/cards/seed', {
-        method: 'POST', body: JSON.stringify({ text: seedText.trim() }),
-      })
-      setSeedOpen(false)
-      setSeedText('')
-      setMsg('投喂处理中（锻主线→铸钩子→法官，约 2~4 分钟）…')
-      pollJob(d.job_id, 'card_seed', (st, err) => {
-        setFactoryBusy(false)
-        if (st === 'succeeded') setMsg('投喂成卡，已进待备稿 ✓')
-        else setMsg(`投喂被拦：${err}（弃卡池可查）`)
-      })
-    })
 
   /** 立即开一轮工场（五段全链），不等 06:00 */
   const runFactory = () =>
@@ -271,27 +252,8 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
             onClick={runFactory} title="立即开一轮三车间流水线（不等 06:00）">
             {factoryBusy ? <RefreshCw size={13} className="animate-spin" /> : <Flame size={13} />} 立即开工
           </button>
-          <button className="btn-accent btn-sm flex items-center gap-1" disabled={!!busy || seedOpen}
-            onClick={() => setSeedOpen(true)}>
-            <Sparkles size={13} /> 手动投喂
-          </button>
         </div>
       </div>
-
-      {/* 手动投喂行内表单 */}
-      {seedOpen && (
-        <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
-          <div className="text-[12px] text-violet-800">你看到想怼的事？一句话投进池子——系统锻主线、铸钩子、过法官，今天就能备稿。</div>
-          <textarea className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-[13px] outline-none focus:border-violet-400"
-            rows={2} maxLength={300} value={seedText}
-            placeholder="一句话说清这事+你的判断（例：某公司发布 XX，砸的是谁的饭碗）"
-            onChange={(e) => setSeedText(e.target.value)} />
-          <div className="mt-2 flex items-center gap-2">
-            <button className="btn-accent btn-sm shrink-0" disabled={!seedText.trim() || !!busy} onClick={feed}>投进池子</button>
-            <button className="btn-ghost btn-sm shrink-0" onClick={() => setSeedOpen(false)}>取消</button>
-          </div>
-        </div>
-      )}
 
       {/* chips */}
       <div className="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
@@ -418,7 +380,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
             <EmptyState icon={Crosshair} title="还没有已备稿的卡" desc="在「待备稿」里展开一张卡，改钩子、选打法、出稿。" />
           ) : (
             <EmptyState icon={Crosshair} title="今天还没有靶子卡"
-              desc="每天 06:00 工场自动产卡（宁缺毋滥，没得怼就是没得怼）；等不及点「立即开工」，或者手动投喂一条。" />
+              desc="每天 06:00 工场自动产卡（宁缺毋滥，没得怼就是没得怼）；等不及点「立即开工」。" />
           )}
         </div>
       ) : (

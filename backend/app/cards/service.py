@@ -13,7 +13,7 @@
 
 进料优先级：一手·抖音原生（监控号新视频评论 ≥pool_peer_min_comments 直产池子卡 /
 话题雷达飙升 / 抖音热点榜）＞二手·外站五路（pool_pick ≤pool_pick_max 条补位，
-需法官高分）＋自有转写（常青）＋手动投喂（card_seed 立即走主线→钩子→法官）。
+需法官高分）＋自有转写（常青）。
 对标圈素材禁当靶子（纪律不变）。每日 LLM 共 4 次。
 """
 from __future__ import annotations
@@ -366,69 +366,6 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
             "pools": len(pools), "meta": meta, "radar_notes": radar_notes}
 
 
-@register_executor("card_seed")
-async def card_seed(ctx: JobContext, payload: dict) -> dict:
-    """手动投喂（用户拍板）：一句话 → 池子卡立即走主线→钩子→法官（当日可备稿）。"""
-    from ..tenant_brand import audience_note_of, brand_of
-
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        raise RuntimeError("投喂内容不能为空")
-    tenant_id = payload.get("tenant_id") or 1
-    persona = brand_of(tenant_id)["persona"]
-    audience_note = audience_note_of(tenant_id)
-    pool_entry = {"source": "manual", "pool": _pool_dict(
-        domain="", heat=f"手动投喂｜{text[:100]}", level="待法官判定",
-        external={"src": "手动投喂", "title": text[:60]})}
-    ctx.set_progress(20, "锻主线")
-    forged = await _forge_with_retry([pool_entry], persona, audience_note)
-    f = forged.get(1)
-    gates: list = []
-    if not f:
-        raise RuntimeError("主线锻造空回卷（模型没给出 spine），请换个说法再投")
-    video_norms = [_norm(t) for t in _published_titles() if t]
-    if not _spine_gate(str(f.get("spine") or ""), str(f.get("role") or ""),
-                       "manual", gates, [], video_norms):
-        failed = next((g["detail"] for g in gates if not g["pass"]), "")
-        raise RuntimeError(f"主线未过闸：{failed}")
-    ctx.set_progress(60, "铸钩子")
-    cast = await _llm_cast([{"i": 1, "spine": str(f["spine"]), "role": str(f.get("role") or ""),
-                             "pool": pool_entry["pool"]}], persona, audience_note)
-    h = cast.get(1)
-    if not h or not _hook_gate(str(h.get("hook") or ""), gates, str(f["spine"])):
-        failed = next((g["detail"] for g in gates if not g["pass"] and g["gate"] in ("三秒字数线", "开头词根闸")), "")
-        raise RuntimeError(f"钩子未过闸：{failed or '空回卷'}")
-    ctx.set_progress(85, "法官终审")
-    item = {"i": 1, "source": "manual", "pool": pool_entry["pool"], "forged": f,
-            "spine": str(f["spine"]).strip(),
-            "hook": str(h["hook"]).strip(), "gates": gates}
-    judged = await _llm_judge([item])
-    j = judged.get(1) or {}
-    line = max(1, int(settings.judge_pass_line or 7))
-    dims = {k: max(0, min(10, int(j.get(k) or 0)))
-            for k in ("hook_pull", "spine_single", "traffic_potential")}
-    # 手动投喂免流量维（R1.4③ 拍板：投喂=用户自带流量判断，法官不替用户赌流量）：
-    # 只判钩子吸引与主线单一两维；traffic_potential 照记不判死。工场猎取的候选仍全维严判。
-    core = dims.get("hook_pull", 0) >= line and dims.get("spine_single", 0) >= line
-    ok = bool(j) and core
-    judge = {"hook_pull": dims.get("hook_pull", 0), "spine_single": dims.get("spine_single", 0),
-             "traffic_potential": dims.get("traffic_potential", 0),
-             "verdict": "pass" if ok else "kill",
-             "reason": (str(j.get("reason") or "法官无回卷（按废处理）")
-                        + ("" if ok else "｜手动投喂仅免流量维，钩子/主线维度不过线照样废"))[:80]}
-    with Session(engine) as s:
-        card = _merge_card(1, pool_entry, f, str(h["hook"]), gates)
-        card.judge = judge
-        card.status = "draft" if ok else "jail"
-        s.add(card)
-        s.commit()
-        card_id = card.id
-    if not ok:
-        raise RuntimeError(f"法官判废（{judge['reason']}）——卡已落弃卡池可查看")
-    ctx.set_progress(100, f"投喂成卡 #{card_id}（draft，可备稿）")
-    return {"card_id": card_id, "judge": judge}
-
-
 async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
                        angle: str = "", user=None) -> dict:
     """备稿：靶子卡（draft/approved）→ 脚本任务。钩子/主线可被用户改写后传入。"""
@@ -470,6 +407,6 @@ async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
                                "hook": hook_v[:60], "spine": spine_v[:40],
                                "angle": angle, "spice": spice_v,
                                "length": "short", "account_type": "persona",
-                               "use_style": True, "angles": [angle], "template_id": 0},
+                               "use_style": True, "angles": [angle]},
                               actor=actor)
     return {"script_id": script_id, "job_id": job.id, "card_id": card_id}

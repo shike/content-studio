@@ -3,34 +3,16 @@ from __future__ import annotations
 
 import json
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import BenchmarkVideo, FalsifyItem, Script, ScriptTemplate, TopicCard
+from ..models import BenchmarkVideo, FalsifyItem, Script, TopicCard
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
-DEFAULT_STRUCTURE = [
-    {"step": "hook", "requirement": "前3秒甩判断或喊话受众（反常识/身份定位/行动指令/提问，禁自我介绍与背景铺垫）"},
-    {"step": "pain", "requirement": "把痛点讲透，让观众对号入座"},
-    {"step": "solution", "requirement": "抛出你的解法或观点，先给结论"},
-    {"step": "proof", "requirement": "用具体案例、数字或交付物证明（真实、可验收）"},
-    {"step": "cta", "requirement": "给观众一个业务上的下一步动作或判断（不出现关注/评论/私信等转化话术）"},
-]
-DEFAULT_TEMPLATE_NAME = "默认口播结构"
-
-# 六打法（2026-10-09 流量诊断定版，与 script_generate.md 同表；前端 chips 与 API 校验共用）
 SIX_ANGLES = ["反常识判断", "身份定位喊话", "行动指令", "提问式", "对比打假", "数字落差"]
-
-
-def seed_default_template() -> None:
-    with Session(engine) as s:
-        if s.exec(select(ScriptTemplate)).first() is None:
-            s.add(ScriptTemplate(name=DEFAULT_TEMPLATE_NAME,
-                                 structure=DEFAULT_STRUCTURE))
-            s.commit()
 
 
 def _script_length_spec(length: str) -> str:
@@ -140,15 +122,6 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                 "spine": str(payload.get("spine") or card.spine)[:60],
                 "spice": payload.get("spice") or card.spice or "mid",
             }
-    template_id = int(payload.get("template_id") or 0)
-    template = None
-    if template_id:
-        with Session(engine) as s:
-            template = s.get(ScriptTemplate, template_id)
-        if template is None:
-            print(f"[script] 结构模板 #{template_id} 不存在，按不使用处理")
-    # 结构模板注入已生效（script_generate.md 有 {{STRUCTURE}} 占位符 + render() 强制校验；
-    # 2026-09-27 的「静默失效待拍板」问题已在恢复注入时闭环，此注释 2026-11-13 更新）。
 
     length = payload.get("length", "short")
     # 打法：指定候选（≤3 个，单版直出取最贴合的一个）或自动挑（2026-11-05 一版精品定版）
@@ -163,12 +136,6 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     use_style = bool(payload.get("use_style", True))
     from ..tenant_brand import brand_of
 
-    if template is not None:
-        structure_text = "本版按以下段落结构推进（每步的覆盖要求）：\n" + "\n".join(
-            f"- {st.get('step', '')}：{st.get('requirement', '')}"
-            for st in (template.structure or []) if st.get("step"))
-    else:
-        structure_text = "（未选用结构模板：按上方「口播结构」硬规则组织——判断开场、单判断推进、可转述判断收尾）"
     # 两类号策略（2026-10-28）：账号模式决定内容风格——人设号禁引导，获客号要求获客引导
     # 2026-11-13 修复：account_type 必须显式落值，不能 str(None)="None" 污染筛选
     _raw_at = payload.get("account_type") \
@@ -211,7 +178,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             discipline_mode = "常规备稿"
             card_discipline = "- 开场按上方「口播结构」硬规则（前 3 秒直接甩判断或喊话受众）；主切角以 angle 字段为准"
         prompt = render("script_generate", LENGTH=length_spec,
-                        ANGLES_SPEC=angles_spec, STRUCTURE=structure_text,
+                        ANGLES_SPEC=angles_spec,
                         PERSONA=brand_of(1)["persona"],
                         ACCOUNT_MODE=account_mode,
                         SCAFFOLD=_scaffold(
@@ -239,11 +206,6 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         script.status = "generated"
         script.account_type = account_type
         s.add(script)
-        if template is not None:  # usage_count 只记真实注入（此前占位符缺失静默失效也在计数——假账已修）
-            tpl = s.get(ScriptTemplate, template.id)
-            if tpl:
-                tpl.usage_count += 1
-                s.add(tpl)
         s.commit()
 
     ctx.set_progress(100, f"完成，产出 {len(versions)} 版")

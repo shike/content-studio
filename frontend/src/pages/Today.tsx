@@ -26,7 +26,6 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   const [todos, setTodos] = useState({ failed: 0, active: 0 })
   const [cands, setCands] = useState({ persona: 0, leadgen: 0 })
   const [targets, setTargets] = useState<TargetCard[]>([])
-  const [quick, setQuick] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [pipes, setPipes] = useState<SchedRow[]>([])
@@ -74,18 +73,6 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
   }, [])
 
   useEffect(() => { reload() }, [reload])
-
-  const quickAdd = async () => {
-    if (!quick.trim()) return
-    setBusy('投喂已排队（锻主线→铸钩子→法官，几分钟）…')
-    try {
-      await api('/cards/seed', { method: 'POST', body: JSON.stringify({ text: quick.trim() }) })
-      setQuick('')
-      setBusy('投喂已排队，靶子卡稍后进「选题」页')
-    } catch (e) {
-      setError(String(e)); setBusy('')
-    }
-  }
 
   const trending = () => {
     setBusy('选题工场运行中（五段流水线：信号采集→池子→主线→钩子→法官）…')
@@ -145,17 +132,6 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
           <div className="flex items-center justify-between">
             <h2 className="text-[15px] font-semibold text-slate-900">待备稿靶子卡</h2>
             <button onClick={() => onNavigate('p_topics')} className="text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">去选题 →</button>
-          </div>
-
-          <div className="mt-3 flex gap-2">
-            <input
-              value={quick}
-              onChange={(e) => setQuick(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') quickAdd() }}
-              placeholder="一句话投喂选题（锻完进「选题」页待备稿）…"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm outline-none placeholder:text-slate-300 focus:border-slate-400"
-            />
-            <button onClick={quickAdd} disabled={!quick.trim()} className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">投喂</button>
           </div>
 
           <div className="mt-3">

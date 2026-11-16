@@ -116,7 +116,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `topic_cards` | batch_date, source(douyin_peer/radar/douyin_hot/external/self_story/manual),
+| `topic_cards` | batch_date, source(douyin_peer/radar/douyin_hot/external/self_story),
   pool(JSON 四证), spine, hook, spice, takeaways(JSON 评论要点≤3条=主线原料留痕), judge(JSON 三维+verdict+reason), gates(JSON 程序闸记录),
   status(draft/approved/discarded/jail), superseded_by, script_id | 人设号靶子卡（选题工场，R1.4；
   jail=法官弃卡 7 天可捞） |
@@ -130,7 +130,6 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `video_weekly_reports` | tenant_id, week_start, report(JSON) | 视频表现周报（质量分=收藏率×3+转发率×3+点赞率×1.5+评论率×2+播放规模封顶3；LLM 解读按周缓存）（R9.8） |
 | `style_profiles` | tenant_id, account_name, version, digest, traits(JSON), exemplars(JSON), based_on | 风格画像版本快照，保留历史（R9.3） |
 | `scripts` | card_id?(FK 靶子卡备稿), falsify_item_id?(FK 实测稿备稿), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
-| `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
 | `articles` | script_id?(FK), title, note(素材备注), md, html, kb_sources(JSON ima 素材来源), status(pending/generating/failed/draft/edited/rendered/published) | 公众号文章（failed 可重试） |
 | `content_items` | media_id(索引防重), kb_id/folder, title, source_author, quality_score, why_good, adapt_angle, best_quotes(JSON), category, priority, status(pending/running/done/published/dismissed/low), article_id | 内容清单=知识库挖出的高质量源文（挖掘器≥线入清单，改编器取项成文；低分落 low 防回卷重评）（R5.6b 源文改编流） |
 | `daily_ledger` | day(UTC), phase(mine/adapt), produced, reason, ok | 产线当日账（防「成功但空转」；anomaly=ok 但无产出无原因，按故障处理） |
@@ -145,7 +144,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light 两道), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 
-**生产库遗留（2026-11-16 全部清算完毕）**：已删模型的孤儿旧表 `kb_topics`/`kb_documents`/`harvest_profiles`/`publish_records`/`media_assets`/`dismissals` + 手工备份表 `topics_backup_selfstory_coldrice_20261113` 已于 2026-11-16 生产库 DROP（全库备份 `data/backups/pre-orphan-drop-20261116.sql.gz`）；二次裁决同日 DROP 老选题库 `topics`（517 行）与 idea 深研 `research_reports`（11 行）死档案（备份含）；更早已 DROP：`llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`/`avatar_configs`/`avatar_videos`/`jianying_templates`/`video_projects`。现存 22 表与 22 模型一一对应、零孤儿（topics/research_reports 两表已整表退役）；旧列 `tenants.credits,status`/`topics.sharpness`/`articles.title_alts,kb_doc_ids,topic_id`/`watch_candidates.leadgen_comments,recent_same`/`research_reports.tokens_*`/`radar_topics.recent,new_since_last`/`users.must_change_password`/`failure_patterns.last_type,sample_job_id`/`scripts.topic_id` 等**已于 2026-11-16 经启动重建迁移全部清除（生产实测），库与模型列集合完全一致；更早的未登记遗留列不逐一维护，schema 漂移闸发版时兜底拦截**。
+**生产库遗留（2026-11-16 全部清算完毕）**：已删模型的孤儿旧表 `kb_topics`/`kb_documents`/`harvest_profiles`/`publish_records`/`media_assets`/`dismissals` + 手工备份表 `topics_backup_selfstory_coldrice_20261113` 已于 2026-11-16 生产库 DROP（全库备份 `data/backups/pre-orphan-drop-20261116.sql.gz`）；二次裁决同日 DROP 老选题库 `topics`（517 行）与 idea 深研 `research_reports`（11 行）死档案（备份含）；2026-11-16 三度裁决再 DROP `script_templates`（结构模板库退役，3 行）；更早已 DROP：`llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`/`avatar_configs`/`avatar_videos`/`jianying_templates`/`video_projects`。现存 21 表与 21 模型一一对应、零孤儿（topics/research_reports/script_templates 三表已整表退役）；旧列 `tenants.credits,status`/`topics.sharpness`/`articles.title_alts,kb_doc_ids,topic_id`/`watch_candidates.leadgen_comments,recent_same`/`research_reports.tokens_*`/`radar_topics.recent,new_since_last`/`users.must_change_password`/`failure_patterns.last_type,sample_job_id`/`scripts.topic_id` 等**已于 2026-11-16 经启动重建迁移全部清除（生产实测），库与模型列集合完全一致；更早的未登记遗留列不逐一维护，schema 漂移闸发版时兜底拦截**。
 
 **内容资产状态机**（串联各表的状态流转）：
 
@@ -228,10 +227,10 @@ article:    pending（直出链建稿）──► generating ──► draft ─
   （默认 50，设置页可调）** 过线→池子卡（douyin_evidence=互动实数）；雷达飙升→池子卡
   （spike 速度）；抖音榜→池子卡。二手精选（pool_pick 1 次 LLM ≤`pool_pick_max`(8) 条，
   产 domain_evidence）。**池子闸（程序）**：域内证据非空（词根表兜底）/coverage≠job_narrow/
-  一手免检热度、二手挂 secondary。对标圈素材禁当靶子（纪律不变）。
+  一手免检热度、二手挂 secondary。对标圈素材禁当靶子（纪律不变）。手动投喂线 2026-11-16 退役删除。
 - **车间二·主线锻造**（spine_forge 1 次 LLM，max_tokens 4000）：输入=由头/域内证据＋
   **拆解要点＋高赞评论原文**（douyin_evidence.top ≤12 条带赞数；无评论的池子只有 60 字截断
-  →素材薄可跳过，manual 投喂必须锻出）。每池子卡产 {spine, takeaways, role, spice}：
+  →素材薄可跳过）。每池子卡产 {spine, takeaways, role, spice}：
   先从评论原文抽**评论要点**（大众最强烈的关注点/痛感，≤3 条留痕卡上可检验，提炼不是编造）→
   主线从要点长出来（**共鸣**=替大众说狠 / **错位**=顶大众读法说；检验=必须是评论区里没人
   说出来的那句话，复述评论原文=废）。纪律=单判断/主语=受众角色（公司事件只当论据）/可争议。
@@ -245,7 +244,6 @@ article:    pending（直出链建稿）──► generating ──► draft ─
 - **落卡**：pass 按总分排序取前 `daily_card_limit`(默认 **20**) 张 draft；kill 落 jail
   （`jail_window_days`=7 可捞）；批次替代（当日无下游旧 draft 让位，approved 不动）；空过合法。
   每日 LLM 共 5 次（pick/forge/cast/judge/hunt——尾段自动猎取实测候选 ≤3 条：拆解库分析+当日热源里挑「一人可实测验证」的主张，claim 归一化去重 ≥0.55 拦；纯观点争议不猎，归靶子卡）。
-- **手动投喂**：`POST /api/cards/seed {text, url?}` → 直接成池子卡（coverage/域内由法官补判）。
 
 **API**：
 - `GET /api/cards?status=&date=` → `{items, counts{draft,approved,jail}}`（行=靶子卡四面）
@@ -253,7 +251,6 @@ article:    pending（直出链建稿）──► generating ──► draft ─
   （备稿：用户可改钩子/主线后交脚本；卡转 approved 回填 script_id）
 - `POST /api/cards/{id}/discard` → 不做
 - `GET /api/cards/jail` / `POST /api/cards/{id}/revive` → 弃卡池查看/捞回 draft
-- `POST /api/cards/seed` `{text, url?}` → 手动投池子
 
 **备稿→脚本**：`POST /api/scripts/generate` 支持 `{card_id, hook, spine, angle}`（scripts 落
 card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口语化，禁话题引入/悬念替换）·
@@ -338,8 +335,6 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - `GET /api/scripts?limit=` / `GET /api/scripts/{id}`
 - `POST /api/scripts/{id}/polish` → 202 `{job_id}`（批判打磨，≤2 轮）
 - `POST /api/scripts/{id}/finalize` → 终稿 + `teleprompter_text` + `storyboard` + `title_candidates`
-- `GET/POST /api/scripts/templates`（结构模板库 CRUD）
-- `DELETE /api/scripts/templates/{id}`（护栏：至少保留一个模板，删最后一个 400）
 - `DELETE /api/scripts/{id}` → 解绑文章引用不删下游（topics 回退分支已退役删除）
 
 ### 公众号
@@ -440,7 +435,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
   - 自动重试放行（`_reenqueue`）与人工重试同样先做实体复活，failed 状态不跨重试周期。
   - 执行器可注册 `on_fail(payload, exc)` 回调（`register_executor(type, on_fail=...)`），失败时 runner 统一调用做实体状态回退；实体型执行器（script_generate/polish/article_generate）的实体回退统一由 on_fail 承担，执行器体内不带 try/except 回退。
 - **归档制**：终态任务（failed/superseded/succeeded）超过 7 天由 reaper 归档（`archived=1`）而非物理删除；任务列表/counts/clear/单条删除均只作用于未归档行，错误指纹库的统计证据永不丢失。`POST /jobs/clear` 返回 `{archived: N}`。
-- **执行器注册表**（24 类，2026-11-14 idea_research 随老选题库退役删除；2026-11-15 补登 watch_backfill/topic_backfill 两个存量回填执行器）：`article_generate / article_hotspots（站外热点报题建稿）/ article_style_extract / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；card_id 靶子卡备稿走三段纪律：hook 逐字开场/spine 不出口/单判断推进；ore_id 获客矿建稿 2026-11-14：求学需求评论=痛点输入，强制 leadgen 引导）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）/ watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ watch_backfill（监控号存量回填，追溯窗+拆解闸，契约见 §6 监控节）/ topic_backfill（话题精选集存量回填，dedup=1:topic_backfill，契约见 §6 雷达节）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸） / article_deepread（深读写，调度不注册，保留回滚）/ card_daily（选题工场五段：信号采集→池子→主线→钩子→总法官）/ card_seed（手动投喂：单池子即走主线→钩子→法官）/ falsify_hunt（实测候选猎取，挂 card_daily 尾段）`。
+- **执行器注册表**（21 类，2026-11-14 idea_research 随老选题库退役删除；2026-11-15 补登 watch_backfill/topic_backfill；2026-11-16 删 article_deepread（深读线整条退役）/falsify_hunt（注册面死，猎取函数挂 card_daily 直调）/card_seed（手动投喂退役））：`article_generate / article_hotspots（站外热点报题建稿）/ article_style_extract / benchmark_analyze / script_generate（一版精品直出，含自动打磨一轮；card_id 靶子卡备稿走三段纪律：hook 逐字开场/spine 不出口/单判断推进；ore_id 获客矿建稿 2026-11-14：求学需求评论=痛点输入，强制 leadgen 引导）/ script_polish / script_finalize（定稿+标题候选）/ self_scan / self_analyze / self_profile_update / creator_data_scan / video_weekly_report / hl_search_matrix（同城组局号搜索矩阵，硬超时 3600）/ watch_scan（payload.account_id 单号扫描，全量仅 competitor）/ watch_resolve（自动提取口令全文中的链接）/ watch_discover（关键词发现对标账号，light 并发道）/ watch_backfill（监控号存量回填）/ topic_backfill（话题精选集存量回填，dedup=1:topic_backfill）/ article_kb_miner（挖掘器，源文评估入内容清单）/ article_adapt（改编器，原创度≤30%+去AI味机检+事实对源硬闸）`。
 - **热点雷达（话题查看域）**：`radar_topics` 表（ch_id 全局唯一/seen_ids 防重/recent 最近新视频）。每日 6 点随 `card_line_daily` 车间零巡检话题新视频，低粉高赞同口径自动进拆解（R3.7）；
   雷达飙升（新增视频速度）兼作选题工场一手池子信号（R1.4）；`/api/radar` 仅保留查看域 4 端点（契约见 §6 雷达节）；独立话题雷达面与 topic_radar 任务并入每日热点。
 - **内容合规守卫**：`article_section` 逐节写作带两道程序化守卫——①截断守卫（结尾无句读重写一次）②合规守卫（`BANNED_PATTERNS` 违禁词命中定向重写一次，表源=banned_words.json 单一数据源）；均只在命中时多花一次 LLM 调用。
@@ -459,7 +454,6 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
   热源抓取复用 topics/hotlist.py，雷达巡检复用 radar/service.py，监控号新视频复用 watch 采集链。
 
 ### 9.2 脚本工场
-- `script_templates.structure` 示例：`[{step:"hook",requirement:"前3秒点名受众+痛点"},{step:"pain"},{step:"proof"},{step:"method"},{step:"cta"}]`；模板来自人工整理 + 拆解沉淀（`source_benchmark_id` 溯源）。
 - 终稿三产物：提词器文本（停顿"/"、重音**加粗**标记）、分镜提示（B-roll 槽位 + 字幕卡点位）、标题候选（抖音/视频号/话题标签）。
 
 

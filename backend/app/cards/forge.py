@@ -141,8 +141,6 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
                            "唯一可用角度=对「大家都在求学」这个现象本身立立场"
                            "（示范：「开口就问考证的，我不收徒」——筛选立场）；"
                            "禁止把求资料内容当观点素材；锻不出立场判词就跳过该池")
-        elif p["source"] == "manual":
-            row["备注"] = "手动投喂：用户已拍板的题，必须锻出主线，不许跳过"
         h = (spines_hint or {}).get(i)
         if h:  # 修复循环：上一版原句 + 死因，逼模型砍到位
             row["上一版"] = h.get("spine") or ""

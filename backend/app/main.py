@@ -77,7 +77,6 @@ async def lifespan(_app: FastAPI):
     from .tenant_brand import seed_founder_brand as _seed_brand
 
     _seed_brand()  # 创始租户（id=1）一次性写入示例品牌全套（幂等；brand 已有内容则跳过）
-    _script_service.seed_default_template()
     runner.start()
     await recover_interrupted_jobs()
 

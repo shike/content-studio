@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import BenchmarkVideo, ScriptTemplate, User
+from ..models import BenchmarkVideo, User
 from ..settings import settings
 from ._listing import require_douyin_url
 
@@ -214,17 +214,12 @@ def delete_benchmark(benchmark_id: int) -> dict:
     """删除拆解样本：连带删除其产出的待审选题候选，解绑结构模板引用，删除已下载的媒体文件。"""
     import os
     from ..db import engine as _eng
-    from sqlmodel import Session as _S, select as _sel
+    from sqlmodel import Session as _S
     with _S(_eng) as s:
         b = s.get(BenchmarkVideo, benchmark_id)
         if b is None:
             from fastapi import HTTPException
             raise HTTPException(404, detail="benchmark not found")
-        # 解绑结构模板
-        for tpl in s.exec(_sel(ScriptTemplate).where(
-                ScriptTemplate.source_benchmark_id == benchmark_id)).all():
-            tpl.source_benchmark_id = None
-            s.add(tpl)
         media_path = b.media_path
         s.delete(b)
         s.commit()

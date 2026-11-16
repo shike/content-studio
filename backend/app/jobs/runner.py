@@ -100,7 +100,6 @@ _POLICIES: dict[str, RetryPolicy] = {
     "article_style_extract": RetryPolicy(task_timeout=900),
     "topic_backfill": RetryPolicy(task_timeout=3600),  # 话题回填：话题数×精选集逐条探测（每条 ~10s）
     "card_daily": RetryPolicy(task_timeout=1800),   # 选题工场：雷达巡检+4 次 LLM（pick/forge/cast/judge）
-    "card_seed": RetryPolicy(task_timeout=900),     # 手动投喂：单池子走主线→钩子→法官（3 次 LLM）
     "hl_search_matrix": RetryPolicy(task_timeout=3600),    # 同城搜索矩阵：预算 12 组搜索+取证（2026-11-13 补硬超时）
     "creator_data_scan": RetryPolicy(task_timeout=300),
     "video_weekly_report": RetryPolicy(task_timeout=600),

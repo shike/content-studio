@@ -214,15 +214,6 @@ class Script(TenantScoped, TimestampMixin, table=True):
     account_type: str = Field(default="persona")  # persona | leadgen（两类号：内容看板过滤/风格分叉）
 
 
-class ScriptTemplate(TimestampMixin, table=True):
-    __tablename__ = "script_templates"
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(index=True)
-    structure: list = Field(default_factory=list, sa_column=Column(JSON))
-    source_benchmark_id: Optional[int] = Field(
-        default=None, foreign_key="benchmark_videos.id"
-    )
-    usage_count: int = 0
 
 
 

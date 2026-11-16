@@ -1,5 +1,4 @@
-"""选题工场 API（人设号靶子卡，PRD R1.4）：列表/备稿/不做/弃卡池/手动投喂。"""
-import hashlib
+"""选题工场 API（人设号靶子卡，PRD R1.4）：列表/备稿/不做/弃卡池。"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -8,7 +7,6 @@ from sqlmodel import Session, func, select
 from ..auth import require_user
 from ..cards import service as card_service
 from ..db import engine
-from ..jobs.runner import runner
 from ..models import TopicCard, User
 from ._listing import paged_list_response
 
@@ -89,18 +87,5 @@ def revive(card_id: int, user: User = Depends(require_user)) -> dict:
         return {"id": c.id, "status": c.status}
 
 
-class SeedIn(BaseModel):
-    text: str
 
 
-@router.post("/seed", status_code=202)
-async def seed(body: SeedIn, user: User = Depends(require_user)) -> dict:
-    """手动投喂：一句话（可带链接）→ 池子卡立即走主线→钩子→法官（card_seed 任务）。"""
-    text = body.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="投喂内容不能为空")
-    dedup = hashlib.md5(text.encode()).hexdigest()[:12]
-    job = await runner.submit("card_seed", {"text": text[:300]},
-                              dedup_key=f"1:cardseed:{dedup}",
-                              actor=(user.tenant_id, user.id, user.role))
-    return {"job_id": job.id}

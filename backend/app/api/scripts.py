@@ -6,7 +6,7 @@ from sqlmodel import Session, func, select
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Article, Script, ScriptTemplate, User
+from ..models import Article, Script, User
 from ..scripts import service as script_service
 from ._listing import paged_list_response
 
@@ -21,7 +21,6 @@ class GenerateIn(BaseModel):
     use_style: bool = True  # 贴合我的风格（R9.4）
     length: str = "short"  # short=240~320字（50~70s 黄金档）| long=600~900字（PRD R2.1 两档，2026-10-09 定档）
     angles: list[str] = []  # 主打打法候选（六打法子集 ≤3 个，取最贴合的一个；空=自动挑）
-    template_id: int = 0  # 结构模板（0=不使用，走默认流程）
     account_type: str = ""  # persona(人设号) | leadgen(获客号)；空=读选题自带
 
 
@@ -33,9 +32,6 @@ class PolishIn(BaseModel):
     use_style: bool = True
 
 
-class TemplateIn(BaseModel):
-    name: str
-    structure: list[dict]
 
 
 @router.post("/generate", status_code=202)
@@ -79,7 +75,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
         job = await runner.submit("script_generate",
                                   {"script_id": script_id, "ore_id": body.ore_id,
                                    "length": body.length, "use_style": body.use_style,
-                                   "angles": angles, "template_id": body.template_id},
+                                   "angles": angles},
                                   dedup_key=f"ore:{body.ore_id}", actor=(user.tenant_id, user.id, user.role))
         return {"script_id": script_id, "job_id": job.id}
     if not (body.card_id or body.ore_id):
@@ -89,16 +85,11 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
     bad = [a for a in angles if a not in known]
     if bad:
         raise HTTPException(status_code=400, detail=f"未知打法：{'、'.join(bad)}")
-    if body.template_id:
-        with Session(engine) as s:
-            if s.get(ScriptTemplate, body.template_id) is None:
-                raise HTTPException(status_code=404, detail="结构模板不存在")
     # use_style 此前在此处丢失（开关一直是坏的：关了也注入风格画像）——2026-10-10 修
     job = await runner.submit("script_generate",
                               {"script_id": script_id, "length": body.length,
                                "account_type": body.account_type,
-                               "use_style": body.use_style, "angles": angles,
-                               "template_id": body.template_id})
+                               "use_style": body.use_style, "angles": angles})
     return {"script_id": script_id, "job_id": job.id}
 
 
@@ -117,24 +108,6 @@ def list_scripts(status: str = "", limit: int = 50, offset: int = 0,
             cq = cq.where(Script.account_type == account_type)  # type: ignore[attr-defined]
         return paged_list_response(s, q, offset=offset, limit=limit, counts_q=cq)
 
-
-@router.get("/templates")
-def list_templates() -> dict:
-    with Session(engine) as s:
-        rows = s.exec(select(ScriptTemplate).order_by(ScriptTemplate.id)).all()
-        return {"items": [r.model_dump() for r in rows]}
-
-
-@router.post("/templates", status_code=201)
-def create_template(body: TemplateIn) -> dict:
-    if not body.name.strip():
-        raise HTTPException(status_code=400, detail="模板名不能为空")
-    with Session(engine) as s:
-        tpl = ScriptTemplate(name=body.name.strip(), structure=body.structure)
-        s.add(tpl)
-        s.commit()
-        s.refresh(tpl)
-        return tpl.model_dump()
 
 
 @router.get("/{script_id}")
@@ -178,19 +151,6 @@ async def finalize(script_id: int, body: FinalizeIn | None = None,
                               dedup_key=f"finalize:{script_id}")
     return {"job_id": job.id}
 
-
-@router.delete("/templates/{template_id}")
-def delete_template(template_id: int) -> dict:
-    with Session(engine) as s:
-        tpl = s.get(ScriptTemplate, template_id)
-        if tpl is None:
-            raise HTTPException(404, detail="template not found")
-        remaining = s.exec(select(ScriptTemplate)).all()
-        if len(remaining) <= 1:
-            raise HTTPException(400, detail="至少保留一个结构模板")
-        s.delete(tpl)
-        s.commit()
-    return {"ok": True}
 
 
 @router.delete("/{script_id}")
