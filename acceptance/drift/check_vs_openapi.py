@@ -37,6 +37,9 @@ NEGATIVE_EXACT = {
     "/api/credits": "run_p7:119-131 负断言（积分体系拆除，a78e200）",
     "/api/llm/calls": "run_p7:119-131 负断言（用量台账不在系统范围，PRD R8.3/X4）",
     "/api/llm/usage": "run_p7:119-131 负断言（同上）",
+    "/api/radar": "run_p8:186 负断言——独立雷达端点已退役，打 404 即绿（选题工场替代，PRD R1.8）",
+    "/api/radar/mine": "run_p8:188 负断言——雷达挖矿端点已退役，打 404 即绿",
+    "/api/articles/kb-topics": "run_p8:348-351 负断言——kb 选题池整池下线（2026-11-13 用户裁决）：GET 非 int 参数断 422、POST 断 404",
 }
 
 
