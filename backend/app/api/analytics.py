@@ -36,6 +36,7 @@ def _since_dt(days: int) -> datetime:
 @router.get("/overview")
 def overview(days: int = 30, user: User = Depends(require_user)) -> dict:
     """总览：账号经营合计（近 N 天）+ 各渠道内容产出/发布数 + 数据新鲜度。"""
+    since = _days_param(days)  # metrics.date 是 varchar 日期，字符串比较正确
     with Session(engine) as s:
         snaps = s.exec(
             select(MetricsSnapshot).where(  # type: ignore[attr-defined]
