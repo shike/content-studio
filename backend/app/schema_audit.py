@@ -25,6 +25,8 @@ _LEGACY_TABLES = {
     "benchmark_videos", "watch_candidates", "radar_topics", "content_items", "falsify_items",
     # P3 内容域
     "topic_cards", "scripts", "articles", "style_profiles",
+    # P4 数据域
+    "watch_accounts", "account_metrics_daily", "video_weekly_reports", "daily_ledger",
 }
 
 # 类型只比「家族」：避免 VARCHAR(200) vs VARCHAR、identity INTEGER vs INTEGER 之类误报

@@ -196,7 +196,7 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         if not word or f"douyin_hot:{word}" in seen_refs or not _kw_hit(word + " " + desc):
             continue
         pools.append({"source": "douyin_hot", "pool": _pool_dict(
-            domain=f"抖音热点榜在榜，命中域内词根",
+            domain="抖音热点榜在榜，命中域内词根",
             heat=f"抖音热点榜第 {rank} 位：{word[:30]}",
             level="高", douyin={"kind": "douyin_hot", "ref": word[:40], "rank": rank})})
         meta["douyin_hot"] += 1

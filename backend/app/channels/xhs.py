@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 from sqlmodel import Session
 
@@ -19,7 +17,6 @@ from ..materials.service import record_usage
 from ..models import Content
 from ..prompts import render
 from ..settings import settings
-from .engine import channel_id_of, note_out
 
 
 def render_cover(title_big: str, tenant_id: int, out_name: str) -> str:

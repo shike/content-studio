@@ -1,7 +1,7 @@
 # 跃迁内容工作室 · Agent 工作规约
 
 单管理员流水线（登录门禁，PRD R11/TDD §15）：选题 → 口播脚本（一版精品直出）→ 公众号长文。发布永远人工；数字人成片/发布台/多租户不在系统范围。
-架构：FastAPI + SQLModel + PostgreSQL 16（`backend/app/`，21 模型；迁移期生产库另存 9 张只读旧表——素材面 5 + 内容面 4，P5 收口 DROP）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。schema 变更唯一通道=Alembic（`backend/.venv/bin/alembic -c backend/alembic.ini upgrade head`，sync-server 发版自动跑）。
+架构：FastAPI + SQLModel + PostgreSQL 16（`backend/app/`，21 模型；迁移期生产库另存 13 张只读旧表——素材面 5 + 内容面 4 + 数据面 4，P5 收口 DROP）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。schema 变更唯一通道=Alembic（`backend/.venv/bin/alembic -c backend/alembic.ini upgrade head`，sync-server 发版自动跑）。
 两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约（§13：冒烟纪律/隔离实例/审计对账）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根）
@@ -27,7 +27,7 @@
 ## 前端规矩
 
 - 页面六段式：页头带（主操作 ≤2）→回显带（全站此位置）→计数 chips→紧凑行列表+点行展开→空态。UI 操作必有回显，降级必须可见（含原因）；禁 `prompt()`/`alert()`。审阅队列一律手动进入（交互契约=PRD R1.5）；共享组件 QueueBar/ChipRow/relTime 在 `components.tsx`。
-- 侧重版导航（重构 P3 2026-11-16 定版：四条内容线齐装）：侧栏顶层 8 项=今天/人设号（主线：选题/视频稿/经营）/获客（获客选题/视频稿）/公众号（工场/清单/画像）/**小红书（选题/笔记稿/封面模板，人工发布）**/素材库（收件箱/全部素材/采集源/账号候选）/任务/设置，目的地由页内 tab 承载；旧 16 叶+监控 4 键经 App.tsx NAVMAP 全量兼容路由到素材库（内嵌 onNavigate 不断链）。容器组件在 `pages/Stages.tsx`。**业务口径唯一权威在 PRD（R1/R2-R5/R6），本文件不复述。**
+- 侧重版导航（重构 P4 2026-11-16 定版：六模块齐装）：侧栏顶层 9 项=今天/人设号（主线：选题/视频稿/经营）/获客/公众号/**小红书（选题/笔记稿/封面模板，人工发布）**/素材库（收件箱/全部素材/采集源/账号候选）/**数据（总览/渠道对比/账号趋势/作品表现/周报）**/任务/设置，目的地由页内 tab 承载；旧 16 叶+监控 4 键经 App.tsx NAVMAP 全量兼容路由到素材库（内嵌 onNavigate 不断链）。容器组件在 `pages/Stages.tsx`。**业务口径唯一权威在 PRD（R1/R2-R5/R6），本文件不复述。**
 - 徽章（counts.ts 同源，60s 刷新）落线页自身：人设号=待备稿靶子+待定稿脚本/获客=获客矿数+待定稿脚本/公众号=待决策稿+待改编源文/**素材库=收件箱待定夺+账号候选合计**/任务=在途（红警只在终态失败亮）/今天=待备稿靶子数；过程性数字不上菜单。
 - 主题 moxt（墨绿×白纸）：**换色只改 index.css 的 `@theme`，别动组件类名**；改页面前先给交互方案。icon=public/icon.svg，数字用 `.num-serif`。
 

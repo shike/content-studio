@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import AccountMetricsDaily, SelfVideo
+from ..models import MetricsSnapshot, SelfVideo
 
 
 def _week_window(today: date | None = None) -> tuple[date, date]:
@@ -90,7 +90,7 @@ def _card_matches(tenant_id: int) -> tuple[list[dict], int]:
             unmatched += 1
             continue
         out.append({"hook": c.hook[:30], "spine": c.spine[:30],
-                    "coverage": (c.pool or {}).get("coverage") or "",
+                    "coverage": ((c.payload or {}).get("pool") or {}).get("coverage") or "",
                     "published": best["published"], "video": best["title"][:30],
                     "play": best["play"], "comment": best["comment"], "score": best["score"]})
     out.sort(key=lambda x: -x["score"])
@@ -105,10 +105,18 @@ def _collect(tenant_id: int, week_start: date, week_end: date) -> dict:
             SelfVideo.tenant_id == tenant_id,  # type: ignore[attr-defined]
             SelfVideo.published_at >= week_s,  # type: ignore[attr-defined]
             SelfVideo.published_at <= week_e)).all()  # type: ignore[attr-defined]
-        daily = s.exec(select(AccountMetricsDaily).where(
-            AccountMetricsDaily.tenant_id == tenant_id,  # type: ignore[attr-defined]
-            AccountMetricsDaily.date >= week_start.isoformat(),  # type: ignore[attr-defined]
-            AccountMetricsDaily.date <= week_end.isoformat())).all()  # type: ignore[attr-defined]
+        daily_rows = s.exec(select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+            MetricsSnapshot.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_type == "account",  # type: ignore[attr-defined]
+            MetricsSnapshot.date >= week_start.isoformat(),  # type: ignore[attr-defined]
+            MetricsSnapshot.date <= week_end.isoformat())).all()  # type: ignore[attr-defined]
+        daily = []
+        for d in daily_rows:
+            m = d.metrics or {}
+            daily.append(type("D", (), {"date": d.date,
+                                        "play": int(m.get("play") or 0),
+                                        "new_fans": int(m.get("new_fans") or 0),
+                                        "profile_views": int(m.get("profile_views") or 0)}))
     videos = []
     for v in vids:
         st = v.stats or {}
@@ -159,27 +167,29 @@ async def _interpret(facts: dict) -> str:
 
 async def build_weekly_report(tenant_id: int, force: bool = False,
                               today: date | None = None) -> dict:
-    """生成（或读取缓存的）上周周报。返回 {week, facts, summary}。"""
-    from ..models import WeeklyReport
+    """生成（或读取缓存的）上周周报。缓存=analytics_reports(kind=weekly)。返回 {week, facts, summary}。"""
+    from ..models import AnalyticsReport
 
     ws, we = _week_window(today)
     week_key = ws.isoformat()
     with Session(engine) as s:
-        row = s.exec(select(WeeklyReport).where(
-            WeeklyReport.tenant_id == tenant_id,  # type: ignore[attr-defined]
-            WeeklyReport.week_start == week_key)).first()  # type: ignore[attr-defined]
+        row = s.exec(select(AnalyticsReport).where(
+            AnalyticsReport.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            AnalyticsReport.kind == "weekly",  # type: ignore[attr-defined]
+            AnalyticsReport.period_start == week_key)).first()  # type: ignore[attr-defined]
         if row is not None and not force:
-            return {"week": row.week_start, **(row.report or {})}
+            return {"week": row.period_start, **(row.payload or {})}
     facts = _collect(tenant_id, ws, we)
     facts["cards"], facts["cards_unmatched"] = _card_matches(tenant_id)
     facts["summary"] = await _interpret(facts)
     with Session(engine) as s:
-        row = s.exec(select(WeeklyReport).where(
-            WeeklyReport.tenant_id == tenant_id,  # type: ignore[attr-defined]
-            WeeklyReport.week_start == week_key)).first()  # type: ignore[attr-defined]
+        row = s.exec(select(AnalyticsReport).where(
+            AnalyticsReport.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            AnalyticsReport.kind == "weekly",  # type: ignore[attr-defined]
+            AnalyticsReport.period_start == week_key)).first()  # type: ignore[attr-defined]
         if row is None:
-            row = WeeklyReport(tenant_id=tenant_id, week_start=week_key)
-        row.report = facts
+            row = AnalyticsReport(tenant_id=tenant_id, kind="weekly", period_start=week_key)
+        row.payload = facts
         s.add(row)
         s.commit()
     return {"week": week_key, **facts}
@@ -187,13 +197,14 @@ async def build_weekly_report(tenant_id: int, force: bool = False,
 
 def cached_weekly_report(tenant_id: int) -> dict | None:
     """API 只读：取已生成的最新周报（不触发 LLM）。"""
-    from ..models import WeeklyReport
+    from ..models import AnalyticsReport
 
     with Session(engine) as s:
-        row = s.exec(select(WeeklyReport).where(
-            WeeklyReport.tenant_id == tenant_id))  # type: ignore[attr-defined]
-        rows = sorted(row, key=lambda r: r.week_start, reverse=True)
+        rows = s.exec(select(AnalyticsReport).where(  # type: ignore[attr-defined]
+            AnalyticsReport.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            AnalyticsReport.kind == "weekly")).all()  # type: ignore[attr-defined]
+        rows = sorted(rows, key=lambda r: r.period_start, reverse=True)
         if not rows:
             return None
         r = rows[0]
-        return {"week": r.week_start, **(r.report or {})}
+        return {"week": r.period_start, **(r.payload or {})}

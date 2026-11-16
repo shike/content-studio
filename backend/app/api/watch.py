@@ -10,28 +10,32 @@ from sqlmodel import Session, select
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import User, WatchAccount
+from ..channels.engine import channel_id_of
+from ..models import Account, User
 from ._listing import require_douyin_url
 
 router = APIRouter(prefix="/api/watch")
 
 
-def _account_out(acc: WatchAccount) -> dict:
-    """账号出参统一脱敏（唯一出口）：creator_cookie 绝不出后端，回显只有 has_cookie 位。"""
-    d = acc.model_dump()
-    d.pop("creator_cookie", None)
-    d["has_cookie"] = bool(acc.creator_cookie)
-    return d
+def _account_out(acc: Account) -> dict:
+    """账号出参统一脱敏（唯一出口）：creator_cookie 绝不出后端，回显只有 has_cookie 位。
+    P4：数据在 accounts 表；输出保持旧 watch_accounts 形状（Style 前端零改动）。"""
+    auth = acc.auth or {}
+    return {
+        "id": acc.id, "tenant_id": acc.tenant_id, "platform": acc.platform,
+        "name": acc.name, "url": acc.profile_url, "note": acc.note,
+        "kind": "self", "account_type": "persona", "enabled": bool(acc.enabled),
+        "has_cookie": bool(auth.get("creator_cookie")),
+        "last_scan_at": acc.last_sync_at,
+        "created_at": acc.created_at, "updated_at": acc.updated_at,
+    }
 
 
 @router.get("/accounts")
 def list_accounts(account_type: str = "", user: User = Depends(require_user)) -> dict:
     """自有账号清单（恒 kind=self；同行账号在 /api/sources）。"""
     with Session(engine) as s:
-        q = select(WatchAccount).where(WatchAccount.kind == "self")  # type: ignore[attr-defined]
-        if account_type in ("persona", "leadgen"):
-            q = q.where(WatchAccount.account_type == account_type)  # type: ignore[attr-defined]
-        rows = s.exec(q.order_by(WatchAccount.id)).all()  # type: ignore[attr-defined]
+        rows = s.exec(select(Account).order_by(Account.id)).all()  # type: ignore[attr-defined]
         return {"items": [_account_out(r) for r in rows]}
 
 
@@ -65,10 +69,11 @@ def create_account(body: AccountIn, user: User = Depends(require_user)) -> dict:
     if body.url.strip():
         require_douyin_url(body.url.strip())
     with Session(engine) as s:
-        acc = WatchAccount(platform=body.platform, name=body.name.strip(),
-                           url=body.url.strip(), note=body.note.strip(), kind="self",
-                           account_type=body.account_type if body.account_type in ("persona", "leadgen") else "persona",
-                           creator_cookie=body.creator_cookie.strip())
+        acc = Account(tenant_id=user.tenant_id, channel_id=channel_id_of(s, "persona"),
+                      platform=body.platform, name=body.name.strip(),
+                      handle=body.name.strip()[:40], profile_url=body.url.strip(),
+                      note=body.note.strip()[:300],
+                      auth={"creator_cookie": body.creator_cookie.strip()} if body.creator_cookie.strip() else {})
         s.add(acc)
         s.commit()
         s.refresh(acc)
@@ -79,27 +84,26 @@ def create_account(body: AccountIn, user: User = Depends(require_user)) -> dict:
 def update_account(account_id: int, body: AccountUpdate,
                    user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
-        acc = s.get(WatchAccount, account_id)
-        if acc is None or acc.kind != "self":
+        acc = s.get(Account, account_id)
+        if acc is None:
             raise HTTPException(status_code=404, detail="account not found")
         if body.name is not None:
             if not body.name.strip():
                 raise HTTPException(status_code=400, detail="账号名不能为空")
             acc.name = body.name.strip()
+            acc.handle = body.name.strip()[:40]
         if body.url is not None:
             if body.url.strip():
                 require_douyin_url(body.url.strip())
-            acc.url = body.url.strip()
+            acc.profile_url = body.url.strip()
         if body.note is not None:
             acc.note = body.note
         if body.enabled is not None:
             acc.enabled = body.enabled
-        if body.account_type is not None:
-            if body.account_type not in ("persona", "leadgen"):
-                raise HTTPException(status_code=400, detail="account_type 必须是 persona / leadgen")
-            acc.account_type = body.account_type
         if body.creator_cookie is not None:
-            acc.creator_cookie = body.creator_cookie.strip()  # 传空串=清除
+            auth = dict(acc.auth or {})
+            auth["creator_cookie"] = body.creator_cookie.strip()  # 传空串=清除
+            acc.auth = auth
         s.add(acc)
         s.commit()
         s.refresh(acc)
@@ -109,8 +113,8 @@ def update_account(account_id: int, body: AccountUpdate,
 @router.delete("/accounts/{account_id}")
 def delete_account(account_id: int, user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:
-        acc = s.get(WatchAccount, account_id)
-        if acc is None or acc.kind != "self":
+        acc = s.get(Account, account_id)
+        if acc is None:
             raise HTTPException(status_code=404, detail="account not found")
         s.delete(acc)
         s.commit()
@@ -121,7 +125,7 @@ def delete_account(account_id: int, user: User = Depends(require_user)) -> dict:
 async def scan_account(account_id: int, user: User = Depends(require_user)) -> dict:
     """自有账号手动扫描（自我研究链输入）。"""
     with Session(engine) as s:
-        if s.get(WatchAccount, account_id) is None:
+        if s.get(Account, account_id) is None:
             raise HTTPException(status_code=404, detail="account not found")
     from datetime import datetime
 

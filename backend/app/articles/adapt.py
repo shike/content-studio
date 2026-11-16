@@ -15,7 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Content, DailyLedger, Material
+from ..models import Content, Material, PipelineLedger
 from ..prompts import load, render
 from .service import (
     _article_generate_fail,
@@ -86,7 +86,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                       Material.quality.op('->')('score').desc().nulls_last(),
                       Material.id)).first()  # type: ignore[attr-defined]
         if item is None:
-            s.add(DailyLedger(day=_today(), phase="adapt", ok=True,
+            s.add(PipelineLedger(day=_today(), pipeline="wechat_adapt", ok=True,
                               produced="", reason="清单空：无待改编项（宁缺勿滥）"))
             s.commit()
             ctx.set_progress(100, "清单空，今日不出稿")
@@ -112,7 +112,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 if tag:
                     it.note = ((it.note or "") + f"｜{tag}").strip("｜")[:300]
                 s.add(it)
-            s.add(DailyLedger(day=_today(), phase="adapt", ok=True,
+            s.add(PipelineLedger(day=_today(), pipeline="wechat_adapt", ok=True,
                               produced="", reason=reason))
             s.commit()
 
@@ -308,7 +308,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
 
             record_usage(s, tenant_id=it.tenant_id or 1, material_id=item_id,
                          target_type="content", target_id=article_id, role="source")
-        s.add(DailyLedger(day=_today(), phase="adapt", ok=True,
+        s.add(PipelineLedger(day=_today(), pipeline="wechat_adapt", ok=True,
                           produced=f"清单项 #{item_id} → 文章 #{article_id}《{title[:24]}》（重复率 {ratio}%）"))
         s.commit()
     ctx.set_progress(100, f"完成：《{title[:24]}》已排版待发（改编自《{src_title[:20]}》，重复率 {ratio}%）")

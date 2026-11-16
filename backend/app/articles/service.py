@@ -11,7 +11,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..channels.engine import new_article_content, script_out
+from ..channels.engine import new_article_content
 from ..models import AppSetting, Content
 from ..prompts import load, render
 # C 阶段结构整治（2026-11-16）：质量机检/违禁词表拆至 quality.py，配图拆至 render_charts.py；

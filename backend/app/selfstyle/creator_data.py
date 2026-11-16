@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from ..browser import ua
 from ..db import engine
-from ..models import AccountMetricsDaily, WatchAccount
+from ..models import Account, MetricsSnapshot
 from ..settings import settings
 
 _OVERVIEW_URL = "https://creator.douyin.com/aweme/janus/creator/data/overview/all/"
@@ -60,44 +60,58 @@ def fetch_account_overview(cookie: str, timeout: float = 15.0) -> dict:
     return out
 
 
-def upsert_metrics(tenant_id: int, rows: dict) -> int:
-    """按日期合并入库（已有行只补空列）。返回写入天数。"""
+def upsert_metrics(tenant_id: int, rows: dict, account_id: int | None = None) -> int:
+    """指标事实表按日期合并入库（P4）：同主体同日一行，metrics JSONB 按列合并（空值不覆盖）。
+
+    account_id=None 时落到该租户第一个自有账号（单自有账号版主路径）。返回写入天数。"""
     n = 0
     with Session(engine) as s:
+        aid = account_id
+        if aid is None:
+            acc = s.exec(select(Account).where(  # type: ignore[attr-defined]
+                Account.tenant_id == tenant_id)).first()  # type: ignore[attr-defined]
+            aid = int(acc.id) if acc else 0  # type: ignore[arg-type]
         for d, vals in rows.items():
-            row = s.exec(select(AccountMetricsDaily).where(
-                AccountMetricsDaily.tenant_id == tenant_id,  # type: ignore[attr-defined]
-                AccountMetricsDaily.date == d)).first()  # type: ignore[attr-defined]
+            row = s.exec(select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+                MetricsSnapshot.tenant_id == tenant_id,  # type: ignore[attr-defined]
+                MetricsSnapshot.subject_type == "account",  # type: ignore[attr-defined]
+                MetricsSnapshot.subject_id == aid,  # type: ignore[attr-defined]
+                MetricsSnapshot.date == d)).first()  # type: ignore[attr-defined]
             if row is None:
-                row = AccountMetricsDaily(tenant_id=tenant_id, date=d)
+                row = MetricsSnapshot(tenant_id=tenant_id, subject_type="account",
+                                      subject_id=aid, platform="douyin", date=d,
+                                      metrics={}, source="creator_center")
+            merged = dict(row.metrics or {})
             changed = False
             for col, val in vals.items():
-                if getattr(row, col, 0) in (0, None) and val:
-                    setattr(row, col, val)
+                if not merged.get(col) and val:
+                    merged[col] = int(val)
                     changed = True
             if changed or row.id is None:
+                row.metrics = merged
+                row.source = "creator_center"
                 s.add(row)
                 n += 1
         s.commit()
     return n
 
 
-def _self_cookie() -> str:
+def _self_cookie() -> tuple[int, str]:
+    """自有账号登录态（P4：accounts.auth.creator_cookie）。返回 (account_id, cookie)。"""
     with Session(engine) as s:
-        row = s.exec(select(WatchAccount).where(
-            WatchAccount.kind == "self",  # type: ignore[attr-defined]
-            WatchAccount.enabled == True,  # noqa: E712
-        )).first()  # type: ignore[union-attr]
-        return (row.creator_cookie or "").strip() if row else ""
+        row = s.exec(select(Account)).first()  # type: ignore[attr-defined]
+        if row is None:
+            return 0, ""
+        return int(row.id or 0), str((row.auth or {}).get("creator_cookie") or "").strip()
 
 
 def collect_for_tenant(tenant_id: int) -> tuple[int, str]:
     """抓取并入库一个租户自有账号的指标。返回 (写入天数, 说明)。"""
     if not settings.creator_data_enabled:
         return 0, "开关关闭"
-    cookie = _self_cookie()
+    account_id, cookie = _self_cookie()
     if not cookie:
         return 0, "未配置创作者中心 cookie"
     rows = fetch_account_overview(cookie)
-    n = upsert_metrics(tenant_id, rows)
+    n = upsert_metrics(tenant_id, rows, account_id)
     return n, f"{len(rows)} 天（{min(rows)}~{max(rows)}）" if rows else "0 天"

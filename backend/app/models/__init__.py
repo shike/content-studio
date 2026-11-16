@@ -121,34 +121,6 @@ class UserSession(TimestampMixin, table=True):
     expires_at: datetime = Field(index=True)
 
 
-class DailyLedger(TenantScoped, TimestampMixin, table=True):
-    """产线当日账（2026-11-11）：每环节收尾写一行，次日晨检对账——
-    任务成功但无产出且无原因 = 异常（堵「成功但空转」的洞）。"""
-    __tablename__ = "daily_ledger"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    day: str = Field(default="", index=True)  # UTC 日期 YYYY-MM-DD（runner 全线 naive-UTC）
-    phase: str = ""                           # mine 挖掘 | adapt 改编
-    produced: str = ""                        # 产出摘要（入清单 N 项 / 文章 #id）
-    reason: str = ""                          # 空过/异常原因（有产出留空）
-    ok: bool = True
-
-
-class WatchAccount(TenantScoped, TimestampMixin, table=True):
-    __tablename__ = "watch_accounts"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    platform: str = "douyin"  # douyin | channels
-    name: str = ""
-    url: str = ""  # 账号主页链接（抖音：App 内分享主页→复制链接）
-    enabled: bool = True
-    kind: str = Field(default="competitor")  # competitor | self（我的账号，走自我研究链）
-    creator_cookie: str = Field(default="")  # 创作者中心登录态（仅 self；有它全量抓播放/点赞，无它公开路线）
-    note: str = ""
-    account_type: str = Field(default="persona")  # persona(立人设) | leadgen(获客)（2026-10-28 两类号策略）
-    last_scan_at: Optional[datetime] = None
-
-
 class ScheduleState(TimestampMixin, table=True):
     """统一调度中心运行态：注册表（代码）定义周期任务，本表存开关/钟点覆盖/上次下次。"""
     __tablename__ = "schedules"
@@ -160,35 +132,6 @@ class ScheduleState(TimestampMixin, table=True):
     next_run_at: Optional[datetime] = None
     last_status: str = ""
     run_count: int = 0
-
-
-class WeeklyReport(TenantScoped, TimestampMixin, table=True):
-    """视频表现周报（按周缓存；数字为确定性聚合，summary 为 LLM 解读）。"""
-    __tablename__ = "video_weekly_reports"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    week_start: str = Field(default="", index=True)  # 周一日期 YYYY-MM-DD
-    report: dict = Field(default_factory=dict, sa_column=Column(JSONB))
-
-
-class AccountMetricsDaily(TenantScoped, TimestampMixin, table=True):
-    """自有账号的日级运营指标（创作者中心 overview/all，2026-10-12 课程定位北极星）。
-
-    每日一快照；搜索类指标平台有数日延迟，缺失日按列合并补齐（不整行覆盖）。"""
-    __tablename__ = "account_metrics_daily"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    date: str = Field(default="", index=True)  # YYYY-MM-DD（平台口径，通常 T-1）
-    fans: int = 0            # 粉丝总量
-    new_fans: int = 0        # 净增粉丝
-    cancel_fans: int = 0     # 取关
-    profile_views: int = 0   # 主页访问（课程转化北极星）
-    play: int = 0            # 播放
-    digg: int = 0
-    comment: int = 0
-    share: int = 0
-    account_search: int = 0  # 账号搜索次数
-    post_search: int = 0     # 作品搜索次数
 
 
 class SelfVideo(TenantScoped, TimestampMixin, table=True):
@@ -389,3 +332,72 @@ class ChannelStyle(TenantScoped, TimestampMixin, table=True):
     exemplars: list = Field(default_factory=list, sa_column=Column(JSONB))
     based_on: int = 0  # 基于多少条视频
     payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+
+
+# ── 数据域（重构 P4，2026-11-16）：accounts/metrics_snapshots/analytics_reports/pipeline_ledger ──
+# 旧数据面 4 表（watch_accounts/account_metrics_daily/video_weekly_reports/daily_ledger）模型已删，
+# 数据迁新表后原地只读保留（schema_audit 白名单，P5 收口统一 DROP）。
+
+
+class Account(TenantScoped, TimestampMixin, table=True):
+    """自有账号（PRD R6.1）：四个渠道各登记账号——数据主体，也是自有素材/风格研究来源。
+    auth JSONB 只写不读（创作者中心登录态等，红线：仅自有账号数据回流）。"""
+    __tablename__ = "accounts"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channels.id", index=True)
+    platform: str = "douyin"  # douyin|wechat|xiaohongshu|channels
+    name: str = ""
+    handle: str = ""
+    ext_id: str = Field(default="", index=True)  # 平台侧账号 id（sec_uid 等）
+    profile_url: str = ""
+    auth: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # auth 约定：douyin={creator_cookie}（创作者中心登录态，仅自有账号数据回流）
+    enabled: bool = True
+    last_sync_at: Optional[datetime] = None
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # payload 约定：{_legacy_id 迁移指纹, 渠道扩展位}
+    note: str = ""
+
+
+class MetricsSnapshot(TenantScoped, TimestampMixin, table=True):
+    """统一指标事实表（PRD R6.2）：主体（账号/作品）× 日期 × JSONB 指标。
+    同主体同日一行，按列合并补齐（空值不覆盖，不整行覆盖）；缺失日不补零。"""
+    __tablename__ = "metrics_snapshots"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    subject_type: str = Field(default="account", index=True)  # account|publication
+    subject_id: int = Field(default=0, index=True)
+    platform: str = "douyin"
+    date: str = Field(default="", index=True)  # YYYY-MM-DD（平台口径，通常 T-1）
+    metrics: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # account: {fans,new_fans,cancel_fans,profile_views,play,digg,comment,share,
+    #           account_search,post_search,leads}
+    # publication(wechat): {reads,welook,follows,leads}
+    # publication(douyin/xhs): {exposure,play,likes,comments,shares,collects,follows,leads}
+    source: str = "manual"  # creator_center|manual|public
+
+
+class AnalyticsReport(TenantScoped, TimestampMixin, table=True):
+    """分析报告缓存（PRD R6.4）：周报/阶段报告（数字=事实表重算，summary=LLM 解读）。
+    channel_id=0 表示全渠道。可随时重算，不散落字段。"""
+    __tablename__ = "analytics_reports"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = Field(default="weekly", index=True)  # weekly|monthly
+    channel_id: int = Field(default=0, index=True)  # 0=全渠道
+    period_start: str = Field(default="", index=True)  # 周一日期 YYYY-MM-DD
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+
+
+class PipelineLedger(TenantScoped, TimestampMixin, table=True):
+    """产线当日账（PRD R4.2 当日账必落）：每环节收尾写一行，次日晨检对账——
+    任务成功但无产出且无原因 = 异常（堵「成功但空转」的洞）。"""
+    __tablename__ = "pipeline_ledger"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    day: str = Field(default="", index=True)  # UTC 日期 YYYY-MM-DD
+    pipeline: str = ""  # material_kb_mine | wechat_adapt | persona_ideas | wechat_hotspot | xhs_notes
+    produced: str = ""
+    reason: str = ""
+    ok: bool = True

@@ -24,7 +24,6 @@ def list_contents(channel: str = "", kind: str = "", status: str = "",
                  limit: int = 50, offset: int = 0,
                  user: User = Depends(require_user)) -> dict:
     """跨渠道稿件列表（数据看板/统一检索用；各渠道页走专属门面）。"""
-    from sqlalchemy import text as _text
 
     with Session(engine) as s:
         q = select(Content)

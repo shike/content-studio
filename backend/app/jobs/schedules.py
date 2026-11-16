@@ -249,7 +249,7 @@ async def _run_creator_data() -> str:
     return f"job #{job.id}"
 
 
-register_schedule(Schedule(key="creator_data_daily", label="自有账号日级指标（每日 4 点）",
+register_schedule(Schedule(key="data_creator_sync", label="自有账号日级指标（每日 4 点）",
                            daily_hour=4, enabled_by="creator_data_enabled",
                            run=_run_creator_data))
 
@@ -262,7 +262,7 @@ async def _run_weekly_report() -> str:
     return f"job #{job.id}"
 
 
-register_schedule(Schedule(key="video_weekly_report", label="视频表现周报（每日 5 点自愈，按周幂等）",
+register_schedule(Schedule(key="data_weekly_report", label="视频表现周报（每日 5 点自愈，按周幂等）",
                            daily_hour=5, run=_run_weekly_report))
 register_schedule(Schedule(key="daily_backup", label="业务库每日备份",
                            daily_hour=3, run=_run_daily_backup))

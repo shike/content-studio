@@ -6,15 +6,13 @@ from sqlmodel import Session, select
 from ..db import engine
 from ..jobs.runner import runner
 from ..auth import require_user
-from ..models import ChannelStyle, SelfVideo, WatchAccount, User
+from ..models import Account, ChannelStyle, SelfVideo, User
 
 router = APIRouter(prefix="/api/style")
 
 
-def _self_account(s: Session) -> WatchAccount | None:
-    return s.exec(
-        select(WatchAccount).where(WatchAccount.kind == "self")  # type: ignore[attr-defined]
-    ).first()
+def _self_account(s: Session) -> Account | None:
+    return s.exec(select(Account)).first()  # type: ignore[attr-defined]
 
 
 def _profile_dict(p: ChannelStyle) -> dict:
@@ -86,8 +84,14 @@ def overview() -> dict:
             SelfVideo.analyzed_at is not None)).one() or 0  # type: ignore[attr-defined]
         profile = _latest_profile(s)
 
+        account = ({
+            "id": acc.id, "name": acc.name, "enabled": bool(acc.enabled),
+            "platform": acc.platform, "url": acc.profile_url,
+            "has_cookie": bool((acc.auth or {}).get("creator_cookie")),
+            "created_at": acc.created_at, "updated_at": acc.updated_at,
+        } if acc else None)
         return {
-            "account": acc.model_dump() if acc else None,
+            "account": account,
             "profile": _profile_dict(profile) if profile else None,
             "stats": {"total": total, "analyzed": analyzed},
         }

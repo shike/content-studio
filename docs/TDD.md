@@ -542,6 +542,16 @@ PY
 
 ## 15. 迁移映射（迁移期专用，P5 收口后删除）
 
+> **P4 数据域已执行（2026-11-16）**：alembic 0004=9a3302c66a18 建 accounts/metrics_snapshots/
+> analytics_reports/pipeline_ledger；`backend/scripts/migrate_analytics.py` 迁
+> watch_accounts(self)→accounts(auth.creator_cookie)、account_metrics_daily→metrics_snapshots
+> (subject=account)、video_weekly_reports→analytics_reports(kind=weekly)、daily_ledger→
+> pipeline_ledger（phase→pipeline 改名）；旧数据面 4 表停读写入白名单（legacy 共 13 张）。
+> 调度改名 2 项：creator_data_daily→data_creator_sync、video_weekly_report→data_weekly_report。
+> 自有账号 CRUD 统一 /api/accounts（旧 /api/watch/accounts 保持契约给 Style 页）；看板
+> /api/analytics/{overview,channels,accounts,publications,weekly}；文章 48h 回流双写
+> payload.stats（回显）+metrics_snapshots（事实表）。**幂等键坑：旧表 id≠新表 id，迁移查重
+> 必须 payload._legacy_id，不能用主键集合**（Account 首轮迁移重复建号实测）。
 > **P3 内容域已执行（2026-11-16）**：alembic 0003=8994f9eb59c8 建 channels/ideas/contents/
 > publications/channel_styles 五表；`backend/scripts/migrate_content.py` 迁 topic_cards→ideas、
 > scripts→contents(video_script)、articles→contents(long_article)+publications、

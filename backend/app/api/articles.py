@@ -18,7 +18,7 @@ from ..auth import require_user
 from ..channels.engine import article_out, new_article_content
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Content, DailyLedger, Publication, User
+from ..models import Content, PipelineLedger, Publication, User
 from ..settings import settings
 
 router = APIRouter(prefix="/api/articles")
@@ -153,7 +153,7 @@ def list_ledger(limit: int = 14, user: User = Depends(require_user)) -> dict:
     """产线当日账（近 N 条）：晨检对账数据源。anomaly=成功但无产出且无原因——按故障处理。"""
     with Session(engine) as s:
         rows = s.exec(
-            select(DailyLedger).order_by(DailyLedger.id.desc())  # type: ignore[attr-defined]
+            select(PipelineLedger).order_by(PipelineLedger.id.desc())  # type: ignore[attr-defined]
             .limit(max(1, min(limit, 60)))).all()  # type: ignore[attr-defined]
         out = []
         for r in rows:
@@ -207,17 +207,36 @@ def reflow_article(article_id: int, body: ReflowIn,
     """48h 回流：阅读/在看/涨粉/进线 四个数（北极星=进线）。写 payload.stats（P4 迁指标事实表）。"""
     vals = {"reads": max(0, int(body.reads)), "welook": max(0, int(body.welook)),
             "follows": max(0, int(body.follows)), "leads": max(0, int(body.leads))}
+    from ..models import MetricsSnapshot
+
     with Session(engine) as s:
         art = s.get(Content, article_id)
         if art is None or art.kind != "long_article":
             raise HTTPException(status_code=404, detail="article not found")
+        today = datetime.now().strftime("%Y-%m-%d")
+        filled = datetime.now().strftime("%Y-%m-%d %H:%M")
         p = dict(art.payload or {})
         stats = dict(p.get("stats") or {})
         stats.update(vals)
-        stats["filled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        stats["filled_at"] = filled
         p["stats"] = stats
         art.payload = p
         s.add(art)
+        # 指标事实表（PRD R6.2）：同主体同日按列合并（publication 维度，48h 补录口径）
+        row = s.exec(select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+            MetricsSnapshot.tenant_id == art.tenant_id,  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_type == "publication",  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_id == art.id,  # type: ignore[attr-defined]
+            MetricsSnapshot.date == today)).first()  # type: ignore[attr-defined]
+        if row is None:
+            row = MetricsSnapshot(tenant_id=art.tenant_id or 1, subject_type="publication",
+                                  subject_id=art.id, platform="wechat", date=today,
+                                  metrics={}, source="manual")
+        merged = dict(row.metrics or {})
+        merged.update(vals)
+        row.metrics = merged
+        row.source = "manual"
+        s.add(row)
         s.commit()
         s.refresh(art)
         return article_out(art)

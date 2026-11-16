@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import AccountMetricsDaily, User
+from ..models import MetricsSnapshot, User
 from ..auth import require_user
 from fastapi import APIRouter, Depends
 
@@ -20,19 +20,23 @@ def account_metrics(days: int = 30, user: User = Depends(require_user)) -> dict:
     since = (date.today() - timedelta(days=days)).isoformat()
     with Session(engine) as s:
         rows = s.exec(
-            select(AccountMetricsDaily)
-            .where(AccountMetricsDaily.tenant_id == user.tenant_id,  # type: ignore[attr-defined]
-                   AccountMetricsDaily.date >= since)  # type: ignore[attr-defined]
-            .order_by(AccountMetricsDaily.date)  # type: ignore[attr-defined]
+            select(MetricsSnapshot)
+            .where(MetricsSnapshot.tenant_id == user.tenant_id,  # type: ignore[attr-defined]
+                   MetricsSnapshot.subject_type == "account",  # type: ignore[attr-defined]
+                   MetricsSnapshot.date >= since)  # type: ignore[attr-defined]
+            .order_by(MetricsSnapshot.date)  # type: ignore[attr-defined]
         ).all()
     items = []
     for r in rows:
+        m = r.metrics or {}
         items.append({
-            "date": r.date, "fans": r.fans, "new_fans": r.new_fans,
-            "cancel_fans": r.cancel_fans,
-            "profile_views": r.profile_views, "play": r.play,
-            "digg": r.digg, "comment": r.comment, "share": r.share,
-            "account_search": r.account_search, "post_search": r.post_search,
+            "date": r.date, "fans": m.get("fans") or 0, "new_fans": m.get("new_fans") or 0,
+            "cancel_fans": m.get("cancel_fans") or 0,
+            "profile_views": m.get("profile_views") or 0, "play": m.get("play") or 0,
+            "digg": m.get("digg") or 0, "comment": m.get("comment") or 0,
+            "share": m.get("share") or 0,
+            "account_search": m.get("account_search") or 0,
+            "post_search": m.get("post_search") or 0,
         })
     summary = {"days": len(items)}
     return {"items": items, "summary": summary}

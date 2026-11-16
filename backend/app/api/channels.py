@@ -1,5 +1,4 @@
 """内容域 API：渠道配置 / 统一稿件 / 发布登记（含公众号 API 发布，人工触发）。"""
-import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -13,7 +12,6 @@ from ..db import engine
 from ..integrations import wechat_publisher
 from ..jobs.runner import runner
 from ..models import Channel, Content, Idea, Publication, User
-from ..articles.renderer import sanitize_html
 
 router = APIRouter(prefix="/api/channels")
 

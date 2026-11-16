@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
 from ..auth import require_user
-from ..channels.engine import channel_id_of, channel_key_of, new_script_content, script_out
+from ..channels.engine import channel_key_of, new_script_content, script_out
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import Content, User

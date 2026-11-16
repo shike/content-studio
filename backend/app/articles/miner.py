@@ -15,7 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, DailyLedger, Material
+from ..models import AppSetting, Material, PipelineLedger
 from ..prompts import render
 from .quality import load_cursor, save_cursor
 
@@ -98,7 +98,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
     if not batch:
         with Session(engine) as s:
             _save_cursor(s, 0, 0)
-            s.add(DailyLedger(day=_today(), phase="mine", ok=True,
+            s.add(PipelineLedger(day=_today(), pipeline="material_kb_mine", ok=True,
                               produced="全库盘完一轮", reason="游标已重置，等待扩库"))
             s.commit()
         ctx.set_progress(100, "全库盘完一轮，游标已重置")
@@ -196,8 +196,8 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
             f"本批 {failed} 篇全文/评估全部失败（ima 限流或网络），游标未推进，稍后自动重试")
     with Session(engine) as s:
         _save_cursor(s, idx, pos + len(batch))
-        s.add(DailyLedger(
-            day=_today(), phase="mine", ok=True,
+        s.add(PipelineLedger(
+            day=_today(), pipeline="material_kb_mine", ok=True,
             produced=(f"评 {evaluated} 篇 → 入清单 {added} 项"
                       + (f" · 低分跳过 {skipped_low}" if skipped_low else "")
                       + (f" · 拉取失败 {failed}" if failed else "")),

@@ -18,7 +18,7 @@ from ..materials.download import resolve_aweme_id
 from ..db import engine
 from ..jobs.runner import JobContext, register_concurrent, register_executor, runner
 from ..llm import gateway
-from ..models import ChannelStyle, SelfVideo, WatchAccount
+from ..models import Account, ChannelStyle, SelfVideo
 from ..prompts import load
 from ..settings import settings
 from ..materials.collectors.douyin_list import (
@@ -132,15 +132,15 @@ def _list_self_videos(url: str) -> tuple[Optional[list], Optional[str]]:
 register_concurrent("self_scan")
 @register_executor("self_scan")
 async def self_scan(ctx: JobContext, payload: dict) -> dict:
+
     with Session(engine) as s:
         accounts = s.exec(
-            select(WatchAccount).where(  # type: ignore[attr-defined]
-                WatchAccount.kind == "self",  # type: ignore[attr-defined]
-                WatchAccount.enabled == True,  # noqa: E712
+            select(Account).where(  # type: ignore[attr-defined]
+                Account.enabled == True,  # noqa: E712
             )
         ).all()
     if not accounts:
-        raise RuntimeError("未添加我的账号：在同行监测页添加并勾选「这是我的账号」")
+        raise RuntimeError("未添加我的账号：在「经营」页登记自有账号")
 
     notes: list[str] = []
     queued = 0
@@ -169,11 +169,12 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
 
         # 创作者中心路线（R9 增强）：配了 cookie 就全量抓+刷新存量（播放/点赞/评论/转发）。
         # 失败可见降级公开路线（notes 留原因），绝不静默——播放量口径的数据不能静默变没。
-        if acc.creator_cookie:
+        creator_cookie = str((acc.auth or {}).get("creator_cookie") or "")
+        if creator_cookie:
             from .creator_center import CreatorCookieError, fetch_all_videos
 
             try:
-                entries, err = await asyncio.to_thread(fetch_all_videos, acc.creator_cookie)
+                entries, err = await asyncio.to_thread(fetch_all_videos, creator_cookie)
             except CreatorCookieError as e:
                 entries, err = None, str(e)
             if entries is not None:
@@ -221,9 +222,9 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                 known |= {str(e.get("id")) for e in entries if e.get("id")}
                 queued += created
                 with Session(engine) as s:
-                    row = s.get(WatchAccount, acc.id)
+                    row = s.get(Account, acc.id)
                     if row is not None:
-                        row.last_scan_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                        row.last_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         s.add(row)
                         s.commit()
                 notes.append(f"{acc.name}：创作者中心全量 {len(entries)} 条"
@@ -256,9 +257,9 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
             created += 1
             queued += 1
         with Session(engine) as s:
-            row = s.get(WatchAccount, acc.id)
+            row = s.get(Account, acc.id)
             if row is not None:
-                row.last_scan_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                row.last_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 s.add(row)
                 s.commit()
         notes.append(f"{acc.name}：新增 {created} 条（已自动排队风格拆解）")
@@ -281,11 +282,10 @@ async def self_analyze(ctx: JobContext, payload: dict) -> dict:
         # 自有账号：匿名不可见的自家视频（私密/受限）走创作者中心登录态下载——
         # 红线内用途（仅自有账号数据回流，他人内容仍一律匿名）；cookie 缺省=匿名路线
         with Session(engine) as s:
-            acc = s.exec(select(WatchAccount).where(  # type: ignore[attr-defined]
-                WatchAccount.kind == "self",  # type: ignore[attr-defined]
-                WatchAccount.enabled == True,  # noqa: E712
+            acc = s.exec(select(Account).where(  # type: ignore[attr-defined]
+                Account.enabled == True,  # noqa: E712
             )).first()
-        own_cookie = (acc.creator_cookie if acc else "") or ""
+        own_cookie = str(((acc.auth if acc else None) or {}).get("creator_cookie") or "")
         # 2026-11-13 修复：原路径直接调 downloader.download_video，绕过了验证码熔断
         # 与 45s 下载节流（两者只在 benchmark_analyze 路径生效）——自有下载同样吃家宽
         # IP 的风控，统一走 benchmarks 的节流+熔断闸门再下载
@@ -385,7 +385,7 @@ async def self_profile_update(ctx: JobContext, payload: dict) -> dict:
         max_tokens=16000)
 
     with Session(engine) as s:
-        acc = s.exec(select(WatchAccount).where(WatchAccount.kind == "self")).first()  # type: ignore[attr-defined]
+        acc = s.exec(select(Account)).first()  # type: ignore[attr-defined]
         from ..channels.engine import channel_id_of
 
         profile = ChannelStyle(
@@ -416,13 +416,12 @@ async def creator_data_scan(ctx: JobContext, payload: dict) -> dict:
     notes: list[str] = []
     with Session(engine) as s:
         accounts = s.exec(
-            select(WatchAccount).where(  # type: ignore[attr-defined]
-                WatchAccount.kind == "self",  # type: ignore[attr-defined]
-                WatchAccount.enabled == True,  # noqa: E712
+            select(Account).where(  # type: ignore[attr-defined]
+                Account.enabled == True,  # noqa: E712
             )
         ).all()
     if not accounts:
-        raise RuntimeError("未添加我的账号：在同行监测页添加并勾选「这是我的账号」")
+        raise RuntimeError("未添加我的账号：在「经营」页登记自有账号")
     tenants_seen: set[int] = set()
     for acc in accounts:
         if acc.tenant_id in tenants_seen:
@@ -444,9 +443,8 @@ async def video_weekly_report(ctx: JobContext, payload: dict) -> dict:
     outs = []
     with Session(engine) as s:
         accounts = s.exec(
-            select(WatchAccount).where(  # type: ignore[attr-defined]
-                WatchAccount.kind == "self",  # type: ignore[attr-defined]
-                WatchAccount.enabled == True,  # noqa: E712
+            select(Account).where(  # type: ignore[attr-defined]
+                Account.enabled == True,  # noqa: E712
             )
         ).all()
     for acc in accounts:
