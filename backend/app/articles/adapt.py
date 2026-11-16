@@ -59,6 +59,15 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _strip_fence(body: str) -> str:
+    """剥离 LLM 输出外层的 ``` 代码围栏（模型习惯把成文包进围栏里）。"""
+    body = (body or "").strip()
+    if body.startswith("```"):
+        body = re.sub(r"^```[a-z]*\n?", "", body)
+        body = re.sub(r"\n?```$", "", body).strip()
+    return body
+
+
 @register_executor("article_adapt", on_fail=_article_generate_fail)
 async def article_adapt(ctx: JobContext, payload: dict) -> dict:
     """每日改编：清单取项（CAS）→ 拉源文全文 → 保骨架保原话换口径成文 → 原创度闸 → 机检 → 排版。"""
