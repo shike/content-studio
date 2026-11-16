@@ -42,9 +42,11 @@ rsync -az --delete -e "$RSH" backend/app/ "$HOST:$REMOTE_ROOT/backend/app/"
 echo "→ rsync frontend/dist"
 rsync -az --delete -e "$RSH" frontend/dist/ "$HOST:$REMOTE_ROOT/frontend/dist/"
 # 验收套件与文档也同步：服务器上可能要跑验收套件 / 查口径，别让副本漂移
-for d in acceptance docs migrations; do
+for d in acceptance docs; do
   rsync -az --delete -e "$RSH" "$d/" "$HOST:$REMOTE_ROOT/$d/"
 done
+# migrations 在 backend/ 下（schema 审计闸 B 阶段，2026-11-16）：单独同步，别进根级循环
+rsync -az --delete -e "$RSH" backend/migrations/ "$HOST:$REMOTE_ROOT/backend/migrations/"
 
 # schema 审计闸（B 阶段 2026-11-16）：新代码模型 ↔ 生产库 DDL 只读 diff。
 # 漂移=中止重启（代码已同步、旧进程继续服务，生产零影响）；修漂移后重跑本脚本。
