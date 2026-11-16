@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ -f "$ROOT/scripts/.deploy.env" ] && . "$ROOT/scripts/.deploy.env"
 HOST="${CS_SYNC_HOST:?缺部署目标：在 scripts/.deploy.env 写 CS_SYNC_HOST=user@server（该文件不入库）}"
 KEY="${CS_SYNC_KEY:-$HOME/.ssh/id_ed25519}"
-REMOTE_ROOT="${CS_SYNC_ROOT:-/srv/content-studio}"   # 覆盖仅用于测试闸门
+REMOTE_ROOT="${CS_SYNC_ROOT:-/srv/content-studio}"   # 覆盖仅用于备用环境/手工测试
 RSH="ssh -o BatchMode=yes -i $KEY"   # 整体作为一个 -e 参数传给 rsync，别拆散（拆散后 -i 会被 rsync 吃掉、密钥路径被当成同步源）
 SSH() { ssh -o BatchMode=yes -i "$KEY" "$@"; }
 
@@ -42,9 +42,7 @@ rsync -az --delete -e "$RSH" backend/app/ "$HOST:$REMOTE_ROOT/backend/app/"
 echo "→ rsync frontend/dist"
 rsync -az --delete -e "$RSH" frontend/dist/ "$HOST:$REMOTE_ROOT/frontend/dist/"
 # 文档也同步：服务器上可能要查口径，别让副本漂移
-for d in docs; do
-  rsync -az --delete -e "$RSH" "$d/" "$HOST:$REMOTE_ROOT/$d/"
-done
+rsync -az --delete -e "$RSH" docs/ "$HOST:$REMOTE_ROOT/docs/"
 # migrations 在 backend/ 下（schema 审计闸 B 阶段，2026-11-16）：单独同步，别进根级循环
 rsync -az --delete -e "$RSH" backend/migrations/ "$HOST:$REMOTE_ROOT/backend/migrations/"
 

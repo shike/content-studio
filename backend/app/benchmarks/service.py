@@ -15,7 +15,7 @@ from ..db import engine
 from ..settings import settings
 from ..jobs.runner import _DEAD_ERROR_MARKERS, JobContext, register_executor, register_owed, runner
 from ..llm import gateway
-from ..models import BenchmarkVideo, TopicCard, WatchAccount
+from ..models import BenchmarkVideo, WatchAccount
 from ..prompts import render
 from ..jobs.errors import CaptchaError
 from . import downloader
@@ -357,15 +357,6 @@ _STUDY_KEYWORDS = ("求带", "带带我", "求资料", "求教程", "求文档",
                    "学习", "打卡", "扣1", "扣个1")
 
 
-def _recent_card_titles(days: int = 14, limit: int = 24) -> list[str]:
-    """拆解 prompt 的「近 14 天出题记录」上下文（topics 退役后换源：靶子卡主线）。"""
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    with Session(engine) as s:
-        rows = s.exec(select(TopicCard).where(  # type: ignore[attr-defined]
-            TopicCard.created_at >= cutoff)).all()  # type: ignore[attr-defined]
-    return [c.spine for c in rows if c.spine][:limit]
-
-
 def _classify_comments(comments: list) -> tuple[str, float]:
     """求学密度 → 分型（persona_ore 人设矿 | leadgen_ore 获客矿；空评论=('' ,0)）。
     阈值=comment_leadgen_route_min（百分比，默认 60%）。词根漏判的风险方向是
@@ -523,9 +514,7 @@ async def benchmark_analyze(ctx: JobContext, payload: dict) -> dict:
             "benchmark_analyze", PERSONA=persona_text,
             # 2026-11-13 修复：模板里的 {{AUDIENCE_NOTE}} 此前无人传，占位符字面量
             # 原样进了每一条拆解的 system prompt
-            AUDIENCE_NOTE=audience_note_of(tenant_id),
-            RECENT_TITLES="\n".join(f"- {t}" for t in _recent_card_titles(14))
-            or "（近 14 天无出题记录）")},
+            AUDIENCE_NOTE=audience_note_of(tenant_id))},
          {"role": "user", "content": llm_input}],
         max_tokens=5000)
 

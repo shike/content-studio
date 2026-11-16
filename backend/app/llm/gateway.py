@@ -71,7 +71,7 @@ async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict) -> st
     content: Optional[str] = None
     for attempt in range(3):
         try:
-            # 600s：脚本三版生成（20000 tokens+思考链）在 glm-5.3-flash 上实测超 300s
+            # 600s：脚本一版精品直出（20000 tokens+思考链）在 glm-5.3-flash 上实测超 300s
             # （2026-10-29 P1 服务器侧复现 ReadTimeout；生产 10-12 后未跑过脚本生成=潜伏）
             async with httpx.AsyncClient(timeout=600) as client:
                 resp = await client.post(

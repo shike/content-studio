@@ -69,7 +69,7 @@ install_agent() {
 PLIST_EOF
   launchctl unload "$PLIST" 2>/dev/null || true
   launchctl load "$PLIST"
-  echo "已安装并启动：本机 SOCKS5 :${PORT} + 到 ${SERVER} 的反向隧道（日志 /tmp/content-studio-homeproxy.log）"
+  echo "已安装并启动：本机 SOCKS5 :${PORT} 反向隧道（对端见 plist 内 CS_HOME_PROXY_SERVER；日志 /tmp/content-studio-homeproxy.log）"
 }
 
 uninstall_agent() {

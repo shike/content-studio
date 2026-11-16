@@ -129,9 +129,9 @@ if __name__ == "__main__":
     ap.add_argument("--upstream", type=int, default=0,
                     help="本机外网代理端口（如 7890）；>0 时 duckduckgo.com 等境外目标经它出海")
     ap.add_argument("--port", type=int, default=11080)
-a = ap.parse_args()
-_UPSTREAM = a.upstream
-try:
-    asyncio.run(main(a.host, a.port))
-except KeyboardInterrupt:
-    pass
+    a = ap.parse_args()
+    _UPSTREAM = a.upstream
+    try:
+        asyncio.run(main(a.host, a.port))
+    except KeyboardInterrupt:
+        pass
