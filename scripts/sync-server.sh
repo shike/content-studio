@@ -54,9 +54,9 @@ done
 echo "→ schema 审计（新代码模型 ↔ 生产库，只读）"
 AUDIT_PY="$REMOTE_ROOT/backend/.venv/bin/python"
 SSH "$HOST" "test -x $AUDIT_PY" || AUDIT_PY=python3
-if ! SSH "$HOST" "cd $REMOTE_ROOT/backend && DATA_DIR=$REMOTE_ROOT/data $AUDIT_PY -m app.schema_audit --db $REMOTE_ROOT/data/studio.db --quiet"; then
+if ! SSH "$HOST" "cd $REMOTE_ROOT/backend && $AUDIT_PY -m app.schema_audit --db $REMOTE_ROOT/data/studio.db --quiet"; then
   echo "✗ schema 漂移：中止重启（代码已同步、旧进程继续服务，生产零影响）。修漂移后重跑本脚本；漂移明细：" >&2
-  SSH "$HOST" "cd $REMOTE_ROOT/backend && DATA_DIR=$REMOTE_ROOT/data $AUDIT_PY -m app.schema_audit --db $REMOTE_ROOT/data/studio.db" >&2 || true
+  SSH "$HOST" "cd $REMOTE_ROOT/backend && $AUDIT_PY -m app.schema_audit --db $REMOTE_ROOT/data/studio.db" >&2 || true
   exit 1
 fi
 echo "✓ schema 审计通过（模型与生产库一致）"
