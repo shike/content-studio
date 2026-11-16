@@ -181,7 +181,7 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
               )}
             </div>
             <div className="space-y-2 border-t border-slate-100 pt-3">
-              <div className="text-xs font-medium text-slate-500">联网检索通道（深研/热点/发现共用）</div>
+              <div className="text-xs font-medium text-slate-500">联网检索通道（账号发现用）</div>
               <div className="flex flex-wrap gap-2">
                 {SEARCH_PROVIDERS.map((p) => (
                   <button

@@ -23,7 +23,7 @@ import Mobile from './Mobile'
  * （用户批准破「目的地不藏页内 tab」旧规）。
  * 旧产线树 16 叶 + 三段式 3 键 + 更早 4 键经 NAVMAP 全量兼容路由（内嵌页 onNavigate 不断链）。
  */
-export type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'monitor' | 'tasks' | 'settings'
+type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'monitor' | 'tasks' | 'settings'
 
 interface NavTarget {
   key: SectionKey

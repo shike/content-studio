@@ -272,16 +272,3 @@ def _parse_ddg(html: str) -> list[dict]:
                 "url": _real_url(t.group(1)),
             })
     return [r for r in results if r["title"]]
-
-
-def batch_search(queries: list[str], per_query: int = 4) -> tuple[str, dict]:
-    """单查询为主（限流纪律）。返回 (参考文本, 执行元数据)。"""
-    q = queries[0] if queries else ""
-    if not q:
-        return "", {"query": "", "refs": 0, "status": "error", "provider": "-"}
-    results, status, provider, note = web_search(q, per_query)
-    lines = [f"- {r['title']}：{r['snippet'][:120]}（{r['url'][:80]}）"
-             for r in results if r["title"]]
-    meta = {"query": q, "refs": len(results), "status": status,
-            "provider": provider, "note": note}
-    return ("\n".join(lines[:8]) if lines else ""), meta

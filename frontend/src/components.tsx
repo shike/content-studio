@@ -147,13 +147,6 @@ export function relTime(iso?: string) {
   return `${Math.floor(d / 30)} 个月前`
 }
 
-/** 24h 内入库 = NEW 徽章（口径与 relTime 同源：UTC 无时区补 Z）。 */
-export function isNew(iso?: string) {
-  if (!iso) return false
-  const ms = Date.now() - new Date(/[Zz]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z').getTime()
-  return !Number.isNaN(ms) && ms >= 0 && ms < 24 * 3600 * 1000
-}
-
 /** 状态 counts 字典取数：不给 key = 全量合计（状态 chips 的「全部」用）。 */
 export function sumCounts(counts: Record<string, number>, key?: string): number {
   if (key) return counts[key] || 0

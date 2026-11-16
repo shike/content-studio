@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileVideo, Inbox, Lightbulb, Scissors, Sparkles } from 'lucide-react'
+import { FileVideo, Inbox, Scissors, Sparkles } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import { Busy, ChipRow, ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { usePageGuard } from '../hooks'
@@ -204,7 +204,7 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
           </button>
         </div>
         <div className="mt-2 text-[11px] text-slate-400">
-          拆解产出：钩子类型 / 叙事结构 / 可复刻点，并自动沉淀 1 条选题候选到选题库
+          拆解产出：钩子类型 / 叙事结构 / 可复刻点
         </div>
       </div>
 
@@ -445,17 +445,6 @@ export default function Benchmarks({ onNavigate, accountType }: { onNavigate?: (
                               <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-slate-50 p-3.5 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-700">
                                 {detail.transcript}
                               </pre>
-                            )}
-                          </div>
-                        )}
-                        {detail?.analysis?.topic_candidate && (
-                          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3.5 py-2.5 text-[13px] text-emerald-800">
-                            <Lightbulb size={14} />
-                            已沉淀选题候选「{detail.analysis.topic_candidate.title}」
-                            {onNavigate && (
-                              <button onClick={() => onNavigate(accountType === 'leadgen' ? 'l_topics' : 'p_topics')} className="ml-1 font-semibold underline hover:text-emerald-900">
-                                去选题库定审 →
-                              </button>
                             )}
                           </div>
                         )}

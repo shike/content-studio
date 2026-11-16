@@ -39,7 +39,6 @@ interface Counts {
 }
 
 const TYPE_NAMES: Record<string, string> = {
-  idea_research: '选题深研',
   benchmark_analyze: '同行拆解',
   script_generate: '脚本生成',
   script_polish: '脚本打磨',
@@ -112,7 +111,7 @@ const PAGE_SIZE = 20
 function objectLabel(payload: Record<string, any>): string {
   for (const [key, prefix] of [
     ['benchmark_id', '拆解'], ['script_id', '脚本'], ['article_id', '长文'],
-    ['video_id', '视频'], ['topic_id', '选题'], ['account_id', '账号'],
+    ['video_id', '视频'], ['account_id', '账号'],
   ] as const) {
     if (payload?.[key] != null) return `${prefix} #${payload[key]}`
   }
@@ -498,7 +497,6 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
                                   if (t.payload?.benchmark_id != null) links.push(['benchmarks', '查看拆解样本 →'])
                                   if (t.payload?.script_id != null) links.push(['scripts', '查看脚本 →'])
                                   if (t.payload?.article_id != null) links.push(['articles', '查看长文 →'])
-                                  if (t.payload?.topic_id != null) links.push(['topics', '查看选题 →'])
                                   return links.map(([k, label]) => (
                                     <button key={k} onClick={() => onNavigate?.(k)}
                                       className="rounded-full bg-sky-50 px-2.5 py-0.5 text-xs text-sky-700 hover:bg-sky-100">

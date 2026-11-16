@@ -55,23 +55,6 @@ export async function waitJob(
   }
 }
 
-export interface Topic {
-  id: number
-  title: string
-  angle: string
-  audience: 'boss' | 'fde' | 'both'
-  source_type: string
-  source_ref?: string
-  score: number | null
-  status: string
-  evidence: Record<string, any>
-  research_report?: string
-  scripts?: { id: number; status: string }[]
-  articles?: { id: number; status: string }[]
-  created_at?: string
-  updated_at?: string
-}
-
 interface ScriptVersion {
   label: string
   hook: string
@@ -125,23 +108,3 @@ export interface ContentItem {
   created_at?: string
 }
 
-export const SOURCE_LABELS: Record<string, string> = {
-  idea: 'idea深研',
-  benchmark: '同行拆解',
-  manual: '手动',
-  trending: '热点切角',
-  self_story: '一线交付',
-}
-
-export const STATUS_LABELS: Record<string, string> = {
-  draft: '待审',
-  approved: '已定审',
-  rejected: '已否决',
-  produced: '已产出',
-}
-
-export const AUDIENCE_LABELS: Record<string, string> = {
-  boss: '企业主',
-  fde: '准FDE',
-  both: '双受众',
-}

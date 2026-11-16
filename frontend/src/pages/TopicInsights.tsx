@@ -110,11 +110,11 @@ export default function TopicInsights() {
   return (
     <div>
       <div className="mb-2.5 text-xs text-slate-500">
-        每日 06:00「热点雷达」自动拉取这些抖音话题的内容样本（免登录接口给的是话题精选集，非实时新增）；样本中新出现的低粉高赞视频会自动走质量闸拆解、候选进选题库。
+        每日 06:00「热点雷达」自动拉取这些抖音话题的内容样本（免登录接口给的是话题精选集，非实时新增）；样本中新出现的低粉高赞视频会自动走质量闸拆解、采高赞评论分型入矿。
       </div>
       <div className="card mb-3 flex flex-wrap items-center gap-2 p-4">
         <span className="text-sm font-semibold text-zinc-900">存量回填</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-slate-400">把每个监测话题的精选集全部探一遍（30 天内、过拆解闸的自动进拆解采评论）——监控话题以来只抓增量，存量从未翻过账</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-400">把每个监测话题的精选集全部探一遍（追溯窗内、过拆解闸的自动进拆解采评论）——监控话题以来只抓增量，存量从未翻过账</span>
         <button onClick={backfill} disabled={!!backfilling || items.length === 0} className="btn-accent btn-xs disabled:opacity-40">
           {backfilling || '回填 30 天'}
         </button>
