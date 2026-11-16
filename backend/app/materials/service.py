@@ -113,7 +113,7 @@ async def gate_rows(rows: list[Material], source_tag: str) -> int:
     不过线置 ignored（gate_reason 留痕，页面可见，手动可翻案强拆）。返回批准条数。"""
     import asyncio
 
-    from ..download import probe_video_stats
+    from .download import probe_video_stats
     from ..jobs.runner import runner
 
     n = 0

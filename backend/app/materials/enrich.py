@@ -401,8 +401,8 @@ def owed_materials() -> list[tuple[dict, str]]:
         rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
             Material.status == "ready",  # type: ignore[attr-defined]
             Material.origin_type == "douyin_video")).all()  # type: ignore[attr-defined]
-        have_analysis = {r.material_id for r in s.exec(
-            select(MaterialAnalysis.material_id)).all()}  # type: ignore[attr-defined]
+        have_analysis = {a.material_id for a in s.exec(
+            select(MaterialAnalysis)).all()}  # type: ignore[attr-defined]
         active = {
             (j.payload or {}).get("material_id")
             for j in s.exec(select(Job).where(  # type: ignore[attr-defined]
