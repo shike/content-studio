@@ -21,7 +21,6 @@ ENTITY_TABLE: dict[str, tuple[type, str, str]] = {
     # adapt/deepread 两条公众号成文线同样产出 Article 且注册了
     # _article_generate_fail（2026-11-13 补映射：此前它们的失败文章不在复活/孤儿射程）
     "article_adapt": (Article, "article_id", "generating"),
-    "article_deepread": (Article, "article_id", "generating"),
 }
 
 
@@ -83,17 +82,11 @@ def _entity_title(row) -> str:
         v = getattr(row, attr, None)
         if v:
             return str(v)[:60]
-    if hasattr(row, "topic_id") and row.topic_id:  # 失败文章常无标题，回落选题标题
-        from ..models import Topic
-        with Session(engine) as s:
-            t = s.get(Topic, row.topic_id)
-            if t is not None and t.title:
-                return f"#{row.id} {t.title[:50]}"
     return f"#{row.id}"
 
 
 def _revive_payload(job_type: str, row) -> dict:
-    if job_type in ("article_generate", "article_adapt", "article_deepread"):
+    if job_type in ("article_generate", "article_adapt"):
         return {"article_id": row.id}
     if job_type in ("script_generate", "script_polish"):
         return {"script_id": row.id}

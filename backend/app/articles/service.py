@@ -11,7 +11,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import AppSetting, Article, Script, Topic
+from ..models import AppSetting, Article, Script
 from ..prompts import load, render
 # C 阶段结构整治（2026-11-16）：质量机检/违禁词表拆至 quality.py，配图拆至 render_charts.py；
 # 本模块 facade 导入沿用旧名——deepread.py 与 api/ 的既有导入零改动。
@@ -191,32 +191,15 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         from ..tenant_brand import brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
-        topic = s.get(Topic, article.topic_id) if article.topic_id else None
         script = s.get(Script, article.script_id) if article.script_id else None
-        from ..models import ResearchReport
-        report = ""
-        if topic:
-            rep = s.exec(
-                select(ResearchReport).where(ResearchReport.topic_id == topic.id)
-                .order_by(ResearchReport.id.desc())  # type: ignore[attr-defined]
-            ).first()
-            report = rep.content if rep is not None else ""
-        material = {
-            "选题": {
-                "标题": topic.title if topic else "",
-                "角度": topic.angle if topic else "",
-                "受众": topic.audience if topic else "both",
-                "痛点": (topic.evidence or {}).get("pain_points", []) if topic else [],
-                "钩子": (topic.evidence or {}).get("hooks", []) if topic else [],
-            },
-            "深研报告（深度素材，长文的主要原料）": report,
-            "口播脚本终稿（可改写扩写，不要照抄）": script.final_text if script else "",
-        }
-        # 公众号独立报题线（2026-11-02）：无选题无脚本的草稿，报题标题+备注就是原料
-        if topic is None and script is None:
+        if script is not None:
+            material = {
+                "口播脚本终稿（可改写扩写，不要照抄）": script.final_text if script else "",
+            }
+        else:
+            # 无脚本关联的历史草稿（直出链建稿必有脚本；此分支兜底旧数据），报题信息即原料
             material = {
                 "报题": {"标题": article.title, "备注/参考链接": article.note or ""},
-                "深研报告（深度素材，长文的主要原料）": "",
             }
         # 公众号独立风格画像（从已发长文提取，app_settings）：有就注入所有 prompt 的素材块
         style_row = s.get(AppSetting, _ARTICLE_STYLE_KEY)

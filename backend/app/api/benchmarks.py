@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from ..auth import require_user
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import BenchmarkVideo, ScriptTemplate, Topic, User
+from ..models import BenchmarkVideo, ScriptTemplate, User
 from ..settings import settings
 from ._listing import require_douyin_url
 
@@ -220,13 +220,6 @@ def delete_benchmark(benchmark_id: int) -> dict:
         if b is None:
             from fastapi import HTTPException
             raise HTTPException(404, detail="benchmark not found")
-        # 连带删除本样本产出的待审选题候选（已定审/已产出的选题保留）
-        cands = s.exec(_sel(Topic).where(
-            Topic.source_type == "benchmark",
-            Topic.source_ref == f"benchmark:{benchmark_id}",
-            Topic.status == "draft")).all()
-        for t in cands:
-            s.delete(t)
         # 解绑结构模板
         for tpl in s.exec(_sel(ScriptTemplate).where(
                 ScriptTemplate.source_benchmark_id == benchmark_id)).all():

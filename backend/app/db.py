@@ -281,15 +281,6 @@ def _migrate(engine) -> None:
                 " enabled, notify, seen_ids, hits, last_checked_at) "
                 "SELECT created_at, updated_at, id, tenant_id, ch_id, name, enabled, notify,"
                 " seen_ids, hits, last_checked_at FROM radar_topics_legacy")
-        if _has_legacy_col(conn, "research_reports", "tokens_in"):
-            _rebuild_drop_legacy(conn, "research_reports",
-                "CREATE TABLE research_reports ("
-                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
-                " id INTEGER PRIMARY KEY, topic_id INTEGER, content VARCHAR DEFAULT '',"
-                " model VARCHAR DEFAULT '')",
-                "INSERT INTO research_reports (created_at, updated_at, tenant_id, id, topic_id,"
-                " content, model) SELECT created_at, updated_at, tenant_id, id, topic_id,"
-                " content, model FROM research_reports_legacy")
         # 2026-11-16 死列清算（schema 漂移闸上线后最后一波库有模型无）：七列四表
         if _has_legacy_col(conn, "tenants", "credits") or _has_legacy_col(conn, "tenants", "status"):
             _rebuild_drop_legacy(conn, "tenants",
@@ -298,29 +289,17 @@ def _migrate(engine) -> None:
                 " name VARCHAR DEFAULT '', brand JSON)",
                 "INSERT INTO tenants (created_at, updated_at, id, name, brand) "
                 "SELECT created_at, updated_at, id, name, brand FROM tenants_legacy")
-        if _has_legacy_col(conn, "topics", "sharpness"):
-            _rebuild_drop_legacy(conn, "topics",
-                "CREATE TABLE topics ("
-                "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
-                " id INTEGER PRIMARY KEY, line VARCHAR DEFAULT 'persona', title VARCHAR DEFAULT '',"
-                " angle VARCHAR DEFAULT '', audience VARCHAR DEFAULT 'both',"
-                " source_type VARCHAR DEFAULT 'manual', source_ref VARCHAR DEFAULT '',"
-                " evidence JSON, score REAL, score_breakdown JSON, status VARCHAR DEFAULT 'draft')",
-                "INSERT INTO topics (created_at, updated_at, tenant_id, id, line, title, angle,"
-                " audience, source_type, source_ref, evidence, score, score_breakdown, status) "
-                "SELECT created_at, updated_at, tenant_id, id, line, title, angle, audience,"
-                " source_type, source_ref, evidence, score, score_breakdown, status FROM topics_legacy")
         if _has_legacy_col(conn, "articles", "title_alts") or _has_legacy_col(conn, "articles", "kb_doc_ids"):
             _rebuild_drop_legacy(conn, "articles",
                 "CREATE TABLE articles ("
                 "created_at DATETIME, updated_at DATETIME, tenant_id INTEGER DEFAULT 0,"
-                " id INTEGER PRIMARY KEY, topic_id INTEGER, script_id INTEGER,"
+                " id INTEGER PRIMARY KEY, script_id INTEGER,"
                 " md VARCHAR DEFAULT '', title VARCHAR DEFAULT '', note VARCHAR DEFAULT '',"
                 " kb_sources JSON, publish_url VARCHAR DEFAULT '', published_at VARCHAR DEFAULT '',"
                 " stats JSON, html VARCHAR DEFAULT '', status VARCHAR DEFAULT 'draft')",
-                "INSERT INTO articles (created_at, updated_at, tenant_id, id, topic_id, script_id,"
+                "INSERT INTO articles (created_at, updated_at, tenant_id, id, script_id,"
                 " md, title, note, kb_sources, publish_url, published_at, stats, html, status) "
-                "SELECT created_at, updated_at, tenant_id, id, topic_id, script_id,"
+                "SELECT created_at, updated_at, tenant_id, id, script_id,"
                 " md, title, note, kb_sources, publish_url, published_at, stats, html, status FROM articles_legacy")
         if _has_legacy_col(conn, "users", "must_change_password"):
             # R11.2 首登强制改密流程 2026-11-16 全链退役（bootstrap 从不置位，403 分支不可达）
@@ -378,6 +357,11 @@ def _migrate(engine) -> None:
                 " url, signature, follower_count, sample_video_id, sample_title, sample_stats,"
                 " COALESCE(account_type,'persona'), COALESCE(leadgen_density,0), pure_reason,"
                 " COALESCE(status,'open') FROM watch_candidates_legacy")
+
+        # 2026-11-16 二次裁决：老选题库 topics / idea 深研 research_reports 死档案全清
+        # （唯二读者=老文章详情回显/watch 周报 topics_7d 已删；DROP 前有全库备份）
+        for _dead_table in ("topics", "research_reports"):
+            conn.execute(sqlalchemy.text(f"DROP TABLE IF EXISTS {_dead_table}"))
 
         fpcols = [r[1] for r in conn.execute(sqlalchemy.text("PRAGMA table_info(failure_patterns)"))]
         if fpcols and any(c in fpcols for c in ("kind", "last_type", "sample_job_id")):
@@ -473,8 +457,8 @@ def _migrate(engine) -> None:
         #   生产库里已有行原地保留，不再迁移维护）
         for table in ("articles", "benchmark_videos",
                       "radar_topics",
-                      "research_reports", "scripts", "self_videos", "style_profiles",
-                      "topics", "watch_accounts", "watch_candidates"):
+                      "scripts", "self_videos", "style_profiles",
+                      "watch_accounts", "watch_candidates"):
             tcols = [r[1] for r in conn.execute(sqlalchemy.text(f"PRAGMA table_info({table})"))]
             if tcols and "tenant_id" not in tcols:
                 conn.execute(sqlalchemy.text(

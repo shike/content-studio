@@ -15,7 +15,7 @@ from difflib import SequenceMatcher
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..jobs.runner import JobContext, register_executor, runner
+from ..jobs.runner import JobContext, runner
 from ..llm import gateway
 from ..models import BenchmarkVideo, FalsifyItem, Script
 from ..prompts import render
@@ -83,12 +83,6 @@ async def hunt_candidates(ctx: JobContext, tenant_id: int) -> dict:
             s.commit()
     ctx.set_progress(99, f"实测候选猎取：+{len(picked)} 条")
     return {"hunted": len(picked)}
-
-
-@register_executor("falsify_hunt")
-async def falsify_hunt(ctx: JobContext, payload: dict) -> dict:
-    """手动触发猎取（日常随 card_daily 尾段自动跑）。"""
-    return await hunt_candidates(ctx, payload.get("tenant_id") or 1)
 
 
 async def compose_falsify(*, item_id: int, user=None, length: str = "short") -> dict:

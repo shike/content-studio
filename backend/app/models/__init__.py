@@ -83,20 +83,6 @@ class FailurePattern(TimestampMixin, table=True):
     sample_error: str = ""  # 最近一次完整错误（诊断线索）
 
 
-class Topic(TenantScoped, TimestampMixin, table=True):
-    __tablename__ = "topics"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    line: str = Field(default="persona", index=True)  # 选题线（三库独立硬隔离：persona 人设库 | leadgen 获客库；2026-11-02）
-    title: str = ""
-    angle: str = ""
-    audience: str = "both"  # boss | fde | both
-    source_type: str = "manual"  # idea | benchmark | manual | trending | self_story
-    source_ref: str = ""
-    evidence: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    score: Optional[float] = None
-    score_breakdown: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    status: str = "draft"  # draft | approved | rejected | produced
 
 
 class TopicCard(TenantScoped, TimestampMixin, table=True):
@@ -139,13 +125,6 @@ class FalsifyItem(TenantScoped, TimestampMixin, table=True):
     script_id: Optional[int] = None  # 成稿后回填（与 scripts.falsify_item_id 双向锚）
 
 
-class ResearchReport(TenantScoped, TimestampMixin, table=True):
-    __tablename__ = "research_reports"
-    tenant_id: int = Field(default=0, index=True)
-    id: Optional[int] = Field(default=None, primary_key=True)
-    topic_id: Optional[int] = Field(default=None, foreign_key="topics.id", index=True)
-    content: str = ""
-    model: str = ""
 
 
 class BenchmarkVideo(TenantScoped, TimestampMixin, table=True):
@@ -253,7 +232,6 @@ class Article(TenantScoped, TimestampMixin, table=True):
     __tablename__ = "articles"
     tenant_id: int = Field(default=0, index=True)
     id: Optional[int] = Field(default=None, primary_key=True)
-    topic_id: Optional[int] = Field(default=None, foreign_key="topics.id")
     script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
     md: str = ""
     title: str = ""  # 公众号主标题

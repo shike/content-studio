@@ -19,7 +19,6 @@ router = APIRouter(prefix="/api/articles")
 
 
 class GenerateIn(BaseModel):
-    topic_id: int | None = None
     script_id: int | None = None
     style: str = ""  # 长文风格（deep_dive/practice/comparison/inquiry/anatomy；auto=模型按素材挑）
     length: str = "deep"  # 深度版唯一档位（2026-11-02 feed 退役；参数保留仅为兼容，服务端强制 deep）
@@ -197,22 +196,16 @@ class RenderIn(BaseModel):
 
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict:
-    if body.topic_id is None and body.script_id is None:
-        raise HTTPException(status_code=400, detail="topic_id 与 script_id 至少传一个")
+    if body.script_id is None:
+        raise HTTPException(status_code=400, detail="需要 script_id（老选题库 topic 建文已随 topics 退役删除）")
     with Session(engine) as s:
-        dup = None
-        if body.topic_id:
-            dup = s.exec(select(Article).where(
-                Article.topic_id == body.topic_id,
-                Article.status == "generating")).first()
-        if dup is None and body.script_id:
-            dup = s.exec(select(Article).where(
-                Article.script_id == body.script_id,
-                Article.status == "generating")).first()
+        dup = s.exec(select(Article).where(
+            Article.script_id == body.script_id,
+            Article.status == "generating")).first()
         if dup is not None:  # 实体级去重：同源在途不重复生成
             raise HTTPException(status_code=409,
-                                detail=f"该选题正在生成长文（文章 #{dup.id}），请等完成后再试")
-        article = Article(topic_id=body.topic_id, script_id=body.script_id, status="generating")
+                                detail=f"该脚本正在生成长文（文章 #{dup.id}），请等完成后再试")
+        article = Article(script_id=body.script_id, status="generating")
         s.add(article)
         s.commit()
         s.refresh(article)

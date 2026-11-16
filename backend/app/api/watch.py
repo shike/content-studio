@@ -10,7 +10,7 @@ from ..auth import require_user
 from ..db import engine
 from ..models import User
 from ..jobs.runner import runner
-from ..models import BenchmarkVideo, Job, Topic, WatchAccount, WatchCandidate
+from ..models import BenchmarkVideo, Job, WatchAccount, WatchCandidate
 from ..watch.service import _DISCOVER_QUALITY_FANS
 from ..watch.service import _fmt_follow
 from ._listing import require_douyin_url
@@ -48,16 +48,6 @@ def watch_digest(user: User = Depends(require_user)) -> dict:
             if v.scan_status == "pending":
                 key = v.author or "未知"
                 pending_authors[key] = pending_authors.get(key, 0) + 1
-        topics = s.exec(
-            select(Topic).where(  # type: ignore[attr-defined]
-                Topic.tenant_id == tid,  # type: ignore[attr-defined]
-                Topic.source_type == "benchmark",  # type: ignore[attr-defined]
-                Topic.created_at >= cutoff_s,  # type: ignore[attr-defined]
-                Topic.score >= 8,  # type: ignore[attr-defined]
-            ).order_by(Topic.score.desc())  # type: ignore[attr-defined]
-        ).all()
-        top = [{"topic_id": t.id, "title": t.title, "score": round(t.score, 1),
-                "angle": (t.angle or "")[:60]} for t in topics[:3]]
         # 清单外高赞同行（每日发现的 open 候选，粉丝过质量线）：价值流转的第三路
         disc = s.exec(
             select(WatchCandidate).where(  # type: ignore[attr-defined]
@@ -72,8 +62,6 @@ def watch_digest(user: User = Depends(require_user)) -> dict:
         "new_videos": len(vids),
         "pending": sum(1 for v in vids if v.scan_status == "pending"),
         "pending_authors": sorted(pending_authors.items(), key=lambda x: -x[1])[:5],
-        "topics_7d": len(topics),
-        "top_topics": top,
         "discovered": {"count": len(disc), "top": discovered},
     }
 

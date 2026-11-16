@@ -116,7 +116,6 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `topics` | （历史表，2026-11-14 退役：sink 停写/API 全下线，原地保留历史行供老脚本 title 回显） | 老选题库（被 R1.4 靶子卡线+R1.9 获客矿线替代） |
 | `topic_cards` | batch_date, source(douyin_peer/radar/douyin_hot/external/self_story/manual),
   pool(JSON 四证), spine, hook, spice, takeaways(JSON 评论要点≤3条=主线原料留痕), judge(JSON 三维+verdict+reason), gates(JSON 程序闸记录),
   status(draft/approved/discarded/jail), superseded_by, script_id | 人设号靶子卡（选题工场，R1.4；
@@ -124,7 +123,6 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `falsify_items` | claim(主张≤60), target(对象≤40), evidence_note(线索自由文本),
   result_note(实测结论自由文本=成稿论据来源), status(pending/testing/tested/scripted/dismissed),
   script_id | 实测打假清单（R1.4③；实测=物理动作，系统管清单与成稿） |
-| `research_reports` | topic_id(FK), content(MD), model | idea 深研产物 |
 | `benchmark_videos` | url, author, title, stats(JSON), transcript, analysis(JSON), top_comments(JSON 高赞评论原文[{t,d}]≤20条), comment_kind(persona_ore/leadgen_ore),
   comment_leadgen_share(求学密度0~1), media_path, source(douyin/local) | 同行拆解样本 |
 | `self_videos` | url, aweme_id, title, transcript, style_analysis(JSON), analyzed_at, published_at, duration, stats(JSON) | 我的账号视频 + 逐条风格标注（R9.2） |
@@ -133,7 +131,7 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `style_profiles` | tenant_id, account_name, version, digest, traits(JSON), exemplars(JSON), based_on | 风格画像版本快照，保留历史（R9.3） |
 | `scripts` | card_id?(FK 靶子卡备稿), falsify_item_id?(FK 实测稿备稿), versions(JSON:[{label,hook,body,notes}]), final_text, teleprompter_text, storyboard(JSON), title_candidates(JSON), status(generating/polishing/generated/final), account_type(persona/leadgen) | 一个选题一个脚本对象（一版精品直出，R2.1；generated=待定稿，徽章计数口径） |
 | `script_templates` | name, structure(JSON), source_benchmark_id, usage_count | 结构模板库（从拆解沉淀） |
-| `articles` | topic_id?(FK), script_id?(FK), title, note(素材备注), md, html, kb_sources(JSON ima 素材来源), status(pending/generating/failed/draft/edited/rendered/published) | 公众号文章（pending=直出链建稿，failed 可重试） |
+| `articles` | script_id?(FK), title, note(素材备注), md, html, kb_sources(JSON ima 素材来源), status(pending/generating/failed/draft/edited/rendered/published) | 公众号文章（failed 可重试） |
 | `content_items` | media_id(索引防重), kb_id/folder, title, source_author, quality_score, why_good, adapt_angle, best_quotes(JSON), category, priority, status(pending/running/done/published/dismissed/low), article_id | 内容清单=知识库挖出的高质量源文（挖掘器≥线入清单，改编器取项成文；低分落 low 防回卷重评）（R5.6b 源文改编流） |
 | `daily_ledger` | day(UTC), phase(mine/adapt), produced, reason, ok | 产线当日账（防「成功但空转」；anomaly=ok 但无产出无原因，按故障处理） |
 | `tenants` | name, brand(JSON 九字段) | 工作室档案（单用户版恒 1 行；R11.2） |
@@ -147,13 +145,11 @@ daily_card_limit / jail_window_days / pool_pick_max / pool_peer_window_hours（�
 | `watch_candidates` | tenant_id, keyword, direction, name, sec_uid, follower_count, sample_*, status(open/added/dismissed) | 关键词发现的对标账号候选（R3.6） |
 | `jobs` | type, status(queued/running/succeeded/failed/superseded), progress, message, payload/result/history(JSON), error, dedup_key, lane(heavy/light 两道), retry_count/max_retries/next_retry_at, fail_class, error_fp, archived, retry_of, tenant_id, user_id | 统一异步任务（五要素 + 归属；tenant_id=0 为系统任务） |
 
-**生产库遗留（2026-11-16 全部清算完毕）**：已删模型的孤儿旧表 `kb_topics`/`kb_documents`/`harvest_profiles`/`publish_records`/`media_assets`/`dismissals` + 手工备份表 `topics_backup_selfstory_coldrice_20261113` 已于 2026-11-16 生产库 DROP（全库备份 `data/backups/pre-orphan-drop-20261116.sql.gz`）；更早已 DROP：`llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`/`avatar_configs`/`avatar_videos`/`jianying_templates`/`video_projects`。现存 24 表与 24 模型一一对应、零孤儿；旧列 `tenants.credits,status`/`topics.sharpness`/`articles.title_alts,kb_doc_ids`/`watch_candidates.leadgen_comments,recent_same`/`research_reports.tokens_*`/`radar_topics.recent,new_since_last` 等**已于 2026-11-16 经启动重建迁移全部清除（生产实测），库与模型列集合完全一致；更早的未登记遗留列不逐一维护，schema 漂移闸发版时兜底拦截**。
+**生产库遗留（2026-11-16 全部清算完毕）**：已删模型的孤儿旧表 `kb_topics`/`kb_documents`/`harvest_profiles`/`publish_records`/`media_assets`/`dismissals` + 手工备份表 `topics_backup_selfstory_coldrice_20261113` 已于 2026-11-16 生产库 DROP（全库备份 `data/backups/pre-orphan-drop-20261116.sql.gz`）；二次裁决同日 DROP 老选题库 `topics`（517 行）与 idea 深研 `research_reports`（11 行）死档案（备份含）；更早已 DROP：`llm_calls`/`bean_ledger`/`credit_transactions`/`tenant_memberships`/`avatar_configs`/`avatar_videos`/`jianying_templates`/`video_projects`。现存 22 表与 22 模型一一对应、零孤儿（topics/research_reports 两表已整表退役）；旧列 `tenants.credits,status`/`topics.sharpness`/`articles.title_alts,kb_doc_ids,topic_id`/`watch_candidates.leadgen_comments,recent_same`/`research_reports.tokens_*`/`radar_topics.recent,new_since_last`/`users.must_change_password`/`failure_patterns.last_type,sample_job_id`/`scripts.topic_id` 等**已于 2026-11-16 经启动重建迁移全部清除（生产实测），库与模型列集合完全一致；更早的未登记遗留列不逐一维护，schema 漂移闸发版时兜底拦截**。
 
 **内容资产状态机**（串联各表的状态流转）：
 
 ```
-topic:      （2026-11-16 退役划线：仅历史行，sink 停写/API 下线/回退分支已删；
-             Script.topic_id 列已随迁移清除）
 
 script:     generating ──► polishing ──► final
 article:    pending（直出链建稿）──► generating ──► draft ──► edited ──► rendered ──► published
@@ -284,7 +280,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 - 前端：今日靶子页第三 tab「实测打假」（行=主张+对象+状态；展开=线索/结论编辑+状态推进+成稿）。
 
 ### 同行监测（对标账号管理与扫描）
-- `GET /api/watch/digest` → 同行监测周报（近 7 天实时摘要，不落库：新视频/待定夺按作者分布+高分选题 Top3 带切角一句话）
+- `GET /api/watch/digest` → 同行监测周报（近 7 天实时摘要，不落库：新视频/待定夺按作者分布）
 - `GET /api/watch/accounts` → `{items:[{platform, name, url, note, enabled, last_scan_at, video_total, video_recent_7d, scores}]}`；`scores` 为 `{relevance, quality, overall}` 或 null（从备注评分文本解析，口径见 §5）
 - `POST /api/watch/accounts` `{platform(douyin|channels), name, url, note?}` → 201；抖音必须带链接（缺 400）
 - `PUT /api/watch/accounts/{id}` `{name?, url?, note?, enabled?}` → 200（部分更新）；不存在 404、空名 400
@@ -349,7 +345,7 @@ card_id）；script_generate.md 三段纪律=开场逐字用 hook（≤2 字口�
 ### 公众号
 - `GET /api/articles/style-summary` → `{note}`（公众号独立风格画像，存 app_settings.article_style_note）
 - `POST /api/articles/extract-style` → 202 `{job_id}`（从已成文长文提取公众号风格画像）
-- `POST /api/articles/generate` `{topic_id | script_id}` → 202 `{article_id, job_id}`
+- `POST /api/articles/generate` `{script_id}` → 202 `{article_id, job_id}`（topic 建文分支已随 topics 退役删除——2026-11-16）
 - `GET /api/articles/{id}` / `PUT /api/articles/{id}` `{md}`（保存人工改稿，status→edited）
 - `POST /api/articles/{id}/render` `{md?}` → 完整文章对象（含 html，前端据此即时回显预览/状态/复制）；传 md = 渲染即保存改稿，缺省渲染库内正文（renderer.py 渲染器，内联样式，status→rendered）
 - `GET /api/articles/{id}/wechat-copy` → `{html}` 公众号粘贴载荷：净化后的渲染产物，配图地址改写为签名公开地址（前端据此写剪贴板 `text/html`+`text/plain` 双格式；只写纯文本时公众号编辑器贴出来是 HTML 源码）
