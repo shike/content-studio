@@ -65,7 +65,7 @@ class ComposeIn(BaseModel):
 @router.post("/{card_id}/compose", status_code=202)
 async def compose(card_id: int, body: ComposeIn,
                   user: User = Depends(require_user)) -> dict:
-    from ..cards import service as card_service
+    from ..channels.persona import service as card_service
 
     try:
         return await card_service.compose_card(card_id=card_id, hook=body.hook,

@@ -17,7 +17,7 @@ from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
 from ..models import Content, Material, PipelineLedger
 from ..prompts import load, render
-from .service import (
+from .wechat import (
     _article_generate_fail,
     _attach_charts,
     _attach_cover,
@@ -27,7 +27,7 @@ from .service import (
     _kb_style_violations,
     length_specs,
 )
-from .quality import min_chars_or_raise, strip_fence as _strip_fence
+from ..articles.quality import min_chars_or_raise, strip_fence as _strip_fence
 
 _SRC_CAP = 30000      # 源文全文上限
 _DUP_LINE = 30.0      # 原创度线：与源文重复率百分比上限
@@ -64,7 +64,7 @@ def _today() -> str:
 async def article_adapt(ctx: JobContext, payload: dict) -> dict:
     """每日改编：清单取项（CAS）→ 拉源文全文 → 保骨架保原话换口径成文 → 原创度闸 → 机检 → 排版。"""
     from ..tenant_brand import brand_of
-    from .ima_kb import fetch_full_doc, kb_config
+    from ..articles.ima_kb import fetch_full_doc, kb_config
 
     with Session(engine) as s:
         cfg = kb_config(s)
@@ -224,7 +224,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 md_text = polished
 
         # ── 审校组（问题清单制）：事实对源=硬闸（拦编造），读者弃读点=建议（落 note 不拦）──
-        from .review import review_facts, review_reader, revise_once, score_titles
+        from ..articles.review import review_facts, review_reader, revise_once, score_titles
         ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
         issues = await review_facts(md_text, source)
         reader_points = await review_reader(md_text, persona_text)
@@ -282,7 +282,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
     # ── 定稿排版 + 清单项收尾 + 当日账 ──
     _finalize_article(article_id, title=title,
                       kb_sources=[{"media_id": mid, "title": src_title}], md_text=md_text)
-    from .renderer import render_wechat_html
+    from ..articles.renderer import render_wechat_html
     with Session(engine) as s:
         art = s.get(Content, article_id)
         if art is not None and (art.body or "").strip():

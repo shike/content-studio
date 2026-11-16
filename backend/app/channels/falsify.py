@@ -26,7 +26,7 @@ from ..materials.service import record_usage
 
 FALSIFY_STATUS = ("pending", "testing", "tested", "scripted", "dismissed")
 _HUNT_MAX = 3
-from ..cards.norms import _norm  # 归一化单点（2026-11-16 合并，原逐字符同款双份）
+from .persona.norms import _norm  # 归一化单点（2026-11-16 合并，原逐字符同款双份）
 
 _ORIGIN = "test_record"
 
@@ -124,7 +124,7 @@ async def compose_falsify(*, item_id: int, user=None, length: str = "short") -> 
             Content.status == "drafting")).first()  # type: ignore[attr-defined]
         if dup is not None:
             raise RuntimeError(f"该条目正在成稿（脚本 #{dup.id}），等完成或删除后再试")
-        from ..channels.engine import new_script_content
+        from .engine import new_script_content
 
         script = new_script_content(
             s, tenant_id=m.tenant_id or (user.tenant_id if user else 1),

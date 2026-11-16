@@ -24,10 +24,10 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from ..db import engine
-from ..jobs.runner import JobContext, register_executor
-from ..models import Content, Idea, Material, Source
-from ..settings import settings
+from ...db import engine
+from ...jobs.runner import JobContext, register_executor
+from ...models import Content, Idea, Material, Source
+from ...settings import settings
 
 # ── C 阶段结构整治（2026-11-16）：归一/闸门/锻造链拆至 norms/gates/forge，本模块留执行器与编排；facade 导入沿用旧名（api/ 既有导入零改动）──
 
@@ -55,7 +55,7 @@ def _published_titles() -> list[str]:
 async def _hunt_safe(ctx: JobContext, tenant_id: int, meta: dict) -> None:
     """尾段实测候选猎取（失败不拦落卡——猎取是增益不是产线）。"""
     try:
-        from ..falsify import service as _ff
+        from .falsify import service as _ff
         r = await _ff.hunt_candidates(ctx, tenant_id)
         meta["hunted"] = r.get("hunted", 0)
     except Exception as e:  # noqa: BLE001
@@ -72,7 +72,7 @@ async def _radar_round(ctx: JobContext) -> tuple[list[str], list[dict]]:
                 Source.status == "active")).all()  # type: ignore[attr-defined]
         for rrow in radar_rows:
             try:
-                from ..materials.collectors.radar_patrol import check_topic
+                from ...materials.collectors.radar_patrol import check_topic
                 r = await check_topic(rrow)
                 notes.append(f"#{rrow.name}：新增 {r['new']} 条" + ("（飙升）" if r["spiked"] else ""))
                 if r["spiked"]:
@@ -90,11 +90,11 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     """人设号选题工场五段（R1.4）。空过合法：无可怼=诚实空过，失败是异常不是工作流。"""
     from datetime import timedelta as _td
 
-    from ..materials.collectors.hotlist import (fetch_aihot_hot, fetch_baidu_hot,
+    from ...materials.collectors.hotlist import (fetch_aihot_hot, fetch_baidu_hot,
                                                 fetch_douyin_hot, fetch_github_hot,
                                                 fetch_tech_news, fetch_zhihu_hot)
-    from ..materials.service import analyses_map
-    from ..tenant_brand import audience_note_of, brand_of
+    from ...materials.service import analyses_map
+    from ...tenant_brand import audience_note_of, brand_of
 
     tenant_id = payload.get("tenant_id") or 1
     persona = brand_of(tenant_id)["persona"]
@@ -113,15 +113,15 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         recent_cards = s.exec(select(Idea).where(  # type: ignore[attr-defined]
             Idea.created_at >= datetime.now(timezone.utc).replace(tzinfo=None) - _td(days=14)
         )).all()  # type: ignore[attr-defined]
-        seen_refs = {str(((c.pool or {}).get("douyin_evidence") or {}).get("ref") or "")
+        seen_refs = {str((((c.payload or {}).get("pool") or {}).get("douyin_evidence") or {}).get("ref") or "")
                      for c in recent_cards}
         # 一手池子线（P2 素材域）：ready 的抖音素材，新鲜度=published_at（缺省 collected_at）
-        from sqlalchemy import coalesce as _coalesce
+        from sqlalchemy import func as _func
 
         peer_rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
             Material.origin_type == "douyin_video",  # type: ignore[attr-defined]
             Material.status == "ready",  # type: ignore[attr-defined]
-            _coalesce(Material.published_at, Material.collected_at) >= cutoff)).all()  # type: ignore[attr-defined]
+            _func.coalesce(Material.published_at, Material.collected_at) >= cutoff)).all()  # type: ignore[attr-defined]
     peer_amap = {}
     if peer_rows:
         with Session(engine) as s:
@@ -337,7 +337,7 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     draft_ids: list[int] = []
     n_jail = 0
     n_superseded = 0
-    from ..channels.engine import channel_id_of
+    from ..engine import channel_id_of
 
     with Session(engine) as s:
         persona_ch = channel_id_of(s, "persona")
@@ -391,8 +391,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
 async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
                        angle: str = "", user=None) -> dict:
     """备稿：靶子卡（draft/approved）→ 脚本任务。钩子/主线可被用户改写后传入。"""
-    from ..channels.engine import new_script_content
-    from ..scripts.service import SIX_ANGLES
+    from ..engine import new_script_content
+    from ..scripts import SIX_ANGLES
 
     angle = (angle or "").strip()
     if angle not in SIX_ANGLES:
@@ -424,7 +424,7 @@ async def compose_card(*, card_id: int, hook: str = "", spine: str = "",
         s.commit()
         script_id = script.id
     actor = (user.tenant_id, user.id, user.role) if user is not None else None
-    from ..jobs.runner import runner
+    from ...jobs.runner import runner
     job = await runner.submit("script_generate",
                               {"script_id": script_id, "card_id": card_id,
                                "hook": hook_v[:60], "spine": spine_v[:40],

@@ -9,9 +9,9 @@ from difflib import SequenceMatcher
 
 from sqlmodel import Session, select
 
-from ..db import engine
-from ..models import Idea
-from ..settings import settings
+from ...db import engine
+from ...models import Idea
+from ...settings import settings
 from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _COVER_RANK, _coverage_of,
                     _max_chars, _norm, _PREDICT_KW, _pron_len)
 
@@ -93,7 +93,8 @@ def _merge_card(i: int, pool_entry: dict, forged: dict, hook: str,
     pool["coverage"] = _coverage_of(role)
     return Idea(channel_id=channel_id, tenant_id=1,
                     batch_date=_local_day(), source=pool_entry["source"],
-                     pool=pool, spine=str(forged.get("spine") or "").strip(),
+                     payload={"pool": pool},
+                     spine=str(forged.get("spine") or "").strip(),
                      hook=hook.strip(), spice=spice,
                      takeaways=list(forged.get("takeaways") or [])[:3],
                      gates=gates, status="draft")

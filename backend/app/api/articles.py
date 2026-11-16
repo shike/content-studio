@@ -281,6 +281,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
                                 detail=f"该脚本正在生成长文（文章 #{dup.id}），请等完成后再试")
         article = new_article_content(s, tenant_id=user.tenant_id, state="pending",
                                       parent_content_id=body.script_id)
+        s.commit()  # SQLAlchemy2 的 with-Session 退出只 close 不 commit——漏了=行回滚
         article_id = article.id
     job = await runner.submit("article_generate",
                               {"article_id": article_id, "style": body.style})

@@ -16,12 +16,12 @@ from ..models import AppSetting, Content
 from ..prompts import load, render
 # C 阶段结构整治（2026-11-16）：质量机检/违禁词表拆至 quality.py，配图拆至 render_charts.py；
 # 本模块 facade 导入沿用旧名——api/ 与 adapt/review 的既有导入零改动。
-from .quality import CTA_PATTERNS as _CTA_PATTERNS  # noqa: F401
-from .quality import banned_hits as _banned_hits  # noqa: F401
-from .quality import content_signature as _content_signature  # noqa: F401
-from .quality import kb_style_violations as _kb_style_violations  # noqa: F401
-from .render_charts import attach_charts as _attach_charts  # noqa: F401
-from .render_charts import attach_cover as _attach_cover  # noqa: F401
+from ..articles.quality import CTA_PATTERNS as _CTA_PATTERNS  # noqa: F401
+from ..articles.quality import banned_hits as _banned_hits  # noqa: F401
+from ..articles.quality import content_signature as _content_signature  # noqa: F401
+from ..articles.quality import kb_style_violations as _kb_style_violations  # noqa: F401
+from ..articles.render_charts import attach_charts as _attach_charts  # noqa: F401
+from ..articles.render_charts import attach_cover as _attach_cover  # noqa: F401
 
 # 长文风格库（R10）：key → 结构骨架。生成时单选，auto 交给模型按素材挑。
 ARTICLE_STYLES: dict[str, str] = {

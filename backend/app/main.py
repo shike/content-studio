@@ -17,13 +17,13 @@ from .jobs.runner import recover_interrupted_jobs, runner
 from .version import APP_VERSION
 
 # 导入服务模块以注册任务执行器
-from .articles import service as _article_service  # noqa: F401
+from .channels import wechat as _article_service  # noqa: F401
 from .articles import miner as _article_kb_miner  # noqa: F401
-from .articles import adapt as _article_adapt  # noqa: F401
-from .cards import service as _card_service  # noqa: F401
+from .channels import wechat_adapt as _article_adapt  # noqa: F401
+from .channels.persona import service as _card_service  # noqa: F401
 from .materials import executors as _materials_executors  # noqa: F401  素材域执行器（scan/analyze/discover/backfill/topic/hl）
 from .channels import xhs as _xhs_executors  # noqa: F401  内容域执行器（note_generate）
-from .scripts import service as _script_service  # noqa: F401  （链带 selfstyle 执行器注册）
+from .channels import scripts as _script_service  # noqa: F401  （链带 selfstyle 执行器注册）
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 

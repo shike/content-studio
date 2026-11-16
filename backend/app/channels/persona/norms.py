@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from ..settings import settings
+from ...settings import settings
 
 _DOMAIN_KW = ("AI", "人工智能", "大模型", "模型", "智能体", "agent", "机器人", "芯片", "算力",
               "开源", "自动驾驶", "智能驾驶", "代码", "软件", "互联网", "科技", "数字", "算法",

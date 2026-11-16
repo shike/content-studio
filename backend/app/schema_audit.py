@@ -20,14 +20,7 @@ _IGNORED_TABLES = {"alembic_version"}
 # 迁移期白名单：旧表已停止读写、数据已迁新表，生产库原地只读保留到 P5 收口统一 DROP
 # （Expand-Contract；模型已删=新库不再建）。P5 删旧表时同步移出本清单。
 # P2 素材域（2026-11-16）+ P3 内容域（2026-11-16）。
-_LEGACY_TABLES = {
-    # P2 素材域
-    "benchmark_videos", "watch_candidates", "radar_topics", "content_items", "falsify_items",
-    # P3 内容域
-    "topic_cards", "scripts", "articles", "style_profiles",
-    # P4 数据域
-    "watch_accounts", "account_metrics_daily", "video_weekly_reports", "daily_ledger",
-}
+_LEGACY_TABLES: set[str] = set()  # P5 收口后清空：旧表已物理删除，勿再加回
 
 # 类型只比「家族」：避免 VARCHAR(200) vs VARCHAR、identity INTEGER vs INTEGER 之类误报
 _TYPE_FAMILY = {

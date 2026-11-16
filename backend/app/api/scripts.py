@@ -12,7 +12,7 @@ from ..channels.engine import channel_key_of, new_script_content, script_out
 from ..db import engine
 from ..jobs.runner import runner
 from ..models import Content, User
-from ..scripts import service as script_service
+from ..channels import scripts as script_service
 from ._listing import paged_list_response
 
 router = APIRouter(prefix="/api/scripts")
@@ -70,7 +70,7 @@ class PolishIn(BaseModel):
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict:
     if body.card_id:  # 靶子卡备稿：compose 单点在 channels/persona（cards.service 沿用）
-        from ..cards.service import compose_card
+        from ..channels.persona.service import compose_card
 
         angle = (body.angles[0].strip() if body.angles else "")
         try:
@@ -104,6 +104,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
             # 引用追溯（PRD R1.6）：获客稿 ← 获客矿素材
             record_usage(s, tenant_id=user.tenant_id, material_id=body.ore_id,
                          target_type="content", target_id=script.id, role="source")
+            s.commit()  # with-Session 退出不 commit（SQLA2）——漏了=脚本行回滚
             script_id = script.id
         angles = [a.strip() for a in body.angles if a.strip()][:3]
         known = script_service.SIX_ANGLES
@@ -129,6 +130,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
             channel_key="persona" if (body.account_type or "persona") != "leadgen" else "leadgen",
             payload={"script_state": "generating",
                      "account_type": body.account_type or "persona"})
+        s.commit()  # with-Session 退出不 commit（SQLA2）
         script_id = script.id
     job = await runner.submit("script_generate",
                               {"script_id": script_id, "length": body.length,

@@ -58,27 +58,42 @@
 ```
 content-studio/
 ├── backend/
+│   ├── alembic.ini                 # Alembic 配置（schema 变更唯一通道）
 │   ├── app/
 │   │   ├── main.py                 # FastAPI 入口 + 静态托管 frontend/dist
-│   │   ├── settings.py             # pydantic-settings 读 .env
-│   │   ├── db.py                   # 引擎 + 会话 + 作用域三件套
-│   │   ├── schema_audit.py         # 模型 ↔ 生产库 Postgres 只读审计
-│   │   ├── platform/               # auth / settings / jobs / schedules / failure
-│   │   ├── materials/              # sources / ingest / enrich / search / usage
-│   │   ├── channels/               # engine.py 共享状态机 + 渠道配置与提示词
-│   │   ├── analytics/              # accounts / metrics / reports
-│   │   ├── integrations/           # douyin / ima / wechat_publisher / llm / search / browser
-│   │   ├── api/                    # 路由层（薄）
+│   │   ├── settings.py             # pydantic-settings 读 .env（DATABASE_URL 必填）
+│   │   ├── db.py                   # PG 引擎 + 会话 + 作用域三件套
+│   │   ├── schema_audit.py         # 模型 ↔ 生产库只读审计（发版闸）
+│   │   ├── ops.py                  # 运维 CLI（inflight/backup，看门狗与发版共用）
+│   │   ├── api/                    # 路由层：auth/health/jobs/schedules/settings/stats/
+│   │   │                           #   materials/sources（素材域）channels/contents（内容域）
+│   │   │                           #   accounts/analytics（数据域）cards/scripts/articles/
+│   │   │                           #   falsify/style/metrics（门面）falsify/crawl/llm/…
+│   │   ├── platform 能力            # auth.py / settings_store.py / tenant_brand.py /
+│   │   │                           #   jobs/（runner+schedules+revive+errors）/ search.py
+│   │   ├── materials/              # 素材域：service / enrich / executors /
+│   │   │   └── collectors/         #   download / collectors（douyin_list/hotlist/hl/radar_patrol）
+│   │   ├── channels/               # 内容域：engine（渠道注册+状态机+门面整形）/ persona/
+│   │   │                           #   （选题工场四件）scripts（脚本引擎）wechat /
+│   │   │                           #   wechat_adapt / falsify / xhs
+│   │   ├── analytics 能力           # selfstyle/（扫描/创作者中心/风格画像/周报计算）
+│   │   ├── integrations/           # wechat_publisher（公众号 API，人工触发）
+│   │   ├── articles/               # 公众号能力库：renderer / quality / review /
+│   │   │                           #   render_charts / images / ima_kb / miner
 │   │   ├── models/                 # SQLModel 表定义（§5）
-│   │   └── prompts/                # shared/ + channels/{persona,leadgen,wechat,xhs}/
-│   ├── migrations/                 # Alembic versions（唯一 schema 变更通道）
-│   └── tests/                      # 仅冒烟辅助（无验收套件）
-├── frontend/src/pages/             # Today / Materials / Persona / Leadgen / Wechat / Xhs / Analytics / Tasks / Settings
-├── scripts/                        # 部署运维（launchd / deploy-linux / sync-server / watchdog / pg-backup）
-├── data/                           # 媒体/配图/缓存/备份（业务库在 Postgres）
+│   │   └── prompts/                # 模板（md + 版本 frontmatter，render 强校验占位符）
+│   ├── migrations/                 # Alembic versions（baseline→0004 领域四表→0005 收口）
+│   └── scripts/                    # 一次性迁移 ETL（migrate_materials/content/analytics）
+├── frontend/src/pages/             # Today/Persona/Leadgen/Wechat/Xhs/Materials/Analytics/Tasks/Settings
+├── scripts/                        # 部署运维（launchd/deploy-linux/sync-server/watchdog/pg-*）
+├── data/                           # 媒体/配图/封面/备份（pg-daily-*.dump）；业务库在 PostgreSQL
 ├── docs/
 └── .env.example
 ```
+
+编排层（channels/）与能力库（articles/、selfstyle/）分层说明：产线编排与状态机在
+channels/；纯能力（渲染器/图表/配图/机检/审校/ima 客户端）留驻原位——它们无表、
+被多渠道复用，P5 后不再搬（避免无收益的纯文件 churn）。
 
 ## 4. 配置与密钥（分层：.env 引导项 + 数据库运行时项）
 
@@ -539,66 +554,3 @@ PY
   匿名采集默认机房直连，`scrape_proxy` 可配住宅兜底；`douyin_proxy` 只用于 DDG 出海与
   创作者中心登录态；出口不可达时错误信息显式标注所用代理。
 - **公众号登录态**：仅用于自有账号数据回流，永不爬取他人内容（红线）。
-
-## 15. 迁移映射（迁移期专用，P5 收口后删除）
-
-> **P4 数据域已执行（2026-11-16）**：alembic 0004=9a3302c66a18 建 accounts/metrics_snapshots/
-> analytics_reports/pipeline_ledger；`backend/scripts/migrate_analytics.py` 迁
-> watch_accounts(self)→accounts(auth.creator_cookie)、account_metrics_daily→metrics_snapshots
-> (subject=account)、video_weekly_reports→analytics_reports(kind=weekly)、daily_ledger→
-> pipeline_ledger（phase→pipeline 改名）；旧数据面 4 表停读写入白名单（legacy 共 13 张）。
-> 调度改名 2 项：creator_data_daily→data_creator_sync、video_weekly_report→data_weekly_report。
-> 自有账号 CRUD 统一 /api/accounts（旧 /api/watch/accounts 保持契约给 Style 页）；看板
-> /api/analytics/{overview,channels,accounts,publications,weekly}；文章 48h 回流双写
-> payload.stats（回显）+metrics_snapshots（事实表）。**幂等键坑：旧表 id≠新表 id，迁移查重
-> 必须 payload._legacy_id，不能用主键集合**（Account 首轮迁移重复建号实测）。
-> **P3 内容域已执行（2026-11-16）**：alembic 0003=8994f9eb59c8 建 channels/ideas/contents/
-> publications/channel_styles 五表；`backend/scripts/migrate_content.py` 迁 topic_cards→ideas、
-> scripts→contents(video_script)、articles→contents(long_article)+publications、
-> style_profiles→channel_styles，并重映射 idea.content_id / contents.parent_content_id /
-> materials.quality.article_id+script_id；旧内容面 4 表停读写入白名单。调度改名 4 项：
-> article_hotspots_daily→wechat_hotspot_daily、article_kb_miner_daily→material_kb_mine、
-> article_adapt_daily→wechat_adapt_daily、card_line_daily→persona_idea_daily。
-> API 门面（/api/cards、/api/scripts、/api/articles、/api/style）保持旧契约，前端零改动；
-> 新增 /api/channels（渠道配置+小红书线+发布）、/api/contents（统一稿件+封面服务）。
-> 执行器名维持（card_daily/script_generate/article_generate…），目录结构 P5 统一搬。
-> **P2 素材域已执行（2026-11-16）**：`backend/scripts/migrate_materials.py` 已把旧 5 表迁入
-> sources/materials/material_analyses/material_usages（幂等可重跑），scripts.ore_id/falsify_item_id
-> 重映射为 materials.id（FK 已在 0002 迁移拆除）；旧表停读写、模型已删，生产库原地只读保留
-> （schema_audit 白名单 `_LEGACY_TABLES`，P5 DROP 时移除）。执行器/调度改名同步落地：
-> watch_scan→material_watch_scan、watch_resolve→material_resolve、watch_discover→material_discover、
-> watch_backfill→material_backfill、topic_backfill→material_topic_backfill（+material_topic_check）、
-> hl_search_matrix→material_hl_search、benchmark_analyze→material_analyze；
-> article_kb_miner/article_adapt/self_scan 等内容线与自有链执行器名 P3/P4 再随域迁移。
-
-
-**原则**：Expand-Contract。先建 Postgres 等价库并全量搬数据；新域表与旧表并存，
-双写/回填后切读；旧表在 P5 停写并 DROP。所有旧 id 原样保留，迁移后重置 identity 序列。
-
-| 旧表/字段 | 新表 | 映射规则 |
-|---|---|---|
-| `watch_accounts`(competitor) | `sources` | kind=peer_account, status=active/disabled, config 存评分/账号类型 |
-| `watch_accounts`(self) | `accounts` | channel_id=persona（或按 account_type），auth 存 creator cookie 引用 |
-| `watch_candidates` | `sources` | kind=peer_account, status=candidate；keyword/direction/sample 进 config |
-| `radar_topics` | `sources` | kind=radar_topic, ext_id=ch_id；seen_ids/hits 进 config |
-| `benchmark_videos` | `materials` + `material_analyses` | origin_type=douyin_video/local；transcript/analysis/top_comments 拆到 analyses；comment_kind/leadgen_share 进 quality |
-| `content_items` | `materials` | origin_type=kb_doc, origin_id=media_id；评分/改编角度/原话进 quality/payload；pending→inbox，low→ignored，done/published→ready |
-| `topic_cards` | `ideas` | channel_id=persona；pool/spine/hook/judge/gates 原样；status 映射 draft/approved/discarded/jail |
-| `falsify_items` | `materials`(test_record) | claim→title, evidence_note→body, result_note→note/body；status→stage（pending/testing/tested/scripted/dismissed）；成稿引用走 usages |
-| `scripts` | `contents` | kind=video_script；channel 由 account_type 决定；versions/final_text/teleprompter/storyboard 进 body/payload；card_id→idea_id，ore_id→material_usages |
-| `articles` | `contents` + `publications` | kind=long_article, channel_id=wechat；md/html/note→body/payload；script_id→parent_content_id；publish_url/published_at→publications；stats→metrics_snapshots |
-| `self_videos` | `publications` + `metrics_snapshots` + `channel_styles` | channel=persona；style_analysis→publication.payload/风格素材；stats→metrics |
-| `account_metrics_daily` | `metrics_snapshots` | subject_type=account, date 原样；source=creator_center |
-| `video_weekly_reports` | `analytics_reports` | kind=weekly, period_start=week_start |
-| `style_profiles` | `channel_styles` | 按 account_name 归渠道；version/based_on 原样 |
-| `daily_ledger` | `pipeline_ledger` | phase→pipeline；produced/reason/ok 原样 |
-| `jobs/schedules/failure_patterns/app_settings/users/sessions/tenants` | 同名表 | 结构等价迁移；jobs 历史保留；schedules 旧 key 按映射改名 |
-
-**调度 key 映射**：`watch_scan→material_watch_scan` · `self_scan→material_self_scan` ·
-`article_hotspots_daily→wechat_hotspot_daily` · `article_kb_miner_daily→material_kb_mine` ·
-`article_adapt_daily→wechat_adapt_daily` · `card_line_daily→persona_idea_daily` ·
-`creator_data_daily→data_creator_sync` · `video_weekly_report→data_weekly_report` ·
-`hl_search_daily→material_hl_search` · `daily_backup/media_cleanup/crawl_probe` 不变。
-
-**迁移安全**：切换前 `pg_dump` + 旧 SQLite 快照双备份；ETL 后核对每表行数与关键状态
-校验和；旧 SQLite 只读保留 N 天可回滚；schema_audit 通过后才允许发版。

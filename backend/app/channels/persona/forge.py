@@ -10,11 +10,11 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from ..db import engine
-from ..llm import gateway
-from ..models import Material, SelfVideo
-from ..prompts import render
-from ..settings import settings
+from ...db import engine
+from ...llm import gateway
+from ...models import Material, SelfVideo
+from ...prompts import render
+from ...settings import settings
 from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _PREDICT_KW, _max_chars,
                     _pron_len)
 
@@ -32,7 +32,7 @@ def _fewshot_lines(limit: int = 14) -> str:
     """few-shot 句式标尺：素材库近 30 天高分拆解的钩子/高光 + 已发视频标题（正样本）。"""
     from datetime import timedelta as _td
 
-    from ..materials.service import analyses_map
+    from ...materials.service import analyses_map
 
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _td(days=30)
     lines: list[str] = []

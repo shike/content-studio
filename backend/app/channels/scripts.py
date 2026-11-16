@@ -316,7 +316,8 @@ async def script_finalize(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(20, "定稿三件套生成中（提词器/分镜/标题）")
     script = await finalize_script(script_id, int(payload.get("version_index") or 0))
     ctx.set_progress(100, "定稿完成")
-    first_title = (script.title_candidates or [""])[0] if script.title_candidates else ""
+    titles = (script.payload or {}).get("title_candidates") or []
+    first_title = titles[0] if titles else ""
     return {"script_id": script_id, "status": script.status, "title": first_title}
 
 

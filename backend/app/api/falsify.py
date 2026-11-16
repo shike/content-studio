@@ -9,7 +9,7 @@ from sqlmodel import Session, func, select
 
 from ..auth import require_user
 from ..db import engine
-from ..falsify import service as falsify_service
+from ..channels import falsify as falsify_service
 from ..models import Material, User
 
 router = APIRouter(prefix="/api/falsify")

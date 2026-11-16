@@ -1,7 +1,7 @@
 # 跃迁内容工作室 · Agent 工作规约
 
 单管理员流水线（登录门禁，PRD R11/TDD §15）：选题 → 口播脚本（一版精品直出）→ 公众号长文。发布永远人工；数字人成片/发布台/多租户不在系统范围。
-架构：FastAPI + SQLModel + PostgreSQL 16（`backend/app/`，21 模型；迁移期生产库另存 13 张只读旧表——素材面 5 + 内容面 4 + 数据面 4，P5 收口 DROP）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。schema 变更唯一通道=Alembic（`backend/.venv/bin/alembic -c backend/alembic.ini upgrade head`，sync-server 发版自动跑）。
+架构：FastAPI + SQLModel + PostgreSQL 16（`backend/app/`，21 模型 21 表，零旧表零孤儿；Alembic 迁移 0001~0005）· React 18 + Vite + Tailwind v4（`frontend/`）· Python 3.12（`backend/.venv`，uv 管理）。schema 变更唯一通道=Alembic（`backend/.venv/bin/alembic -c backend/alembic.ini upgrade head`，sync-server 发版自动跑）。
 两大文档=规格型（无版本号/完成情况）：PRD 需求总账（**改需求先改它**，业务口径唯一权威）· TDD 技术契约（§13：冒烟纪律/隔离实例/审计对账）。现状只看运行中的应用。
 
 ## 启动与构建（CWD 必须是仓库根）
@@ -44,6 +44,7 @@
 
 - 数据源国内优先（硬约束）：论据/检索中文源优先，国外数据仅补位不作主锚。
 - 发布方式（PRD R0.4）：默认人工；**公众号支持官方 API 发布但必须人工点按触发**（wechat_publish_enabled 开关 + AppID/Secret 只写不读 + IP 白名单），失败回退复制 HTML；抖音/小红书/视频号无自动发布。端口 8000 是用户别的项目，**永远不许杀**。
+- **SQLA2 纪律（P5 教训）**：`with Session(engine) as s:` 退出只 close 不 commit——flush 后必须显式 `s.commit()` 才落库；新代码凡「flush 拿 id 再交执行器」的调用方一律加 commit，冒烟必须覆盖执行器全路径（搬位后 card_daily/adapt/generate 各炸出过一处）。
 - `data/` 混真实内容：删行先确认归属，删库先备份；`data/backups/` 安全网别动。
 - 改 `watchdog.sh` 后必须重跑 `launchd.sh install` 同步副本（副本在 `~/Library/Application Support/content-studio/`）；探活=连续 2 次失败升级，有 running 连续 6 次才强拉。
 - 智谱充值/控制台开通等只能用户本人操作。
