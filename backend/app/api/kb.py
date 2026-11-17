@@ -85,6 +85,38 @@ def kb_overview(user: User = Depends(require_user)) -> dict:
         }
 
 
+@router.get("/docs")
+def kb_docs(user: User = Depends(require_user)) -> dict:
+    """知识库内容榜：全量 kb 文档（评分降序，低分含内、无分垫底）——高质量内容展示数据源。
+
+    字段取自 quality（score/folder/category/why_good/adapt_angle/best_quotes，挖掘器写入）；
+    一次全量返回（~几百篇量级），目录/关键词筛选在客户端做。
+    """
+    with Session(engine) as s:
+        rows = s.exec(
+            select(Material).where(Material.origin_type == "kb_doc")).all()  # type: ignore[attr-defined]
+        items = [{
+            "id": m.id, "title": m.title, "author": m.author or "",
+            "folder": str((m.quality or {}).get("folder") or ""),
+            "category": str((m.quality or {}).get("category") or ""),
+            "score": (m.quality or {}).get("score"),
+            "why_good": str((m.quality or {}).get("why_good") or ""),
+            "adapt_angle": str((m.quality or {}).get("adapt_angle") or ""),
+            "best_quotes": (m.quality or {}).get("best_quotes") or [],
+            "status": m.status, "stage": m.stage,
+            "created_at": str(m.created_at or "").replace(" ", "T"),
+        } for m in rows]
+        def _score(d: dict) -> float | None:
+            try:
+                return round(float(d["score"]), 1) if d["score"] is not None else None
+            except (TypeError, ValueError):
+                return None
+        items.sort(key=lambda d: (_score(d) is None, -(_score(d) or 0)))
+        for d in items:
+            d["score"] = _score(d)
+        return {"items": items, "total": len(items)}
+
+
 class FolderIn(BaseModel):
     folder_id: str
     name: str

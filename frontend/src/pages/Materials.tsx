@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
   Check,
@@ -150,15 +150,22 @@ function MaterialDetail({ m }: { m: MaterialRow }) {
   )
 }
 
-/** 状态圆片（页内 chips：tab=实体，chips=生命周期，徽章=待办）。 */
-function Chips({ items, value, onPick }: { items: { v: string; label: string }[]; value: string; onPick: (v: string) => void }) {
+/** 状态圆片（页内 chips：tab=实体，chips=生命周期，徽章=待办）。onRemove=条目级 ✕（目录移除用）。 */
+function Chips({ items, value, onPick }: {
+  items: { v: string; label: string; onRemove?: () => void }[]
+  value: string; onPick: (v: string) => void
+}) {
   return (
     <div className="flex items-center gap-1">
       {items.map((c) => (
-        <button key={c.v} onClick={() => onPick(c.v)}
-          className={`rounded-full px-3 py-1 text-[12.5px] font-medium transition ${value === c.v ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
-          {c.label}
-        </button>
+        <span key={c.v}
+          className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[12.5px] font-medium transition ${value === c.v ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+          <button onClick={() => onPick(c.v)}>{c.label}</button>
+          {c.onRemove && (
+            <button title="移除该目录" onClick={(e) => { e.stopPropagation(); c.onRemove?.() }}
+              className="text-slate-400 transition hover:text-red-500">✕</button>
+          )}
+        </span>
       ))}
     </div>
   )
@@ -656,19 +663,51 @@ function WatchTab() {
 
 /* ─────────────────────────── Tab ③ 知识库 ─────────────────────────── */
 
-/** 知识库：ima 源这条线的管理台——目录清单增删 + 挖掘控制；文档本体在「推荐选题」可检索。 */
+interface KbDoc {
+  id: number
+  title: string
+  author: string
+  folder: string
+  category: string
+  score: number | null
+  why_good: string
+  adapt_angle: string
+  best_quotes: string[]
+  status: string
+  stage: string
+  created_at: string
+}
+
+/** 知识库：高质量内容榜（评分降序，低分灰显可翻案视野）+ ima 线管理细带（凭证/挖掘/目录增删）。 */
 function KbTab() {
   const [ov, setOv] = useState<KbOverview | null>(null)
+  const [docs, setDocs] = useState<KbDoc[]>([])
+  const [folder, setFolder] = useState('')
+  const [q, setQ] = useState('')
   const [form, setForm] = useState({ folder_id: '', name: '' })
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState<number | null>(null)
 
   const load = useCallback(() => {
     api<KbOverview>('/kb/overview').then(setOv)
       .catch((e) => setError(apiErrText(e)))
+    api<{ items: KbDoc[] }>('/kb/docs').then((d) => setDocs(d.items || []))
+      .catch((e) => setError(apiErrText(e)))
   }, [])
   useEffect(() => { load() }, [load])
+
+  const folders = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of docs) if (d.folder) m.set(d.folder, (m.get(d.folder) || 0) + 1)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [docs])
+  const kw = q.trim().toLowerCase()
+  const shown = docs.filter((d) =>
+    (!folder || d.folder === folder) &&
+    (!kw || (d.title + ' ' + d.author).toLowerCase().includes(kw)))
+  const passed = docs.filter((d) => d.status === 'ready').length
 
   const addFolder = async () => {
     setError('')
@@ -684,6 +723,7 @@ function KbTab() {
     setError('')
     try {
       await api(`/kb/folders/${encodeURIComponent(fid)}`, { method: 'DELETE' })
+      if (folder === name) setFolder('')
       setMsg(`已移除目录「${name}」——已入库文档不受影响`)
       load()
     } catch (e) { setError(apiErrText(e)) }
@@ -707,9 +747,9 @@ function KbTab() {
             {ov.configured ? '凭证已配置' : '凭证未配置（设置页 ima_*）'}
           </span>
           <span className="text-[13px] text-slate-600">
-            共入库 <b className="num-serif text-slate-900">{ov.docs_total}</b> 篇
-            {ov.stage.pending > 0 && <> · 待改编 {ov.stage.pending}</>}
-            {ov.last_mine && <> · 最近挖掘 {relTime(ov.last_mine.updated_at)}：{ov.last_mine.message?.slice(0, 40) || ov.last_mine.status}</>}
+            共 <b className="num-serif text-slate-900">{docs.length}</b> 篇（入选 <b className="num-serif text-slate-900">{passed}</b> ·
+            低分 <b className="num-serif text-slate-900">{docs.length - passed}</b>）
+            {ov.last_mine && <> · 最近挖掘 {relTime(ov.last_mine.updated_at)}：{ov.last_mine.message?.slice(0, 36) || ov.last_mine.status}</>}
           </span>
         </> : <span className="text-[13px] text-slate-400">载入中…</span>}
         actions={<button onClick={mine} disabled={busy || (ov != null && !ov.configured)}
@@ -719,9 +759,83 @@ function KbTab() {
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       <ErrorLine text={error} />
 
-      <div className="mb-4 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Chips items={[
+          { v: '', label: `全部 ${docs.length}` },
+          ...folders.map(([name, n]) => {
+            const fid = ov?.folders.find((f) => f.name === name)?.folder_id
+            return {
+              v: name, label: `${name} ${n}`,
+              onRemove: fid ? () => removeFolder(fid, name) : undefined,
+            }
+          }),
+        ]} value={folder} onPick={setFolder} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜标题 / 作者…"
+          className="ml-auto w-52 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+      </div>
+
+      {shown.length === 0 ? (
+        <EmptyState icon={BookOpen} title={docs.length === 0 ? '知识库还没有入库文档' : '没有匹配的文档'}
+          desc={docs.length === 0 ? '点上方「立即挖掘」跑一批，或每日 04:00 自动挖掘' : '换个目录或关键词'} />
+      ) : (
+        <div className="space-y-2">
+          {shown.map((d) => {
+            const open = expanded === d.id
+            const low = d.status !== 'ready'
+            return (
+              <div key={d.id}
+                className={`cursor-pointer rounded-xl border bg-white px-4 py-3 transition ${open ? 'border-emerald-300' : low ? 'border-[#E8ECF0] opacity-70 hover:border-slate-300' : 'border-[#E8ECF0] hover:border-slate-300'}`}
+                onClick={() => setExpanded(open ? null : d.id)}>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className={`shrink-0 text-[17px] font-bold num-serif ${low ? 'text-slate-300' : 'text-[#0a2f24]'}`}>
+                    {d.score ?? '—'}
+                  </span>
+                  <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${low ? 'text-slate-500' : 'text-slate-900'}`}>
+                    《{d.title || `文档 #${d.id}`}》
+                  </span>
+                  {low && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-400">未过线</span>}
+                  {d.category && (
+                    <span className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">{d.category}</span>
+                  )}
+                  {d.author && <span className="shrink-0 text-xs text-slate-400">@{d.author}</span>}
+                  <span className="shrink-0 text-[11px] text-slate-400">{relTime(d.created_at)}</span>
+                </div>
+                {d.why_good && (
+                  <div className="mt-1 line-clamp-1 text-[12.5px] text-slate-500">为什么好：{d.why_good}</div>
+                )}
+                {open && (
+                  <div className="mt-3 space-y-2 border-t border-[#E8ECF0] pt-3" onClick={(e) => e.stopPropagation()}>
+                    {d.adapt_angle && (
+                      <div>
+                        <div className="text-[11px] tracking-wide text-slate-400">改编角度</div>
+                        <div className="mt-1 text-[13px] leading-relaxed text-slate-700">{d.adapt_angle}</div>
+                      </div>
+                    )}
+                    {(d.best_quotes || []).length > 0 && (
+                      <div>
+                        <div className="text-[11px] tracking-wide text-slate-400">金句原文</div>
+                        <ul className="mt-1.5 space-y-1">
+                          {d.best_quotes.slice(0, 3).map((t, ix) => (
+                            <li key={ix} className="text-[13px] text-slate-600">「{t}」</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-x-4 text-[12px] text-slate-400">
+                      {d.folder && <span>目录：{d.folder}</span>}
+                      <span>{low ? '评分低于生成线，未入改编队列' : '已入改编队列（改编走公众号·清单）'}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="mt-6 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
         <div className="mb-2 text-[12px] font-medium tracking-wide text-slate-400">
-          添加挖掘目录（ima 知识库的 folder_id；每日 04:00 自动翻一遍，评分过线入库进「推荐选题」）
+          目录管理（每日 04:00 自动翻一遍；目录上方 chips 可点 ✕ 移除，已入库文档不受影响）
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input value={form.folder_id} onChange={(e) => setForm({ ...form, folder_id: e.target.value })}
@@ -731,35 +845,10 @@ function KbTab() {
             className="w-44 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
           <button onClick={addFolder} disabled={!form.folder_id.trim()}
             className="rounded-full bg-[#0a2f24] px-3 py-1.5 text-[12.5px] font-medium text-[#f0e9d5] transition hover:opacity-90 disabled:opacity-40">
-            <FolderPlus size={13} className="inline" /> 添加
+            <FolderPlus size={13} className="inline" /> 添加目录
           </button>
         </div>
       </div>
-
-      {!ov ? null : ov.folders.length === 0 ? (
-        <EmptyState icon={BookOpen} title="还没有挖掘目录" desc="上面添加第一个目录；没有目录时挖掘器用内置默认 12 目录" />
-      ) : (
-        <div className="space-y-2">
-          {ov.folders.map((f) => (
-            <div key={f.folder_id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
-              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">知识库目录</span>
-              <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-slate-900">{f.name}</span>
-              <span className="shrink-0 text-[11px] text-slate-400">
-                入库 <b className="num-serif text-slate-800">{f.docs}</b> 篇{f.latest ? ` · 最近 ${relTime(f.latest)}` : ' · 还没挖到过'}
-              </span>
-              <button onClick={() => removeFolder(f.folder_id, f.name)}
-                className="shrink-0 rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600 transition hover:bg-slate-50">
-                移除
-              </button>
-            </div>
-          ))}
-          {ov.unknown_folder_docs > 0 && (
-            <div className="px-1 text-[12px] text-slate-400">
-              另有 {ov.unknown_folder_docs} 篇早期入库文档目录标记缺失，仍在「推荐选题」可检索
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
