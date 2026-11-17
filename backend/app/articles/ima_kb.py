@@ -74,12 +74,17 @@ async def list_folder_docs(client_id: str, api_key: str, kb_id: str,
                 body = {"knowledge_base_id": kb_id, "cursor": cursor, "limit": 50}
                 if fid:
                     body["folder_id"] = fid
-                r = await cli.post(f"{BASE}/openapi/wiki/v1/get_knowledge_list", json=body, headers={
-                    "ima-openapi-clientid": client_id,
-                    "ima-openapi-apikey": api_key,
-                    "ima-openapi-ctx": CTX,
-                })
-                r.raise_for_status()
+                for attempt in range(4):  # 403=突发量惩罚：批内自退避，不炸整批
+                    r = await cli.post(f"{BASE}/openapi/wiki/v1/get_knowledge_list", json=body, headers={
+                        "ima-openapi-clientid": client_id,
+                        "ima-openapi-apikey": api_key,
+                        "ima-openapi-ctx": CTX,
+                    })
+                    if r.status_code == 403 and attempt < 3:
+                        await asyncio.sleep(45)
+                        continue
+                    r.raise_for_status()
+                    break
                 data = r.json()
                 if data.get("code") != 0:
                     raise RuntimeError(f"ima 列目录失败: {data.get('msg')}")
@@ -88,7 +93,7 @@ async def list_folder_docs(client_id: str, api_key: str, kb_id: str,
                     mt = it.get("media_type")
                     if mt == 99:  # 文件夹：递归下钻
                         if depth > 0:
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(2.0)
                             await _walk(str(it.get("media_id") or ""), depth - 1)
                         continue
                     docs.append({"title": str(it.get("title") or "")[:80],
@@ -97,7 +102,7 @@ async def list_folder_docs(client_id: str, api_key: str, kb_id: str,
                 if payload.get("is_end") or not payload.get("next_cursor"):
                     break
                 cursor = payload.get("next_cursor")
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(2.5)
         await _walk(folder_id, depth)
     return docs
 
