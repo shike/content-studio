@@ -148,7 +148,7 @@ export default function App() {
           {renderItem({ key: 'today', label: '今天', icon: LayoutDashboard })}
           <div className="pt-3" />
           {renderItem({ key: 'persona', label: '人设号', icon: Fingerprint })}
-          {renderItem({ key: 'leadgen', label: '获客', icon: Magnet })}
+          {renderItem({ key: 'leadgen', label: '获客号', icon: Magnet })}
           {renderItem({ key: 'article', label: '公众号', icon: Newspaper })}
           {renderItem({ key: 'xhs', label: '小红书', icon: Feather })}
           {renderItem({ key: 'analytics', label: '数据', icon: BarChart3 })}
