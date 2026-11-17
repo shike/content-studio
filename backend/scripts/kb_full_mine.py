@@ -46,10 +46,13 @@ async def main() -> int:
             total["errors"] += 1
             consec_fail += 1
             print(f"[batch {total['batches'] + 1}] 批失败: {type(e).__name__}: {str(e)[:120]}", flush=True)
-            if consec_fail >= 5:
-                print("[full-mine] 连续 5 批失败，停止（查失败中台/ima 凭证）", flush=True)
+            if consec_fail >= 8:
+                print("[full-mine] 连续 8 批失败，停止（查失败中台/ima 凭证）", flush=True)
                 break
-            await asyncio.sleep(30)
+            # 递归遍历列目录调用密集，ima 403 惩罚窗以分钟计——退避给足（2026-11-17 实测 30s 不够）
+            wait = min(600, 180 * consec_fail)
+            print(f"  退避 {wait}s（连败 {consec_fail}）", flush=True)
+            await asyncio.sleep(wait)
             continue
         total["batches"] += 1
         for k in ("evaluated", "added", "skipped_low", "failed", "already", "non_text"):
