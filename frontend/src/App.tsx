@@ -140,7 +140,6 @@ export default function App() {
             <div className="truncate text-sm font-semibold tracking-tight text-[#f0e9d5]">
               跃迁内容工作室
             </div>
-            <div className="text-[10px] text-[#9dbba9]/70">六模块 · 素材库 · 数据</div>
           </div>
         </div>
 
