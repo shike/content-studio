@@ -96,6 +96,10 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                                       or (ore.quality or {}).get("comment_kind") != "leadgen_ore"):
             raise RuntimeError(f"获客矿素材 {payload['ore_id']} 不存在")
         ore_ctx = _material_ctx(s, ore.id) if ore is not None else {}
+        kb = (s.get(Material, int(payload["kb_id"]))
+              if payload.get("kb_id") else None)
+        if payload.get("kb_id") and (kb is None or kb.origin_type != "kb_doc"):
+            raise RuntimeError(f"知识库文档 {payload['kb_id']} 不存在")
         if falsify is not None:
             # 实测打假稿（R1.4③）：body=实测结论（唯一事实来源），没实测的环节一个字不许编
             fq = falsify.quality or {}
@@ -125,6 +129,21 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                 "demand_note": (f"这条视频的评论区 {share}% 在求资料/学习（上面 pain_points=赞数最高的求学评论原文）。"
                                 "稿子要面向这些需求做获客内容：接住需求、给出具体可上手的方案，结尾按获客引导完成转化动作；"
                                 f"视频背景供参考：{(ore_ctx.get('analysis') or {}).get('summary', '')[:160]}"),
+            }
+        elif kb is not None:
+            # 知识库文档建稿（2026-11-17）：挖掘器的改编角度=切角、金句=钩子证据、原文=唯一事实来源
+            kq = kb.quality or {}
+            quotes = [str(q).strip() for q in (kq.get("best_quotes") or []) if str(q).strip()]
+            topic_info = {
+                "title": (kb.title or "")[:60],
+                "angle": str(kq.get("adapt_angle") or "")[:200],
+                "audience": "both",
+                "pain_points": [],
+                "hooks": quotes[:2],
+                "claim": str(kq.get("why_good") or "")[:200],
+                "evidence": (("\n".join(f"「{q}」" for q in quotes[:3]) + "\n" if quotes else "")
+                             + (kb.body or "")[:1200]),
+                "spice": "mid",
             }
         elif card is not None:
             # 靶子卡备稿（选题工场 R1.4）：钩子/主线由卡带（备稿时可被用户改写），spice 辣度入通道

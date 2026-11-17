@@ -673,6 +673,7 @@ interface KbDoc {
   why_good: string
   adapt_angle: string
   best_quotes: string[]
+  excerpt?: string
   status: string
   stage: string
   created_at: string
@@ -739,6 +740,45 @@ function KbTab() {
       setMsg(`已移除目录「${name}」——已入库文档不受影响`)
       load()
     } catch (e) { setError(apiErrText(e)) }
+  }
+
+  const toScript = async (d: KbDoc) => {
+    setError('')
+    try {
+      const r = await api<{ job_id: number; script_id: number }>('/scripts/generate', {
+        method: 'POST', body: JSON.stringify({ kb_id: d.id, length: 'short' }),
+      })
+      setMsg(`视频脚本生成中（任务 #${r.job_id}）——完成后在「人设号 · 视频稿」`)
+      waitJob(r.job_id, (j) => setMsg(`视频脚本：${j.progress}% ${j.message || ''}`))
+        .then(() => setMsg(`脚本 #${r.script_id} 已生成 → 「人设号 · 视频稿」定稿`))
+        .catch((e) => setError(`脚本生成失败：${apiErrText(e)}`))
+    } catch (e) { setError(`发起失败：${apiErrText(e)}`) }
+  }
+
+  const toXhs = async (d: KbDoc) => {
+    setError('')
+    try {
+      const angle = [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
+        .filter(Boolean).join('；金句：').slice(0, 200)
+      const idea = await api<{ id: number }>('/channels/xhs/ideas', {
+        method: 'POST', body: JSON.stringify({ title: d.title, angle, material_ids: [d.id] }),
+      })
+      const c = await api<{ job_id: number }>(`/channels/xhs/ideas/${idea.id}/compose`, { method: 'POST' })
+      setMsg(`小红书笔记生成中（任务 #${c.job_id}）`)
+      waitJob(c.job_id, (j) => setMsg(`小红书笔记：${j.progress}% ${j.message || ''}`))
+        .then(() => setMsg('笔记已生成 → 「小红书」tab 改稿发布'))
+        .catch((e) => setError(`笔记生成失败：${apiErrText(e)}`))
+    } catch (e) { setError(`发起失败：${apiErrText(e)}`) }
+  }
+
+  const toArticle = async (d: KbDoc) => {
+    setError('')
+    try {
+      await api(`/articles/content-items/${d.id}/status`, {
+        method: 'POST', body: JSON.stringify({ status: 'pending' }),
+      })
+      setMsg('已入公众号改编队列（每日 05:00 自动出长文）——队列在「公众号 · 清单」')
+    } catch (e) { setError(`入队失败：${apiErrText(e)}`) }
   }
 
   const mine = async () => {
@@ -825,10 +865,25 @@ function KbTab() {
                         <button onClick={() => setEdit(null)} className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-500 transition hover:bg-slate-50">取消</button>
                       </div>
                     ) : (
-                      <button onClick={() => setEdit({ id: d.id, title: d.title })}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600 transition hover:bg-slate-50">
-                        改标题
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button onClick={() => setEdit({ id: d.id, title: d.title })}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600 transition hover:bg-slate-50">
+                          改标题
+                        </button>
+                        <span className="text-[11px] text-slate-300">｜</span>
+                        <button onClick={() => toScript(d)} title="人设号·视频稿"
+                          className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] font-medium text-emerald-700 transition hover:bg-emerald-100">
+                          视频脚本
+                        </button>
+                        <button onClick={() => toXhs(d)} title="小红书图文笔记"
+                          className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[12px] font-medium text-rose-600 transition hover:bg-rose-100">
+                          小红书笔记
+                        </button>
+                        <button onClick={() => toArticle(d)} title="入公众号改编队列"
+                          className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[12px] font-medium text-sky-700 transition hover:bg-sky-100">
+                          改编公众号
+                        </button>
+                      </div>
                     )}
                     {d.adapt_angle && (
                       <div>

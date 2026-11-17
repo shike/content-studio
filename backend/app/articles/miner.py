@@ -164,6 +164,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     s.add(Material(
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
                         title=clean_kb_title(title),
+                        body=(text or "")[:12000],
                         author=str((note or {}).get("source_author") or "")[:60],
                         quality={"score": score,
                                  "folder": folder_name,
@@ -183,6 +184,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     s.add(Material(
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
                         title=clean_kb_title(title),
+                        body=(text or "")[:12000],
                         quality={"score": score, "folder": folder_name, "priority": 0},
                         stage="low", status="ignored",
                         note=f"评分 {score} 低于生成线 {line}，未入改编队列"))

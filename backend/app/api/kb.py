@@ -103,6 +103,7 @@ def kb_docs(user: User = Depends(require_user)) -> dict:
             "why_good": str((m.quality or {}).get("why_good") or ""),
             "adapt_angle": str((m.quality or {}).get("adapt_angle") or ""),
             "best_quotes": (m.quality or {}).get("best_quotes") or [],
+            "excerpt": (m.body or "").strip()[:300],
             "status": m.status, "stage": m.stage,
             "created_at": str(m.created_at or "").replace(" ", "T"),
         } for m in rows]

@@ -51,6 +51,7 @@ def _account_filter(q, account_type: str):
 class GenerateIn(BaseModel):
     card_id: int = 0  # 靶子卡备稿（选题工场 R2.2）
     ore_id: int = 0  # 获客矿建稿（分型路由消费面；与 card_id 二选一）
+    kb_id: int = 0  # 知识库文档建稿（素材库知识库 2026-11-17；三者选一）
     hook: str = ""
     spine: str = ""
     use_style: bool = True
@@ -117,8 +118,43 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
                                    "angles": angles},
                                   dedup_key=f"ore:{body.ore_id}", actor=(user.tenant_id, user.id, user.role))
         return {"script_id": script_id, "job_id": job.id}
-    if not (body.card_id or body.ore_id):
-        raise HTTPException(status_code=400, detail="需要 card_id 或 ore_id")
+    if body.kb_id:  # 知识库文档建稿：挖掘器的改编角度/金句直接做切角与证据，原文做事实底
+        with Session(engine) as s:
+            from ..materials.service import record_usage
+            from ..models import Material
+
+            kb = s.get(Material, body.kb_id)
+            if kb is None or kb.origin_type != "kb_doc":
+                raise HTTPException(status_code=404, detail="知识库文档不存在")
+            dup = s.exec(select(Content).where(  # type: ignore[attr-defined]
+                Content.payload.op('->>')('kb_id') == str(body.kb_id),  # type: ignore[attr-defined]
+                Content.status == "drafting")).first()  # type: ignore[attr-defined]
+            if dup is not None:
+                raise HTTPException(status_code=409,
+                                    detail=f"该文档正在生成脚本（脚本 #{dup.id}），请等完成或删除后再试")
+            script = new_script_content(
+                s, tenant_id=user.tenant_id, channel_key="persona",
+                title_hint=f"知识库：{(kb.title or '')[:50]}",
+                payload={"script_state": "generating", "kb_id": body.kb_id,
+                         "account_type": "persona"})
+            # 引用追溯（PRD R1.6）：脚本 ← 知识库文档
+            record_usage(s, tenant_id=user.tenant_id, material_id=body.kb_id,
+                         target_type="content", target_id=script.id, role="source")
+            s.commit()  # with-Session 退出不 commit（SQLA2）——漏了=脚本行回滚
+            script_id = script.id
+        angles = [a.strip() for a in body.angles if a.strip()][:3]
+        known = script_service.SIX_ANGLES
+        bad = [a for a in angles if a not in known]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"未知打法：{'、'.join(bad)}")
+        job = await runner.submit("script_generate",
+                                  {"script_id": script_id, "kb_id": body.kb_id,
+                                   "length": body.length, "use_style": body.use_style,
+                                   "angles": angles},
+                                  dedup_key=f"kb:{body.kb_id}", actor=(user.tenant_id, user.id, user.role))
+        return {"script_id": script_id, "job_id": job.id}
+    if not (body.card_id or body.ore_id or body.kb_id):
+        raise HTTPException(status_code=400, detail="需要 card_id / ore_id / kb_id")
     angles = [a.strip() for a in body.angles if a.strip()][:3]
     known = script_service.SIX_ANGLES
     bad = [a for a in angles if a not in known]
