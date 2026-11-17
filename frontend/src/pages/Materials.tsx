@@ -885,10 +885,16 @@ function KbTab() {
                         </button>
                       </div>
                     )}
+                    {d.excerpt && (
+                      <div>
+                        <div className="text-[11px] tracking-wide text-slate-400">原文摘录（前 300 字，真货优先）</div>
+                        <div className="mt-1 text-[13px] leading-relaxed text-slate-700">{d.excerpt}…</div>
+                      </div>
+                    )}
                     {d.adapt_angle && (
                       <div>
-                        <div className="text-[11px] tracking-wide text-slate-400">改编角度</div>
-                        <div className="mt-1 text-[13px] leading-relaxed text-slate-700">{d.adapt_angle}</div>
+                        <div className="text-[11px] tracking-wide text-slate-400">改编角度（AI 评估）</div>
+                        <div className="mt-1 text-[13px] leading-relaxed text-slate-500">{d.adapt_angle}</div>
                       </div>
                     )}
                     {(d.best_quotes || []).length > 0 && (
