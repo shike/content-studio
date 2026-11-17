@@ -17,6 +17,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.articles.miner import article_kb_miner  # noqa: E402
+from app.settings_store import load_overrides  # noqa: E402
+
+# 与服务进程同口径：DB 里的运行时配置（LLM 密钥等）覆盖 .env 默认值——
+# 不调用它，脚本进程 settings.zhipu_api_key 是空的（密钥只存在 app_settings，.env 无此行）
+load_overrides()
 
 
 class _Ctx:
