@@ -16,7 +16,6 @@ import Analytics from './pages/Analytics'
 import Tasks from './pages/Tasks'
 import SettingsPage from './pages/Settings'
 import { PersonaStage, LeadgenStage, ArticleStage, MaterialsStage } from './pages/Stages'
-import { fetchMenuStats, menuBadges } from './counts'
 import Login from './pages/Login'
 import Mobile from './Mobile'
 
@@ -52,8 +51,6 @@ const NAVMAP: Record<string, NavTarget> = {
   articles: { key: 'article', tab: 'workshop' },
 }
 
-const BADGED = new Set<string>(['today', 'persona', 'leadgen', 'article', 'xhs', 'materials', 'tasks'])
-
 const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
   persona: 'topics',
   leadgen: 'topics',
@@ -64,7 +61,6 @@ const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
 export default function App() {
   const [active, setActive] = useState<SectionKey>('today')
   const [stageTab, setStageTab] = useState<Partial<Record<SectionKey, string>>>({})
-  const [badges, setBadges] = useState<Partial<Record<string, number>>>({})
   const [authed, setAuthed] = useState<boolean | null>(null)  // null=检查中
   const [me, setMe] = useState<MeInfo | null>(null)
 
@@ -87,25 +83,6 @@ export default function App() {
     document.title = '跃迁内容工作室'
   }, [])
 
-  // 菜单待办计数：徽章落在阶段页自身（counts.ts 求和），60s 静默刷新。
-  // 依赖 authed（2026-11-16 修）：此前只在 App 挂载时跑一次——那时未登录，整组
-  // fetchMenuStats 401 被 catch 静默吞掉，登录后要等 60s 定时器才显示真值
-  // （实测登录后前 60 秒侧栏徽章全 0，看起来像"今天没活"）。
-  useEffect(() => {
-    if (authed !== true) return
-    let alive = true
-    const load = () =>
-      fetchMenuStats()
-        .then((s) => alive && setBadges(menuBadges(s)))
-        .catch(() => {})
-    load()
-    const timer = setInterval(load, 60_000)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [authed])
-
   /** 跳转：新键直达，旧键走 NAVMAP（页+页内 tab），未知键落工作台。 */
   const navTo = (k: string) => {
     const t = NAVMAP[k]
@@ -118,13 +95,9 @@ export default function App() {
       ? (k as SectionKey) : 'today')
   }
 
-  const badgeOf = (k: string) => (BADGED.has(k) ? (badges[k] ?? 0) : null)
-
   const renderItem = (s: { key: SectionKey; label: string; icon: typeof Package }) => {
     const Icon = s.icon
     const isActive = active === s.key
-    const raw = badgeOf(s.key)
-    const count = raw ?? 0
     return (
       <button
         key={s.key}
@@ -137,19 +110,6 @@ export default function App() {
       >
         <Icon size={16} className={isActive ? 'text-[#e8c97f]' : 'text-[#7fa695] group-hover:text-[#f0e9d5]'} />
         <span className="flex-1">{s.label}</span>
-        {raw !== null && (
-          <span
-            className={`min-w-5 rounded-full px-1.5 py-px text-center text-[10px] font-semibold tabular-nums ${
-              count > 0
-                ? s.key === 'tasks' && (badges.tasks_alert ?? 0) > 0
-                  ? 'bg-red-500/25 text-red-300'  // 任务徽章红色 = 有待处置失败（带病运行）
-                  : 'bg-[rgba(232,201,127,0.16)] text-[#e8c97f]'
-                : 'text-[#7fa695]/70'
-            }`}
-          >
-            {count}
-          </span>
-        )}
       </button>
     )
   }

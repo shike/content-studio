@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { Spark } from '../components'
-import { fetchMenuStats } from '../counts'
+import { fetchCardStats } from '../counts'
 
 interface MetricsResp {
   items: { date: string; fans?: number; play?: number; profile_views?: number }[]
@@ -36,7 +36,7 @@ export default function Today({ onNavigate }: { onNavigate: (k: string) => void 
     try {
       const [cards, s] = await Promise.all([
         api<{ items: TargetCard[] }>('/cards?status=draft&limit=8'),
-        fetchMenuStats(),
+        fetchCardStats(),
       ])
       setTodos({ failed: s.failed, active: s.tasks }) // tasks=在途、failed=终态（2026-11-11 口径分离，不再相减）
       // 候选待定夺两线真实数字：p_cand/l_cand 即 TodoStats.openCandidatesPersona/Leadgen 的透传

@@ -174,7 +174,7 @@ const TOPIC_CHIPS: { v: TopicChip; label: string }[] = [
 ]
 
 /** 推荐选题：全部素材大一统——待定夺收件箱 / 可用（按热度排）/ 已忽略翻案 / 全部检索。 */
-function TopicsTab({ onLoaded }: { onLoaded?: (n: number) => void }) {
+function TopicsTab() {
   const [chip, setChip] = useState<TopicChip>('ready')
   const [rows, setRows] = useState<MaterialRow[]>([])
   const [total, setTotal] = useState(0)
@@ -199,11 +199,10 @@ function TopicsTab({ onLoaded }: { onLoaded?: (n: number) => void }) {
         if (chip === 'ready') {
           items.sort((a, b) => (b.quality_score ?? -1) - (a.quality_score ?? -1))
         }
-        setRows(items); setTotal(d.total); setCounts(d.counts || {})
-        onLoaded?.(d.counts?.inbox ?? 0); setLoaded(true)
+        setRows(items); setTotal(d.total); setCounts(d.counts || {}); setLoaded(true)
       })
       .catch((e) => { setError(apiErrText(e)); setLoaded(true) })
-  }, [chip, q, author, onLoaded])
+  }, [chip, q, author])
   useEffect(() => { load() }, [load])
 
   const act = async (m: MaterialRow, action: 'ready' | 'ignored' | 'enrich' | 'delete') => {
@@ -378,7 +377,7 @@ function TopicsTab({ onLoaded }: { onLoaded?: (n: number) => void }) {
 type WatchChip = 'cand' | 'active' | 'disabled'
 
 /** 监控清单：同行账号/话题雷达 + 候选账号定夺——源的完整生命周期一处管。 */
-function WatchTab({ onCandidates }: { onCandidates?: (n: number) => void }) {
+function WatchTab() {
   const [kind, setKind] = useState<'peer_account' | 'radar_topic'>('peer_account')
   const [chip, setChip] = useState<WatchChip>('active')
   const [rows, setRows] = useState<SourceRow[]>([])
@@ -403,7 +402,6 @@ function WatchTab({ onCandidates }: { onCandidates?: (n: number) => void }) {
   const disabled = rows.filter((r) => !r.enabled && r.status !== 'candidate')
   const dismissedN = rows.filter((r) => r.status === 'candidate' && r.dismissed).length
   const shown = chip === 'cand' ? cands : chip === 'active' ? active : disabled
-  useEffect(() => { onCandidates?.(cands.length) }, [cands.length, onCandidates])
 
   const runJob = async (submit: () => Promise<{ job_id: number }>, label: string, reload = false) => {
     setError('')
@@ -779,13 +777,11 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
   onNavigate?: (k: string) => void; tabId?: string; onTabChange?: (t: string) => void
 } = {}) {
   const [tab, setTab] = useState<Tab>(normalizeTab(tabId))
-  const [inboxN, setInboxN] = useState(0)
-  const [candN, setCandN] = useState(0)
 
   const pick = (t: Tab) => { setTab(t); onTabChange?.(t) }
-  const tabs: { id: Tab; label: string; badge?: number }[] = [
-    { id: 'topics', label: '推荐选题', badge: inboxN },
-    { id: 'watch', label: '监控清单', badge: candN },
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'topics', label: '推荐选题' },
+    { id: 'watch', label: '监控清单' },
     { id: 'kb', label: '知识库' },
   ]
 
@@ -797,12 +793,12 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
         {tabs.map((t) => (
           <button key={t.id} onClick={() => pick(t.id)}
             className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${tab === t.id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
-            {t.label}{t.badge ? ` ${t.badge}` : ''}
+            {t.label}
           </button>
         ))}
       </div>
-      {tab === 'topics' && <TopicsTab onLoaded={setInboxN} />}
-      {tab === 'watch' && <WatchTab onCandidates={setCandN} />}
+      {tab === 'topics' && <TopicsTab />}
+      {tab === 'watch' && <WatchTab />}
       {tab === 'kb' && <KbTab />}
     </div>
   )
