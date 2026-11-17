@@ -37,6 +37,23 @@ def _is_cjk(ch: str) -> bool:
 _PUNCT = set("：:，,。.、；;！!？?·——-（）()「」『』《》〈〉\u3000")
 
 
+def clean_kb_body(text: str) -> str:
+    """ima 全文 → 可入库正文。ima 里混着伪 .md 的二进制文件（控制字符/\\x00），PG VARCHAR 拒收：
+
+    - 剔除 NUL 与控制字符（保留换行/制表）
+    - 控制字符占比 >2% 判为二进制文件 → 整篇拒收（空串）
+    """
+    import re
+
+    t = (text or "").replace("\x00", "")
+    if not t:
+        return ""
+    ctrl = sum(1 for ch in t if ord(ch) < 32 and ch not in "\n\t\r")
+    if len(t) > 200 and ctrl / len(t) > 0.02:  # 比例闸只对长文生效（短句一个杂符就超 2%）
+        return ""
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", t)
+
+
 def clean_kb_title(raw: str) -> str:
     """ima 文件名 → 干净标题。纯机械规则（AI 不参与、不加一个词），原始文件名留在 origin_id 可溯：
 
