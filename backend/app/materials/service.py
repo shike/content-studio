@@ -30,6 +30,45 @@ def aweme_id_of(origin_url: str) -> str:
     return m.group(1) if m else ""
 
 
+def _is_cjk(ch: str) -> bool:
+    return bool(ch) and "\u4e00" <= ch <= "\u9fff"
+
+
+_PUNCT = set("：:，,。.、；;！!？?·——-（）()「」『』《》〈〉\u3000")
+
+
+def clean_kb_title(raw: str) -> str:
+    """ima 文件名 → 干净标题。纯机械规则（AI 不参与、不加一个词），原始文件名留在 origin_id 可溯：
+
+    - 去 .md 尾；压空白；封顶 120
+    - ≥6 段下划线链条 = 抓取源的 SEO 关键词串（『FDE 业务落地实战_FDE_交付_…_极客时间』）→ 砍到首段
+    - 其余孤立下划线 = markdown 标记残缺（『从_看数_到_决策_』）：CJK 侧邻接（含全角标点）→ 删；
+      两侧都不挨 CJK（如 『了_AI 落地』中 _邻拉丁）→ 还原成空格
+    """
+    t = (raw or "").strip()
+    if t.lower().endswith(".md"):
+        t = t[:-3].rstrip()
+    parts = t.split("_")
+    if len(parts) >= 6:
+        t = parts[0]
+    else:
+        out: list[str] = []
+        for i, ch in enumerate(t):
+            if ch != "_":
+                out.append(ch)
+                continue
+            prev = t[i - 1] if i else ""
+            nxt = t[i + 1] if i + 1 < len(t) else ""
+            if _is_cjk(prev) and (_is_cjk(nxt) or nxt in _PUNCT or not nxt):
+                out.append("")
+            elif _is_cjk(nxt) and (prev in _PUNCT or not prev):
+                out.append("")
+            else:
+                out.append(" ")
+        t = "".join(out)
+    return " ".join(t.split())[:120]
+
+
 def upsert_material(s: Session, *, tenant_id: int, origin_type: str,
                     origin_id: str = "", origin_url: str = "", author: str = "",
                     title: str = "", body: str = "", transcript: str = "",

@@ -689,6 +689,18 @@ function KbTab() {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [edit, setEdit] = useState<{ id: number; title: string } | null>(null)
+
+  const saveTitle = async () => {
+    if (!edit) return
+    setError('')
+    try {
+      await api(`/materials/${edit.id}`, { method: 'PUT', body: JSON.stringify({ title: edit.title.trim() }) })
+      setEdit(null)
+      setMsg('标题已更新')
+      load()
+    } catch (e) { setError(apiErrText(e)) }
+  }
 
   const load = useCallback(() => {
     api<KbOverview>('/kb/overview').then(setOv)
@@ -805,6 +817,19 @@ function KbTab() {
                 )}
                 {open && (
                   <div className="mt-3 space-y-2 border-t border-[#E8ECF0] pt-3" onClick={(e) => e.stopPropagation()}>
+                    {edit?.id === d.id ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })}
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+                        <button onClick={saveTitle} className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] font-medium text-emerald-700 transition hover:bg-emerald-100">保存</button>
+                        <button onClick={() => setEdit(null)} className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-500 transition hover:bg-slate-50">取消</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setEdit({ id: d.id, title: d.title })}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600 transition hover:bg-slate-50">
+                        改标题
+                      </button>
+                    )}
                     {d.adapt_angle && (
                       <div>
                         <div className="text-[11px] tracking-wide text-slate-400">改编角度</div>

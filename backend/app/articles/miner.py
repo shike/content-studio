@@ -15,6 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
+from ..materials.service import clean_kb_title
 from ..models import AppSetting, Material, PipelineLedger
 from ..prompts import render
 from .quality import load_cursor, save_cursor
@@ -162,7 +163,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     # kb 素材：status=ready（挖掘已批准，人工决策点在改编清单），stage=改编流
                     s.add(Material(
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
-                        title=title[:120],
+                        title=clean_kb_title(title),
                         author=str((note or {}).get("source_author") or "")[:60],
                         quality={"score": score,
                                  "folder": folder_name,
@@ -181,7 +182,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                 if again is None:  # 低分也落行（stage=low）：整库盘完回卷时不重复评估
                     s.add(Material(
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
-                        title=title[:120],
+                        title=clean_kb_title(title),
                         quality={"score": score, "folder": folder_name, "priority": 0},
                         stage="low", status="ignored",
                         note=f"评分 {score} 低于生成线 {line}，未入改编队列"))
