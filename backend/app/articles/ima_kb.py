@@ -8,6 +8,8 @@ ima_kb_ids（逗号分隔，只配用户自建库——订阅的他人库不是�
 """
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 from sqlmodel import Session
 
@@ -57,31 +59,46 @@ def topic_kb_id(s: Session) -> str:
     return ids[0] if ids else "ima_kb_Oqey8gOu"
 
 
-async def list_folder_docs(client_id: str, api_key: str, kb_id: str, folder_id: str) -> list[dict]:
-    """遍历目录：全量翻页，返回 [{title, media_id}]。"""
-    docs, cursor = [], ""
+async def list_folder_docs(client_id: str, api_key: str, kb_id: str,
+                           folder_id: str, depth: int = 4) -> list[dict]:
+    """遍历目录（递归子目录至 depth 层，2026-11-17：ima 库重组后内容进了多层子目录）。
+
+    返回 [{title, media_id, media_type}]；99=文件夹（下钻）；9=图片（原样返回，
+    由调用方剔拒）。分页/下钻间隔 0.5s（密集调用 403 教训）。"""
+    docs: list[dict] = []
+
     async with httpx.AsyncClient(timeout=30) as cli:
-        while True:
-            body = {"knowledge_base_id": kb_id, "cursor": cursor, "limit": 50}
-            if folder_id:
-                body["folder_id"] = folder_id
-            r = await cli.post(f"{BASE}/openapi/wiki/v1/get_knowledge_list", json=body, headers={
-                "ima-openapi-clientid": client_id,
-                "ima-openapi-apikey": api_key,
-                "ima-openapi-ctx": CTX,
-            })
-            r.raise_for_status()
-            data = r.json()
-            if data.get("code") != 0:
-                raise RuntimeError(f"ima 列目录失败: {data.get('msg')}")
-            payload = data.get("data") or {}
-            for it in payload.get("knowledge_list") or []:
-                if it.get("media_type") != 99:  # 99=文件夹
+        async def _walk(fid: str, depth: int) -> None:
+            cursor = ""
+            while True:
+                body = {"knowledge_base_id": kb_id, "cursor": cursor, "limit": 50}
+                if fid:
+                    body["folder_id"] = fid
+                r = await cli.post(f"{BASE}/openapi/wiki/v1/get_knowledge_list", json=body, headers={
+                    "ima-openapi-clientid": client_id,
+                    "ima-openapi-apikey": api_key,
+                    "ima-openapi-ctx": CTX,
+                })
+                r.raise_for_status()
+                data = r.json()
+                if data.get("code") != 0:
+                    raise RuntimeError(f"ima 列目录失败: {data.get('msg')}")
+                payload = data.get("data") or {}
+                for it in payload.get("knowledge_list") or []:
+                    mt = it.get("media_type")
+                    if mt == 99:  # 文件夹：递归下钻
+                        if depth > 0:
+                            await asyncio.sleep(0.5)
+                            await _walk(str(it.get("media_id") or ""), depth - 1)
+                        continue
                     docs.append({"title": str(it.get("title") or "")[:80],
-                                 "media_id": str(it.get("media_id") or "")})
-            if payload.get("is_end") or not payload.get("next_cursor"):
-                break
-            cursor = payload.get("next_cursor")
+                                 "media_id": str(it.get("media_id") or ""),
+                                 "media_type": mt})
+                if payload.get("is_end") or not payload.get("next_cursor"):
+                    break
+                cursor = payload.get("next_cursor")
+                await asyncio.sleep(0.5)
+        await _walk(folder_id, depth)
     return docs
 
 

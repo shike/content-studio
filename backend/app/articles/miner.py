@@ -15,7 +15,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..materials.service import clean_kb_title
+from ..materials.service import clean_kb_body, clean_kb_title
 from ..models import AppSetting, Material, PipelineLedger
 from ..prompts import render
 from .quality import load_cursor, save_cursor
@@ -108,13 +108,16 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
     # ── 逐篇：拉全文 → 评估 → 达线入清单 ──
     ctx.set_progress(4, f"目录「{folder_name}」第 {pos + 1}~{pos + len(batch)} 篇，逐篇评估")
     deadline = asyncio.get_event_loop().time() + _BATCH_DEADLINE
-    evaluated = added = skipped_low = failed = already = 0
+    evaluated = added = skipped_low = failed = already = non_text = 0
     for i, d in enumerate(batch, 1):
         if asyncio.get_event_loop().time() > deadline:
             raise TransientError(
                 f"本批评估超过 {_BATCH_DEADLINE // 60} 分钟仍未完成（疑似挂死），游标未推进，稍后自动重试")
         mid = str(d.get("media_id") or "")
         title = str(d.get("title") or f"文档{i}")
+        if d.get("media_type") == 9:  # 9=图片：非文字素材，不进挖掘（2026-11-17 子目录递归后混入大量贴图）
+            non_text += 1
+            continue
         if not mid or mid in existing:
             already += 1
             continue
@@ -164,7 +167,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     s.add(Material(
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
                         title=clean_kb_title(title),
-                        body=(text or "")[:12000],
+                        body=clean_kb_body(text)[:12000],
                         author=str((note or {}).get("source_author") or "")[:60],
                         quality={"score": score,
                                  "folder": folder_name,
@@ -184,7 +187,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                     s.add(Material(
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
                         title=clean_kb_title(title),
-                        body=(text or "")[:12000],
+                        body=clean_kb_body(text)[:12000],
                         quality={"score": score, "folder": folder_name, "priority": 0},
                         stage="low", status="ignored",
                         note=f"评分 {score} 低于生成线 {line}，未入改编队列"))
@@ -209,4 +212,5 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
         s.commit()
     ctx.set_progress(100, f"挖掘完成：评 {evaluated} 篇，入清单 {added} 项，跳过低分 {skipped_low}")
     return {"evaluated": evaluated, "added": added, "skipped_low": skipped_low,
-            "failed": failed, "folder": folder_name, "line": line}
+            "failed": failed, "non_text": non_text, "already": already,
+            "folder": folder_name, "line": line}

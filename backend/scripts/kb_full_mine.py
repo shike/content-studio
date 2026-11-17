@@ -36,7 +36,7 @@ async def main() -> int:
     if "--max-batches" in sys.argv:
         max_batches = int(sys.argv[sys.argv.index("--max-batches") + 1])
     total = {"batches": 0, "evaluated": 0, "added": 0, "skipped_low": 0,
-             "failed": 0, "already": 0, "errors": 0}
+             "failed": 0, "already": 0, "non_text": 0, "errors": 0}
     consec_fail = 0
     for _ in range(max_batches):
         try:
@@ -52,7 +52,7 @@ async def main() -> int:
             await asyncio.sleep(30)
             continue
         total["batches"] += 1
-        for k in ("evaluated", "added", "skipped_low", "failed", "already"):
+        for k in ("evaluated", "added", "skipped_low", "failed", "already", "non_text"):
             total[k] += int(r.get(k) or 0)
         print(f"[batch {total['batches']}] {r}", flush=True)
         if r.get("message") == "全库盘完一轮":
