@@ -65,10 +65,6 @@ export default function HotComments() {
 
   return (
     <div>
-      <div className="mb-3 text-[12px] text-slate-400">
-        只出监控清单作者的高赞评论：赞 ≥ {bar}，共 {items.length} 条——生成走「弹药匹配 + 形态读稿闸」，
-        成稿进「人设号 · 视频稿」。评论存档由补采任务持续补齐，名单在「素材库 · 监控清单」维护。
-      </div>
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
       {!loaded ? null : items.length === 0 ? (

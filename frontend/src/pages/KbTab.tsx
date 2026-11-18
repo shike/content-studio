@@ -164,11 +164,6 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
       <ErrorLine text={error} />
 
       <div className="mb-3 space-y-2">
-        {mode === 'today' && (
-          <div className="text-[12px] text-slate-400">
-            推荐口径：只取未产出的文档，按评分降序前 {TODAY_LIMIT} 篇（未产出共 {statsSrc.length} 篇）——已写成内容的在「素材库 · 知识库」回看
-          </div>
-        )}
         <Chips items={[
           { v: '', label: `全部 ${statsSrc.length}` },
           ...KB_GENRES.map((g) => ({ v: g, label: `${g} ${genreCounts.get(g) || 0}` })),
