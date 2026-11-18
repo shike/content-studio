@@ -3,7 +3,7 @@ import { api } from './api'
 /** 工作台（今天页）卡片数据源。菜单徽章功能已下线（2026-11-17 用户裁决：菜单不挂数字），
 本文件只服务今天页的待办/候选真实数字。 */
 interface TodoStats {
-  targetsPersona: number // 今日靶子·待备稿（选题工场 R1.4）
+  targetsPersona: number // 今日选题·待备稿（选题工场 R1.4）
   pendingScriptsPersona: number // 待定稿脚本·人设
   pendingScriptsLeadgen: number // 待定稿脚本·获客
   pendingArticles: number // 内容工场待决策稿（排队写+待发）

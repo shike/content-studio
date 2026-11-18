@@ -51,8 +51,8 @@ const TYPE_NAMES: Record<string, string> = {
   watch_resolve: '链接识别',
   watch_discover: '账号发现',
   topic_radar: '话题雷达', // 已退役类型：历史行仍可能见到
-  trending_topics: '今日靶子',
-  self_story_targets: '一线交付靶子',
+  trending_topics: '今日选题',
+  self_story_targets: '一线交付选题',
   hl_search_matrix: '同城获客挖掘',
   article_hotspots: '公众号热点报题',
   article_kb_miner: '知识库挖掘',

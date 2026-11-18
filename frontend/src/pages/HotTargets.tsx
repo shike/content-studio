@@ -6,7 +6,7 @@ import { api, apiErrText } from '../api'
 import { Busy, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { usePageGuard } from '../hooks'
 
-/** 今日靶子 = 选题工场靶子卡（PRD R1.4 三原则定版 2026-11-14）：
+/** 今日选题 = 选题工场选题卡（PRD R1.4 三原则定版 2026-11-14）：
  *  每日 06:00 三车间流水线产卡（钩子/主线/流量三证/裁决四面），用户只做定夺与备稿。
  *  主线是写作纪律不出口；开场逐字用钩子。徽章口径 = draft 卡数（counts.ts targetsPersona）。 */
 
@@ -132,7 +132,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
       const jobId = Number((d.message || '').match(/#(\d+)/)?.[1] || 0)
       if (jobId) pollJob(jobId, 'card_daily', (st, err) => {
         setFactoryBusy(false)
-        setMsg(st === 'succeeded' ? '工场跑完，靶子卡已更新 ✓' : `工场异常：${err}`)
+        setMsg(st === 'succeeded' ? '工场跑完，选题卡已更新 ✓' : `工场异常：${err}`)
       })
       else { setFactoryBusy(false); await load() }
     })
@@ -168,11 +168,11 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
     ['jail', `已拦·可捞`, counts.jail || 0],
   ]
 
-  if (!booted) return <div className="text-sm text-slate-400">载入靶子卡…</div>
+  if (!booted) return <div className="text-sm text-slate-400">载入选题卡…</div>
 
   return (
     <div>
-      <PageHeader icon={Crosshair} title="今日靶子"
+      <PageHeader icon={Crosshair} title="今日选题"
         desc="每天 06:00 选题工场产卡：钩子说给观众听（三秒说清+抓人），主线是写作纪律（全程论证、不出口），流量三证=域内×覆盖×热度。你只做两件事：定夺、备稿。" />
       {error && <div className="mt-4"><ErrorLine text={error} /></div>}
 
@@ -208,7 +208,7 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
           ) : chip === 'approved' ? (
             <EmptyState icon={Crosshair} title="还没有已备稿的卡" desc="在「待备稿」里展开一张卡，改钩子、选打法、出稿。" />
           ) : (
-            <EmptyState icon={Crosshair} title="今天还没有靶子卡"
+            <EmptyState icon={Crosshair} title="今天还没有选题卡"
               desc="每天 06:00 工场自动产卡（宁缺毋滥，没得怼就是没得怼）；等不及点「立即开工」。" />
           )}
         </div>

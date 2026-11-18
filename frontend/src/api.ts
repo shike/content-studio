@@ -65,7 +65,7 @@ interface ScriptVersion {
 export interface Script {
   id: number
   ore_id?: number | null   // 获客矿建稿锚（分型路由消费面，2026-11-14）
-  card_id?: number | null       // 靶子卡建稿（=idea_id 旧面别名）
+  card_id?: number | null       // 选题卡建稿（=idea_id 旧面别名）
   falsify_item_id?: number | null // 打假清单成稿
   kb_id?: number | null         // 知识库建稿
   hot_comment?: { material_id: number; idx: number } | null // 热评口播稿

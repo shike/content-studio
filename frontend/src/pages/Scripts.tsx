@@ -38,7 +38,7 @@ function scriptSource(s: Script): { label: string; cls: string } | null {
   if (s.ore_id) return { label: '矿稿', cls: 'bg-violet-100 text-violet-700' }
   if (s.falsify_item_id) return { label: '打假稿', cls: 'bg-indigo-100 text-indigo-700' }
   if (s.kb_id) return { label: '知识库稿', cls: 'bg-emerald-100 text-emerald-700' }
-  if (s.card_id) return { label: '靶子稿', cls: 'bg-sky-100 text-sky-700' }
+  if (s.card_id) return { label: '选题稿', cls: 'bg-sky-100 text-sky-700' }
   return null
 }
 
@@ -393,7 +393,7 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
               title={accountType === 'leadgen' ? '还没有获客脚本' : accountType === 'persona' ? '还没有人设脚本' : '还没有脚本'}
               desc={accountType === 'leadgen'
                 ? '获客脚本从「选题 · 获客选题」的获客矿行上点「建稿」生成——获客矿=分型路由判定的需求素材。'
-                : '人设脚本从「选题 · 人设靶子」的靶子卡上备稿生成（出稿=一版精品+自动打磨）。'}
+                : '人设脚本从「选题」里的选题卡上备稿生成（出稿=一版精品+自动打磨）。'}
             />
           </div>
         ) : (

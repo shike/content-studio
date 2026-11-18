@@ -159,7 +159,7 @@ function WeeklyReportCard() {
       )}
       {cards.length > 0 && (
         <div className="mt-3 border-t border-zinc-100 pt-3">
-          <div className="text-xs font-medium text-zinc-500">靶子卡 → 视频表现（校准回路：哪类钩子真的成立，看这里）</div>
+          <div className="text-xs font-medium text-zinc-500">选题卡 → 视频表现（校准回路：哪类钩子真的成立，看这里）</div>
           <div className="mt-1.5 space-y-1.5">
             {cards.map((x, i) => (
               <div key={i} className="text-[12.5px] leading-snug">
