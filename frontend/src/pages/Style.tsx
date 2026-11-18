@@ -115,11 +115,6 @@ export default function StyleSection({ onNavigate }: { onNavigate?: (k: string) 
   return (
     <div className="mt-4">
       {/* 小节头 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Fingerprint size={16} className="text-[#0a2f24]" />
-        <span className="text-sm font-semibold text-zinc-900">风格画像</span>
-        <span className="text-[11px] text-slate-400">脚本自动贴合我的说话方式</span>
-      </div>
       {/* 状态行 + 自账号管理（监控页退役后收编于此，P4 迁 accounts） */}
       <div className="card mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 text-[13px] text-slate-600">
         <span>账号 <b className="text-zinc-900">{data?.account?.name || '—'}</b></span>

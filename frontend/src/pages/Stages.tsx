@@ -67,13 +67,13 @@ function StageShell(props: {
   )
 }
 
-/** 人设号（主线）：选题 / 视频稿 / 经营——全闭环一页 */
+/** 人设号（主线）：选题 / 视频稿 / 画像——全闭环一页 */
 export function PersonaStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
       { id: 'topics', label: '选题' },
       { id: 'scripts', label: '视频稿' },
-      { id: 'own', label: '经营' },
+      { id: 'own', label: '画像' },
     ]}>
       {({ id }) => (
         <>
