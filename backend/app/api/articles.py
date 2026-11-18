@@ -146,6 +146,29 @@ async def adapt_content_item(item_id: int, user: User = Depends(require_user)) -
     return {"job_id": job.id}
 
 
+@router.delete("/content-items/{item_id}")
+def delete_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
+    """删除清单项（2026-11-18 用户裁决）。
+
+    清单=kb_doc 素材子集，**删除即删除该文档素材本体**（知识库同步消失）。
+    已进入改编链（running/done/published）或已产出文章的项拒绝——先处理文章再删。
+    """
+    from ..models import Material
+
+    with Session(engine) as s:
+        it = s.get(Material, item_id)
+        if it is None or it.origin_type != "kb_doc":
+            raise HTTPException(status_code=404, detail="清单项不存在")
+        if (it.stage or "") in ("running", "done", "published"):
+            raise HTTPException(status_code=409,
+                                detail=f"已进入改编链（{it.stage}），不能删除")
+        if (it.quality or {}).get("article_id"):
+            raise HTTPException(status_code=409,
+                                detail="已产出文章，请到「公众号 · 工场」处理文章后再删")
+    from .materials import delete_material
+    return delete_material(item_id, user)
+
+
 @router.post("/content-items/{item_id}/pin")
 def pin_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
     """置顶：「明天改编」——priority=9，改编器先取（再看质量分）。"""

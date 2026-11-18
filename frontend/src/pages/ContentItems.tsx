@@ -80,6 +80,13 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
     return () => clearInterval(t)
   }, [items, load])
 
+  const removeOne = async (it: ContentItem) => {
+    await guard(async () => {
+      await api(`/articles/content-items/${it.id}`, { method: 'DELETE' })
+      await load()
+    })
+  }
+
   const act = async (it: ContentItem, action: 'pin' | 'dismiss' | 'pending') => {
     await guard(async () => {
       if (action === 'pin') await api(`/articles/content-items/${it.id}/pin`, { method: 'POST' })
@@ -183,6 +190,12 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
                     {it.source_author && <span className="max-w-[110px] truncate">{it.source_author}</span>}
                     <span>{relTime(it.created_at || '')}</span>
                   </span>
+                  {!['running', 'done', 'published'].includes(it.status) && (
+                    <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <ConfirmDeleteButton onConfirm={() => removeOne(it)}
+                        title="删除该文档（知识库同步移除，不可恢复）" />
+                    </span>
+                  )}
                 </div>
                 {open && (
                   <div className="border-t border-[#E8ECF0] px-4 py-4">
