@@ -1,3 +1,19 @@
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+/** 短暂断连（部署重启/网关抖动）：502/503/504 或网络层失败——调用方应静默重试而不是报红。 */
+export function isTransientErr(e: unknown): boolean {
+  const st = (e as { status?: number })?.status
+  if (st === 502 || st === 503 || st === 504) return true
+  const raw = String(e)
+  return /HTTP (502|503|504)/.test(raw) || /Failed to fetch|NetworkError|Load failed/i.test(raw)
+}
+
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -10,13 +26,14 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
     } catch {
       /* 非 JSON 响应体，忽略 */
     }
-    throw new Error(detail)
+    throw new ApiError(res.status, detail)
   }
   return res.json()
 }
 
 /** 把 api 抛出的 "HTTP 400 {detail}" 还原成可读人话（行内错误提示用）。 */
 export function apiErrText(e: unknown): string {
+  if (isTransientErr(e)) return '服务正在重启（部署/重启中），稍后自动重试'
   const raw = String(e)
   const j = raw.match(/\{.*\}$/)
   if (j) {

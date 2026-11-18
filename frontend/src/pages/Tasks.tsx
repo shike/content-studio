@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Activity, ChevronLeft, ChevronRight, Clock, Eraser, PauseCircle, PlayCircle, RefreshCw, Trash2 } from 'lucide-react'
-import { api } from '../api'
+import { api, isTransientErr } from '../api'
 import { Busy, ChipRow, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 
 interface TaskRow {
@@ -135,6 +135,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
   const [tick, setTick] = useState(0)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [connDown, setConnDown] = useState(false)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [detail, setDetail] = useState<(TaskRow & { result?: Record<string, any>; history?: { p: number; m: string; t: string }[] }) | null>(null)
   const [confirmDel, setConfirmDel] = useState<number | null>(null)
@@ -157,14 +158,21 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
   const reload = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
     if (effF) params.set('status', effF)
-    const r = await api<{ items: TaskRow[]; total: number; counts: Counts }>(`/jobs?${params}`)
-    setItems(r.items)
-    setTotal(r.total)
-    setCounts(r.counts)
+    try {
+      const r = await api<{ items: TaskRow[]; total: number; counts: Counts }>(`/jobs?${params}`)
+      setItems(r.items)
+      setTotal(r.total)
+      setCounts(r.counts)
+      setConnDown(false)
+    } catch (e) {
+      if (isTransientErr(e)) setConnDown(true)  // 重启窗口：保留旧数据，横幅提示并自动重连
+      throw e
+    }
   }, [effF, page])
 
   useEffect(() => {
-    reload().catch((e) => setError(String(e)))
+    // 轮询遇部署重启（502/断连）不算错误：静默自动重连，不弹红条（2026-11-18）
+    reload().catch((e) => { if (!isTransientErr(e)) setError(String(e)) })
     reloadScheds().catch(() => {})
   }, [reload, tick, reloadScheds])
 
@@ -328,6 +336,7 @@ export default function Tasks({ onNavigate }: { onNavigate?: (k: string) => void
 
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
+      {connDown && <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">服务正在重启，列表会自动重连…</div>}
 
       {/* 标签导航 */}
       <div className="mb-3 mt-4 flex gap-1.5">
