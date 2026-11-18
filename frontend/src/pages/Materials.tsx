@@ -146,7 +146,7 @@ function Chips({ items, value, onPick }: {
   value: string; onPick: (v: string) => void
 }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1.5">
       {items.map((c) => (
         <span key={c.v}
           className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[12.5px] font-medium transition ${value === c.v ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
