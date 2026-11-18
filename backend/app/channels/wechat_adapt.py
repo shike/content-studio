@@ -27,7 +27,12 @@ from .wechat import (
     _kb_style_violations,
     length_specs,
 )
-from ..articles.quality import min_chars_or_raise, strip_fence as _strip_fence
+from ..articles.quality import (
+    _structure_violations,
+    dedupe_paragraphs,
+    min_chars_or_raise,
+    strip_fence as _strip_fence,
+)
 
 _SRC_CAP = 100000     # 源文全文上限（2026-11-18：3 万字腰斩，长手册改编只读到半篇）
 _DUP_LINE = 30.0      # 原创度线：与源文重复率百分比上限
@@ -251,9 +256,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             ctx.set_progress(100, f"原创度未过（{ratio}%），本项退回清单")
             return {"adapted": False, "ratio": ratio, "message": "原创度未过"}
 
-        # ── 违禁词机检 → 定向重写（签名守卫）──
+        # ── 违禁词 + 结构机检 → 定向重写（签名守卫）──
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
-        violations = _kb_style_violations(md_text, anchor_texts)
+        violations = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
         if violations:
             ctx.set_progress(78, f"机检命中 {len(violations)} 项，定向重写")
             polished = await gateway.complete(
@@ -318,6 +323,12 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         ranked = await score_titles(cands, persona_text)
         if ranked and ranked[0][1] > 0:
             title = ranked[0][0]
+
+        # ── 结构兜底：完全重复的长段确定性去重（#56 实测：检验清单同时出现在开头与结尾）──
+        deduped = dedupe_paragraphs(md_text)
+        if deduped != md_text:
+            md_text = deduped
+            ctx.set_progress(85, "结构兜底：删除完全重复的段落")
     except TransientError:
         with Session(engine) as s:
             it = s.get(Material, item_id)

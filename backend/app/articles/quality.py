@@ -126,6 +126,60 @@ def _language_style_violations(md: str) -> list[str]:
     return out
 
 
+def _para_key(p: str) -> str:
+    return re.sub(r"\s+", "", p or "")
+
+
+def _is_prose(p: str) -> bool:
+    """长正文段（≥40 字、非标题/表格/图片/列表）——只有这类重复才算结构缺陷。"""
+    k = _para_key(p)
+    return len(k) >= 40 and not k.startswith(("#", "|", "!", "-", "*"))
+
+
+def _structure_violations(md: str) -> list[str]:
+    """结构机检（2026-11-18 #56 实测缺陷）：同一长段原文重复出现——模型把收尾的
+    「检验清单」同时写在开头，读起来像文章从结尾开始。命中走定向重写，兜底靠
+    dedupe_paragraphs 的确定性去重。"""
+    paras = [p.strip() for p in md.split("\n\n") if p.strip()]
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for i, p in enumerate(paras, 1):
+        if not _is_prose(p):
+            continue
+        k = _para_key(p)
+        if k in seen:
+            out.append(f"第 {seen[k]} 段与第 {i} 段完全重复——同一段只说一次"
+                       f"（若是检验清单，只留在结尾）：「{p.strip()[:24]}…」")
+        else:
+            seen[k] = i
+    return out[:3]
+
+
+def dedupe_paragraphs(md: str) -> str:
+    """确定性去重兜底：删掉完全重复的长段。若同一段同时出现在开头与结尾
+    （前两段正文 ↔ 后两段正文）= 收尾的检验清单被误写到开头，保留结尾那份；
+    其余重复保留首份、删后面。"""
+    paras = md.split("\n\n")
+    keys = [_para_key(p) for p in paras]
+    prose = [i for i, p in enumerate(paras) if _is_prose(p)]
+    first_p = prose[0] if prose else -1
+    last_p = prose[-1] if prose else -1
+    drop: set[int] = set()
+    for i, p in enumerate(paras):
+        if i in drop or not _is_prose(p):
+            continue
+        dup = [j for j in range(i + 1, len(paras)) if keys[j] == keys[i] and j not in drop]
+        if not dup:
+            continue
+        if i == first_p and last_p in dup:
+            # 首段与末段完全相同 = 收尾的检验清单被误写到开头，保留结尾那份
+            drop.add(i)
+            drop.update(j for j in dup if j != last_p)
+        else:
+            drop.update(dup)
+    return "\n\n".join(p for i, p in enumerate(paras) if i not in drop)
+
+
 def kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
     """成文文风禁令机检：返回违规描述清单（空=干净）。提示词里的禁令靠模型自觉
     不可靠（#8 实测「不是X而是Y」×5）——代码正则兜底，命中走定向重写。"""
