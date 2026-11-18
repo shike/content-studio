@@ -14,6 +14,7 @@ material_analyze，≤一个巡检周期内入队）——按钮版 gate_rows �
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,9 @@ RUN_AT_BEIJING = "03:30"  # 建行开始时刻（北京）；早于此则等待
 
 
 def _wait_until_run_time() -> None:
+    if os.environ.get("CM_RUN_NOW") == "1":  # 用户裁决即时回填（2026-11-18）：跳过凌晨档
+        print("[backfill] CM_RUN_NOW=1：跳过等待，立即建行（拆解任务将排当前生成之后）", flush=True)
+        return
     bj_now = datetime.now(timezone(timedelta(hours=8)))
     target = bj_now.replace(hour=int(RUN_AT_BEIJING[:2]), minute=int(RUN_AT_BEIJING[3:]),
                              second=0, microsecond=0)
