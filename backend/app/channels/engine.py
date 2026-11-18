@@ -124,6 +124,8 @@ def script_out(c: Content, channel_key: str = "") -> dict:
         "account_type": p.get("account_type") or ("leadgen" if ch_key == "leadgen" else "persona"),
         "falsify_item_id": p.get("falsify_item_id"),
         "ore_id": p.get("ore_id"),
+        "kb_id": p.get("kb_id"),
+        "hot_comment": p.get("hot_comment"),
         "note": c.note or "",
         "created_at": c.created_at, "updated_at": c.updated_at,
     }

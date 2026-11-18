@@ -44,7 +44,6 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
   const [playHist, setPlayHist] = useState<number[]>([])
   const [todos, setTodos] = useState({ failed: 0, active: 0 })
   const [cands, setCands] = useState({ persona: 0, leadgen: 0 })
-  const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [pipes, setPipes] = useState<SchedRow[]>([])
   const [article, setArticle] = useState<ArtRow | null>(null)
@@ -88,25 +87,10 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
 
   useEffect(() => { reload() }, [reload])
 
-  const trending = () => {
-    setBusy('选题工场运行中（五段流水线：信号采集→池子→主线→钩子→法官）…')
-    ;(async () => {
-      try {
-        await api('/schedules/persona_idea_daily/run', { method: 'POST' })
-        setBusy('工场已排队，靶子卡稍后进「人设号 · 选题」')
-      } catch (e) {
-        setError(String(e)); setBusy('')
-      }
-    })()
-  }
-
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">今天</h1>
-        {active === 'today' && (
-          <button onClick={trending} className="rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-slate-700">选题工场</button>
-        )}
       </div>
 
       <div className="mb-5 flex items-center gap-1.5 border-b border-[#E8ECF0] pb-2.5">
@@ -123,7 +107,6 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
           : (
         <>
           {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
-          {busy && <div className="mb-3 text-sm text-sky-700">{busy}</div>}
 
           {/* ── 指标区：大数字 + 迷你趋势，无框，靠留白分隔 ── */}
           <div className="grid grid-cols-2 gap-x-8 gap-y-6 lg:grid-cols-3">

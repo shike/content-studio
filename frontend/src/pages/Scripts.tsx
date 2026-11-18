@@ -31,6 +31,17 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '生成失败',
 }
 
+
+/** 稿源标记（2026-11-18 用户定版）：payload 已带各产线锚，列表行上直接标来源。 */
+function scriptSource(s: Script): { label: string; cls: string } | null {
+  if (s.hot_comment) return { label: '热评稿', cls: 'bg-amber-100 text-amber-700' }
+  if (s.ore_id) return { label: '矿稿', cls: 'bg-violet-100 text-violet-700' }
+  if (s.falsify_item_id) return { label: '打假稿', cls: 'bg-indigo-100 text-indigo-700' }
+  if (s.kb_id) return { label: '知识库稿', cls: 'bg-emerald-100 text-emerald-700' }
+  if (s.card_id) return { label: '靶子稿', cls: 'bg-sky-100 text-sky-700' }
+  return null
+}
+
 export default function Scripts({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [scripts, setScripts] = useState<Script[]>([])
   const [allScripts, setAllScripts] = useState<Script[]>([])
@@ -402,6 +413,12 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
                         {s.versions?.map((v) => v.label).join(' · ') || '生成中…'}
                       </div>
                     </div>
+                    {(() => {
+                      const src = scriptSource(s)
+                      return src ? (
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${src.cls}`}>{src.label}</span>
+                      ) : null
+                    })()}
                     <span className={`badge shrink-0 ${STATUS_BADGE[s.status] || 'bg-slate-200 text-slate-600'}`}>
                       {STATUS_LABEL[s.status] || s.status}
                     </span>

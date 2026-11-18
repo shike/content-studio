@@ -4,12 +4,13 @@ import { api, apiErrText, waitJob } from '../api'
 import { EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { Chips, Toolbar } from './MaterialsShared'
 import KbTab from './KbTab'
+import FalsifyPanel from './FalsifyPanel'
 import MaterialsPool from './MaterialsPool'
 
 /**
- * 素材库（PRD R1）：进料口的源 / 池 / 库三层（2026-11-18 用户定版三 tab）：
+ * 素材库（PRD R1）：进料口的源 / 池 / 实测 / 库（2026-11-18 用户定版四 tab）：
  * 监控清单=采集源与候选账号；素材池=待定夺/可用/已忽略与贴链拆解；
- * 知识库=全库内容榜（每日推荐视图在「今天」页，两处分工）。
+ * 实测打假=可疑主张清单与成稿（R2.3，从人设号·选题移入）；知识库=全库内容榜（推荐视图在「今天」页）。
  * 层次法则：tab=实体（源/素材/知识文档），chips=生命周期，徽章=待办。
  */
 
@@ -315,11 +316,12 @@ function WatchTab() {
   )
 }
 
-type Tab = 'watch' | 'pool' | 'kb'
+type Tab = 'watch' | 'pool' | 'falsify' | 'kb'
 
 /** 旧 tab 键 → 三 tab 兼容映射（收件箱/全部素材=素材池；采集源/候选=监控清单）。 */
 function normalizeTab(tabId?: string): Tab {
   if (tabId === 'kb') return 'kb'
+  if (tabId === 'falsify') return 'falsify'
   if (tabId === 'pool' || tabId === 'topics' || tabId === 'inbox' || tabId === 'all') return 'pool'
   return 'watch' // sources / cand / 未知 → 监控清单
 }
@@ -333,13 +335,14 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'watch', label: '监控清单' },
     { id: 'pool', label: '素材池' },
+    { id: 'falsify', label: '实测打假' },
     { id: 'kb', label: '知识库' },
   ]
 
   return (
     <div>
       <PageHeader icon={Package} title="素材库"
-        desc="进料口的源 / 池 / 库：配监控号与话题雷达、定夺素材、回看全库文档——每日取料（热门评论/知识库推荐）在「今天」页。" />
+        desc="进料口的源 / 池 / 实测 / 库：配监控号与话题雷达、定夺素材、管实测打假清单、回看全库文档——每日取料（热门评论/知识库推荐）在「今天」页。" />
       <div className="mb-5 flex items-center gap-1.5 border-b border-[#E8ECF0] pb-2.5">
         {tabs.map((t) => (
           <button key={t.id} onClick={() => pick(t.id)}
@@ -350,6 +353,7 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
       </div>
       {tab === 'watch' && <WatchTab />}
       {tab === 'pool' && <MaterialsPool />}
+      {tab === 'falsify' && <FalsifyPanel onNavigate={onNavigate} />}
       {tab === 'kb' && <KbTab onNavigate={onNavigate} />}
     </div>
   )
