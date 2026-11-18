@@ -175,7 +175,7 @@ async def check_topic(row: Source) -> dict:
     name = row.name
     known_hit_ids = {h.get("id") for h in (cfg.get("hits") or []) if isinstance(h, dict)}
     notify = bool(cfg.get("notify", True))
-    with Session(engine) as s:
+    with Session(engine, expire_on_commit=False) as s:
         row = s.merge(row)
         c2 = dict(row.config or {})
         c2["seen_ids"] = ((c2.get("seen_ids") or []) + sorted(fresh_ids))[-SEEN_CAP:]
@@ -203,7 +203,7 @@ async def check_topic(row: Source) -> dict:
             print(f"[radar] 探测 {v['id']} 失败跳过: {type(e).__name__}: {str(e)[:60]}")
     hit_note = ""
     if hit_candidates:
-        with Session(engine) as s:
+        with Session(engine, expire_on_commit=False) as s:
             row2 = s.merge(row)
             c3 = dict(row2.config or {})
             hits, added = _merge_hits(c3.get("hits") or [], hit_candidates)
@@ -219,7 +219,7 @@ async def check_topic(row: Source) -> dict:
             from ..service import gate_rows, upsert_material
 
             new_rows = []
-            with Session(engine) as s:
+            with Session(engine, expire_on_commit=False) as s:
                 for h in hit_candidates:
                     url = f"https://www.douyin.com/video/{h['id']}"
                     m, created = upsert_material(
@@ -251,7 +251,7 @@ register_concurrent("material_topic_backfill")
 async def material_topic_check(ctx: JobContext, payload: dict) -> dict:
     """单话题即时巡检（采集源页「巡检」按钮）：样本中新出现的低粉高赞照旧自动入库拆解。"""
     source_id = int(payload.get("source_id") or 0)
-    with Session(engine) as s:
+    with Session(engine, expire_on_commit=False) as s:
         row = s.get(Source, source_id)
         if row is None or row.kind != "radar_topic":
             raise RuntimeError("话题不存在")
@@ -272,7 +272,7 @@ async def material_topic_backfill(ctx: JobContext, payload: dict) -> dict:
     dmin = max(1, int(settings.dissect_digg_min or 300))
     days = max(1, int(settings.backfill_window_days or 30))
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
-    with Session(engine) as s:
+    with Session(engine, expire_on_commit=False) as s:
         topics = _topic_sources(s)
     if not topics:
         ctx.set_progress(100, "无启用话题，诚实空过")
@@ -290,7 +290,7 @@ async def material_topic_backfill(ctx: JobContext, payload: dict) -> dict:
         probed_local = 0
         for v in vids:
             url = f"https://www.douyin.com/video/{v['id']}"
-            with Session(engine) as s:
+            with Session(engine, expire_on_commit=False) as s:
                 if s.exec(select(Material).where(  # type: ignore[attr-defined]
                         Material.origin_url == url)).first() is not None:
                     continue  # 已在素材库（日常增量/此前回填），跳过
@@ -306,7 +306,7 @@ async def material_topic_backfill(ctx: JobContext, payload: dict) -> dict:
             followers = int(info.get("followers") or 0)
             if c < cmin and dg < dmin:
                 continue  # 不过拆解闸——不建行不耗拆解
-            with Session(engine) as s:
+            with Session(engine, expire_on_commit=False) as s:
                 row = s.merge(trow)
                 m, created = upsert_material(
                     s, tenant_id=row.tenant_id or 1, origin_type="douyin_video",
