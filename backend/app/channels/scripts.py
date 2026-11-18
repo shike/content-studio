@@ -149,47 +149,61 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
         s.commit()
         script_id = script.id
 
-    ctx.set_progress(20, "知识库弹药匹配")
-    ammo = await _kb_ammunition(comment)
-    ctx.set_progress(30, "在榜热点挂靠检查")
-    hotspot = await _hotspot_for_comment(comment)
-    ctx.set_progress(45, "口播稿生成")
-    prompt = render("script_hotcomment", PERSONA=brand_of(1)["persona"],
-                    COMMENT=comment[:300], LIKES=likes or "?",
-                    KB_AMMO=ammo or "（知识库无直接相关弹药——按人设与常识把这条心声讲透，禁编造数字）",
-                    VIRAL_BLOCK=_viral_block(hotspot))
-    data = await gateway.complete_json([{"role": "user", "content": prompt}], max_tokens=20000)
-    versions = _normalize_versions((data.get("versions") or []))[:1]
-    if not versions:
-        raise RuntimeError("口播稿生成空响应")
-    body = str(versions[0].get("body") or "")
+    # 失败必须把脚本行标 failed（2026-11-18）：否则每次重试新建的行会永远停在「生成中」
+    try:
+        ctx.set_progress(20, "知识库弹药匹配")
+        ammo = await _kb_ammunition(comment)
+        ctx.set_progress(30, "在榜热点挂靠检查")
+        hotspot = await _hotspot_for_comment(comment)
+        ctx.set_progress(45, "口播稿生成")
+        prompt = render("script_hotcomment", PERSONA=brand_of(1)["persona"],
+                        COMMENT=comment[:300], LIKES=likes or "?",
+                        KB_AMMO=ammo or "（知识库无直接相关弹药——按人设与常识把这条心声讲透，禁编造数字）",
+                        VIRAL_BLOCK=_viral_block(hotspot))
+        data = await gateway.complete_json([{"role": "user", "content": prompt}], max_tokens=20000)
+        versions = _normalize_versions((data.get("versions") or []))[:1]
+        if not versions:
+            raise RuntimeError("口播稿生成空响应")
+        body = str(versions[0].get("body") or "")
 
-    chk = _speech_form_check(body)
-    if not chk["pass"]:
-        ctx.set_progress(70, f"形态未过（均 {chk['avg']} 字/句·最长 {chk['max']}·书面标点 {chk['book']}），定向重写")
-        data = await gateway.complete_json(
-            [{"role": "user", "content": prompt +
-              f"\n\n【返工·形态读稿闸】上一稿形态不达标：平均句长 {chk['avg']} 字/句（目标 ≤13）、"
-              f"最长句 {chk['max']} 字（目标 ≤20）、书面标点 {chk['book']} 处（目标 0）。"
-              "全稿逐句拆短重写：一句一口气，书面标点全清，用口语挂钩词（对不对/为什么呢/说白了）替代书面连接。其余规格照旧。"}],
-            max_tokens=20000)
-        versions = _normalize_versions((data.get("versions") or []))[:1] or versions
-        chk = _speech_form_check(str(versions[0].get("body") or ""))
+        chk = _speech_form_check(body)
+        if not chk["pass"]:
+            ctx.set_progress(70, f"形态未过（均 {chk['avg']} 字/句·最长 {chk['max']}·书面标点 {chk['book']}），定向重写")
+            data = await gateway.complete_json(
+                [{"role": "user", "content": prompt +
+                  f"\n\n【返工·形态读稿闸】上一稿形态不达标：平均句长 {chk['avg']} 字/句（目标 ≤13）、"
+                  f"最长句 {chk['max']} 字（目标 ≤20）、书面标点 {chk['book']} 处（目标 0）。"
+                  "全稿逐句拆短重写：一句一口气，书面标点全清，用口语挂钩词（对不对/为什么呢/说白了）替代书面连接。其余规格照旧。"}],
+                max_tokens=20000)
+            versions = _normalize_versions((data.get("versions") or []))[:1] or versions
+            chk = _speech_form_check(str(versions[0].get("body") or ""))
 
-    with Session(engine) as s:
-        script = s.get(Content, script_id)
-        p = dict(script.payload or {})
-        p["script_state"] = "generated"
-        p["account_type"] = "persona"
-        p["form_check"] = chk
-        script.payload = p
-        script.versions = versions
-        script.status = "review"
-        script.note = (f"热评口播｜来源《{src_title[:24]}》｜形态体检：均 {chk['avg']} 字、最长 {chk['max']}、书面标点 {chk['book']}")
-        s.add(script)
-        s.commit()
-    ctx.set_progress(100, f"完成（形态体检：均 {chk['avg']} 字/最长 {chk['max']}/书面标点 {chk['book']}）")
-    return {"script_id": script_id, "form": chk}
+        with Session(engine) as s:
+            script = s.get(Content, script_id)
+            p = dict(script.payload or {})
+            p["script_state"] = "generated"
+            p["account_type"] = "persona"
+            p["form_check"] = chk
+            script.payload = p
+            script.versions = versions
+            script.status = "review"
+            script.note = (f"热评口播｜来源《{src_title[:24]}》｜形态体检：均 {chk['avg']} 字、最长 {chk['max']}、书面标点 {chk['book']}")
+            s.add(script)
+            s.commit()
+        ctx.set_progress(100, f"完成（形态体检：均 {chk['avg']} 字/最长 {chk['max']}/书面标点 {chk['book']}）")
+        return {"script_id": script_id, "form": chk}
+    except Exception as e:  # noqa: BLE001
+        with Session(engine) as s:
+            sc = s.get(Content, script_id)
+            if sc is not None:
+                p = dict(sc.payload or {})
+                p["script_state"] = "failed"
+                p["error"] = f"{type(e).__name__}: {str(e)[:180]}"
+                sc.payload = p
+                sc.status = "failed"
+                s.add(sc)
+                s.commit()
+        raise
 
 
 def _viral_block(hotspot: str) -> str:
