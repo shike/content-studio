@@ -30,7 +30,9 @@ def _speech_form_check(body: str) -> dict:
     平均句长 ≤13 字、单句 ≤20 字、零书面标点——标尺=号主 12 万播放真实转写（21 气口均 12.2 字、最长 20、零书面标点）。"""
     import re
 
-    units = [u for u in re.split(r"[。！？\n]", (body or "").strip()) if u.strip()]
+    # 气口=句末标点或空格：模型执行「零书面标点」后自然改用空格断句（=提词器气口）。
+    # 2026-11-18 生产实测修正：空格不切会把整篇算成一句 318 字假超标、误触发定向重写。
+    units = [u for u in re.split(r"[。！？\s]", (body or "").strip()) if u.strip()]
     lens = [len(re.sub(r"\s", "", u)) for u in units] or [0]
     book = sum(body.count(ch) for ch in _FORM_BOOK)
     avg = sum(lens) / len(lens)
