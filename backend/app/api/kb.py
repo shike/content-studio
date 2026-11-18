@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import or_
@@ -176,11 +179,61 @@ def kb_doc(doc_id: int, user: User = Depends(require_user)) -> dict:
         }
 
 
+@router.get("/docs/{doc_id}/hotspot_suggest")
+async def hotspot_suggest(doc_id: int, user: User = Depends(require_user)) -> dict:
+    """热点引信自动挂靠（2026-11-18 用户裁决「系统挂，不推给人」）。
+
+    站外热点（百度热搜+科技媒体，与公众号直出线同源）× 文档主题 → 匹配 0~1 个可挂热点，
+    给「为什么挂/怎么挂」；前端预填，用户保留否决权（清空=纯干货稿）。"""
+    from ..llm import gateway
+    from ..materials.collectors.hotlist import fetch_baidu_hot, fetch_tech_news
+
+    with Session(engine) as s:
+        m = s.get(Material, doc_id)
+        if m is None or m.origin_type != "kb_doc":  # type: ignore[attr-defined]
+            raise HTTPException(status_code=404, detail="文档不存在")
+        q = m.quality or {}
+        doc_desc = (f"《{m.title}》用处：{str(q.get('why_good') or '')[:120]}；"
+                    f"改编角度：{str(q.get('adapt_angle') or '')[:150]}")
+    try:
+        baidu, _ = await asyncio.to_thread(fetch_baidu_hot, 12)
+        news, _ = await asyncio.to_thread(fetch_tech_news, 6, 48)
+    except Exception:  # noqa: BLE001 热点源挂=诚实降级，可手动填
+        return {"hotspot": "", "reason": "热点源暂不可用，可手动填写"}
+    items = [{"i": i + 1, "来源": "百度热搜", "标题": str(h.get("title") or "")[:40]}
+             for i, h in enumerate(baidu[:8])]
+    items += [{"i": len(items) + j + 1, "来源": str(n.get("source") or "科技媒体"),
+               "标题": str(n.get("title") or "")[:60]} for j, n in enumerate(news[:10])]
+    if not items:
+        return {"hotspot": "", "reason": "当前热点榜无数据，可手动填写"}
+
+    screen = await gateway.complete_json(
+        [{"role": "user", "content":
+          "给一条知识库文档自动挂靠当前热点（抖音口播·爆款基因模式：热点×强情绪立场×一线身份视角）。\n"
+          "本号生意：教不懂技术的普通人做 AI 落地（FDE）的线下实训营；观众=实体老板、想转行的普通人。\n"
+          f"文档：{doc_desc}\n"
+          "候选热点（在榜=正在流量窗口期）：\n" + json.dumps(items, ensure_ascii=False) +
+          '\n挑「最能让文档的判断借上热点流量」的一个热点，双锚缺一不选：'
+          '① 观众看得懂、跟他们的生意/饭碗/机会有关；② 话题必须长在 AI 上或直接冲击他们的工作\n'
+          '没有就 pick=0（宁缺勿滥，不硬挂）。\n'
+          '输出 JSON：{"pick": 序号或0, "reason": "为什么挂它/为什么不挂，一句", '
+          '"angle_hint": "挂法：一线落地者对这个热点甩什么立场，一句"}'}],
+        max_tokens=1024, thinking="disabled")
+    try:
+        pick = int((screen or {}).get("pick") or 0)
+    except (TypeError, ValueError):
+        pick = 0
+    hit = next((x for x in items if x["i"] == pick), None)
+    if hit is None:
+        reason = str((screen or {}).get("reason") or "当前无可挂的热点（宁缺勿滥），可手动填写")
+        return {"hotspot": "", "reason": reason[:120]}
+    return {"hotspot": hit["标题"], "reason": str((screen or {}).get("angle_hint")
+                                                  or (screen or {}).get("reason") or "")[:120]}
+
+
 class FolderIn(BaseModel):
     folder_id: str
     name: str
-
-
 @router.post("/folders", status_code=201)
 def add_folder(body: FolderIn, user: User = Depends(require_user)) -> dict:
     """加挖掘目录（写 ima_topic_folders；同名/同 id 幂等）。"""

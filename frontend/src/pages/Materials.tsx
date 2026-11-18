@@ -703,6 +703,24 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
     xhsTitle: string
     xhsAngle: string
   }>(null)
+  const [hs, setHs] = useState<{ loading: boolean; reason: string; done: boolean }>({ loading: false, reason: '', done: false })
+
+  /** 打开生成框：系统自动匹配当前可挂热点并预填（用户裁决「系统挂，不推给人」），人保留否决权。 */
+  const openProd = (d: KbDoc) => {
+    setProd({
+      doc: d, dir: 'script', length: 'short', angles: [], useStyle: true, hotspot: '',
+      xhsTitle: (d.title || '').slice(0, 40),
+      xhsAngle: [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
+        .filter(Boolean).join('；金句：').slice(0, 200),
+    })
+    setHs({ loading: true, reason: '', done: false })
+    api<{ hotspot: string; reason: string }>(`/kb/docs/${d.id}/hotspot_suggest`)
+      .then((r) => {
+        setHs({ loading: false, reason: r.reason || '', done: true })
+        if (r.hotspot) setProd((p) => (p && !p.hotspot ? { ...p, hotspot: r.hotspot } : p))
+      })
+      .catch(() => setHs({ loading: false, reason: '', done: true }))
+  }
 
   const saveTitle = async () => {
     if (!edit) return
@@ -866,12 +884,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                           改标题
                         </button>
                         <span className="text-[11px] text-slate-300">｜</span>
-                        <button onClick={() => setProd({
-                          doc: d, dir: 'script', length: 'short', angles: [], useStyle: true, hotspot: '',
-                          xhsTitle: (d.title || '').slice(0, 40),
-                          xhsAngle: [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
-                            .filter(Boolean).join('；金句：').slice(0, 200),
-                        })} title="选方向生成内容"
+                        <button onClick={() => openProd(d)} title="选方向生成内容"
                           className="rounded-md bg-emerald-600 px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-emerald-700">
                           生成内容
                         </button>
@@ -1008,12 +1021,13 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                   套用风格画像（你的历史成稿风格）
                 </label>
                 <div>
-                  <div className="text-[12px] font-medium tracking-wide text-slate-400">挂靠热点（爆款引信，可空）</div>
+                  <div className="text-[12px] font-medium tracking-wide text-slate-400">挂靠热点（系统自动匹配，可改可清）</div>
                   <input value={prod.hotspot} onChange={(e) => setProd({ ...prod, hotspot: e.target.value })}
-                    placeholder="热点事件/产品名（如：Workbuddy）——填了=爆款基因模式：热点×强立场×一线视角"
+                    placeholder="正在为你匹配当前热点…也可手动填写热点事件/产品名"
                     className="mt-1.5 w-full rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
                   <div className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
-                    自己账号实证：爆款=热点×立场×一线视角（12万/7.5万播放样本）；不填=纯干货稿（天花板几千播放）
+                    {hs.loading ? '正在匹配当前在榜热点…'
+                      : hs.reason || '自己账号实证：爆款=热点×立场×一线视角；清空=纯干货稿（天花板几千播放）'}
                   </div>
                 </div>
               </div>
