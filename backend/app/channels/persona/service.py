@@ -1,7 +1,7 @@
 """选题工场（人设号靶子卡，PRD R1.4——2026-11-14 三原则定版）。
 
 三车间流水线（`card_daily` 单任务五段）：
-车间零·信号采集（0 LLM）→ 车间一·池子构建（一手直产 + pool_pick 二手补位）
+车间零·信号采集（0 LLM）→ 车间一·池子构建（一手直产 + 自有交付池）
 → 车间二·主线锻造（spine_forge + 主线闸）→ 车间三·钩子铸造（hook_cast + 三秒闸）
 → 总法官（judge_cards）→ 落卡（draft 前 N / jail 可捞，批次替代，空过合法）。
 
@@ -12,9 +12,10 @@
 ③广度×热度=域内×覆盖人口×此刻有流量。
 
 进料优先级：一手·抖音原生（监控号新视频评论 ≥pool_peer_min_comments 直产池子卡 /
-话题雷达飙升 / 抖音热点榜）＞二手·外站五路（pool_pick ≤pool_pick_max 条补位，
-需法官高分）＋自有转写（常青）。
-对标圈素材禁当靶子（纪律不变）。每日 LLM 共 4 次。
+话题雷达飙升 / 抖音热点榜）＋自有·一线交付（实测结论/客户案例/口述，2026-11-18 接通）。
+外站二手池 2026-11-18 用户裁决停用：二手热度结构性够不到流量线（tp 恒 4-6 < 7），
+每轮烧 LLM 却 0 产出——榜单信号只留在公众号直出线，不再进选题工场。
+对标圈素材禁当靶子（纪律不变）。每日 LLM 降至 3 次。
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ from ...settings import settings
 
 
 from .forge import (_forge_with_retry, _llm_cast, _llm_judge,
-                    _llm_pick, _self_titles)
+                    _self_titles)
 from .gates import (_hook_gate, _merge_card, _spine_gate)
 from .norms import (_COVER_RANK, _kw_hit, _norm)
 
@@ -55,8 +56,8 @@ def _published_titles() -> list[str]:
 async def _hunt_safe(ctx: JobContext, tenant_id: int, meta: dict) -> None:
     """尾段实测候选猎取（失败不拦落卡——猎取是增益不是产线）。"""
     try:
-        from .falsify import service as _ff
-        r = await _ff.hunt_candidates(ctx, tenant_id)
+        from ..falsify import hunt_candidates as _hunt  # 2026-11-18 修：原路径 .falsify 不存在，猎取一直静默失败
+        r = await _hunt(ctx, tenant_id)
         meta["hunted"] = r.get("hunted", 0)
     except Exception as e:  # noqa: BLE001
         meta["hunt_error"] = f"{type(e).__name__}: {str(e)[:80]}"
@@ -90,9 +91,7 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     """人设号选题工场五段（R1.4）。空过合法：无可怼=诚实空过，失败是异常不是工作流。"""
     from datetime import timedelta as _td
 
-    from ...materials.collectors.hotlist import (fetch_aihot_hot, fetch_baidu_hot,
-                                                fetch_douyin_hot, fetch_github_hot,
-                                                fetch_tech_news, fetch_zhihu_hot)
+    from ...materials.collectors.hotlist import fetch_douyin_hot
     from ...materials.service import analyses_map
     from ...tenant_brand import audience_note_of, brand_of
 
@@ -105,7 +104,7 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
     # ── 车间一：池子构建 ──
     ctx.set_progress(22, "车间一：一手直产（监控号爆款/雷达飙升/抖音榜）")
     pools: list[dict] = []  # [{source, pool}]
-    meta: dict = {"peer": 0, "radar": 0, "douyin_hot": 0, "external": 0}
+    meta: dict = {"peer": 0, "radar": 0, "douyin_hot": 0, "self_story": 0}
 
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _td(
         hours=max(1, int(settings.pool_peer_window_hours or 30)))
@@ -122,6 +121,8 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
             Material.origin_type == "douyin_video",  # type: ignore[attr-defined]
             Material.status == "ready",  # type: ignore[attr-defined]
             _func.coalesce(Material.published_at, Material.collected_at) >= cutoff)).all()  # type: ignore[attr-defined]
+        # 窗口放大到 72h 后候选变多：按评论实数降序取前 10（互动=选题价值的先验）
+        peer_rows = sorted(peer_rows, key=lambda b: -int((b.stats or {}).get("comment") or 0))
     peer_amap = {}
     if peer_rows:
         with Session(engine) as s:
@@ -204,39 +205,31 @@ async def card_daily(ctx: JobContext, payload: dict) -> dict:
         if meta["douyin_hot"] >= 8:
             break
 
-    ctx.set_progress(34, f"车间一：二手外站精选（一手 {meta['peer'] + meta['radar'] + meta['douyin_hot']} 条已入池）")
-    hot_items, _ = await asyncio.to_thread(fetch_baidu_hot, 50)
-    zh_items, _ = await asyncio.to_thread(fetch_zhihu_hot, 30)
-    news_items, news_meta = await asyncio.to_thread(fetch_tech_news)
-    gh_items, _ = await asyncio.to_thread(fetch_github_hot)
-    ah_items, ah_meta = await asyncio.to_thread(fetch_aihot_hot)
-    menu_parts = [
-        "【三榜（百度/知乎）科技条目】" + ("\n".join(
-            f"- {x.get('word')}（{x.get('desc', '')[:30]}）" for x in (hot_items + zh_items)
-            if _kw_hit(str(x.get('word', '')) + str(x.get('desc', '')))) or "（无科技条目）"),
-        "【科技媒体+AI 垂媒（48h）】" + ("\n".join(
-            f"- {x['title']}（{x['source']}）" for x in news_items) or f"（未生效：{news_meta.get('status')}）"),
-        "【GitHub 新起爆仓库】" + ("\n".join(
-            f"- {x['word']}（★{x['stars']}）{x['desc']}" for x in gh_items) or "（空）"),
-        "【AIHot 精选】" + ("\n".join(
-            f"- {x['title']}｜{x.get('summary', '')[:40]}" for x in ah_items) or f"（未生效：{ah_meta.get('status')}）"),
-    ]
-    try:
-        picks = await _llm_pick("\n\n".join(menu_parts), persona, audience_note)
-    except Exception as e:  # noqa: BLE001 二手通道失败不阻塞一手
-        picks = []
-        meta["external_error"] = f"{type(e).__name__}: {str(e)[:80]}"
-    floor = _COVER_RANK.get(str(settings.coverage_min or "job_wide"), 1)
-    for x in picks:
-        cov = str(x.get("coverage") or "")
-        if _COVER_RANK.get(cov, 0) < max(floor, 1):
-            continue  # 池子闸：窄主语二手卡直接拦
-        pools.append({"source": "external", "pool": _pool_dict(
-            domain=str(x.get("domain_evidence") or "")[:80],
-            heat=f"外站热榜｜{str(x.get('heat_evidence') or '')[:60]}",
-            level="中", role=str(x.get("role") or "")[:30], coverage=cov,
-            secondary=True, external={"src": "外站五路", "title": str(x.get("title") or "")[:60]})})
-        meta["external"] += 1
+    # ── 自有·一线交付池（2026-11-18 用户裁决接通 self_story）──
+    # 料=实测结论（test_record 已回填 body）/ 一手案例·客户口述（manual_note body）；
+    # 这是别人抄不走的内容源，主线必须从交付事实里抽（forge 侧带「交付记录」与备注）。
+    with Session(engine) as s:
+        self_rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
+            Material.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            Material.origin_type.in_(("test_record", "manual_note")),  # type: ignore[attr-defined]
+            Material.status == "ready")).all()  # type: ignore[attr-defined]
+    self_rows = sorted(self_rows, key=lambda m: str(m.created_at or ""), reverse=True)
+    for m in self_rows:
+        if meta["self_story"] >= 3:
+            break
+        ref = f"self:{m.id}"
+        content = str(m.body or "").strip() or str(m.note or "").strip()
+        if ref in seen_refs or len(content) < 20:
+            continue  # 空壳/太短=撑不起一句判词
+        pools.append({"source": "self_story", "pool": _pool_dict(
+            domain="一线交付（自有素材：实测结论/客户案例/客户口述）",
+            heat=f"一手·《{(m.title or '')[:30]}》交付记录 {len(content)} 字",
+            level="中",
+            douyin={"kind": "self_story", "ref": ref,
+                    "digest": content[:80], "self_note": content[:600], "top": []})})
+        meta["self_story"] += 1
+        seen_refs.add(ref)
+
     if not pools:
         await _hunt_safe(ctx, tenant_id, meta)
         ctx.set_progress(100, f"今日池子空，诚实空过（实测候选 +{meta.get('hunted', 0)}）")

@@ -42,7 +42,6 @@ def _status() -> dict:
         "judge_pass_line": settings.judge_pass_line,
         "daily_card_limit": settings.daily_card_limit,
         "jail_window_days": settings.jail_window_days,
-        "pool_pick_max": settings.pool_pick_max,
         "pool_peer_window_hours": settings.pool_peer_window_hours,
         "comment_leadgen_route_min": settings.comment_leadgen_route_min,
         "backfill_window_days": settings.backfill_window_days,
@@ -78,7 +77,6 @@ class UpdateIn(BaseModel):
     judge_pass_line: int | None = None         # 法官三维过线值（1-10）
     daily_card_limit: int | None = None        # 每日进靶子箱上限
     jail_window_days: int | None = None        # 弃卡池可捞窗口（天）
-    pool_pick_max: int | None = None           # 二手外站精选上限
     pool_peer_window_hours: int | None = None  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
     comment_leadgen_route_min: int | None = None  # 评论区分型：求学占比≥此%判获客矿（默认 60）
     backfill_window_days: int | None = None    # 存量回填追溯窗（天，默认 30）
@@ -135,7 +133,7 @@ def update_settings(body: UpdateIn) -> dict:
                 raise HTTPException(400, detail=f"拆解闸{label}必须是 0~100000 的整数")
             values[key] = v
     for key in ("pool_peer_min_comments", "hook_speed_cps", "judge_pass_line",
-                "daily_card_limit", "jail_window_days", "pool_pick_max",
+                "daily_card_limit", "jail_window_days",
                 # 补 2026-11-15 发现：这两键此前只在 UpdateIn 声明、PUT 从未处理（静默忽略）
                 "pool_peer_window_hours", "comment_leadgen_route_min",
                 "backfill_window_days"):

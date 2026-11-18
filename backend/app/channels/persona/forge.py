@@ -18,16 +18,6 @@ from ...settings import settings
 from .norms import (_ADVICE_OPENER, _CLAUSE_PUNCT, _PREDICT_KW, _max_chars,
                     _pron_len)
 
-async def _llm_pick(menu_text: str, persona: str, audience_note: str) -> list[dict]:
-    data = await gateway.complete_json(
-        [{"role": "system", "content": render(
-            "pool_pick", PERSONA=persona, AUDIENCE_NOTE=audience_note,
-            POOL_MAX=str(int(settings.pool_pick_max or 8)),
-            MENU=menu_text[:6000])}],
-        max_tokens=4000, thinking="disabled")
-    return [x for x in (data.get("picks") or []) if isinstance(x, dict) and x.get("title")]
-
-
 def _fewshot_lines(limit: int = 14) -> str:
     """few-shot 句式标尺：素材库近 30 天高分拆解的钩子/高光 + 已发视频标题（正样本）。"""
     from datetime import timedelta as _td
@@ -142,6 +132,10 @@ async def _llm_forge(pools: list[dict], persona: str, audience_note: str,
         if top:  # 高赞评论原文=观点的矿脉（R1.4 进料）：先抽评论要点，主线从要点里长出来
             row["高赞评论"] = [f"「{str(c.get('t') or '').strip()[:60]}」（赞{max(0, int(c.get('d') or 0))}）"
                                for c in top]
+        if dy.get("kind") == "self_story":
+            row["交付记录"] = str(dy.get("self_note") or "")[:600]
+            row["备注"] = ("一线交付池：事实上限=这段交付记录，主线只能从记录里抽，"
+                           "不许外推成行业判断；记录里有数字/客户名优先点名。")
         if dy.get("kind") == "study_meta":
             pct = int(round(float(dy.get("study_share") or 0) * 100))
             row["备注"] = (f"求学现象卡：此池评论区约 {pct}% 是求资料/学习打卡。"
@@ -197,6 +191,16 @@ async def _llm_cast(items: list[dict], persona: str, audience_note: str) -> dict
     for it in items:
         row = {"i": it["i"], "spine": it.get("spine") or "", "role": it.get("role") or "",
                "由头": (it["pool"].get("heat_evidence") or "")[:50]}
+        # 评论矿脉（2026-11-18 用户裁决）：钩子要从评论里点名/接情绪，不能只对着由头空写
+        takes = [str(t).strip() for t in ((it.get("forged") or {}).get("takeaways") or [])
+                 if str(t).strip()][:3]
+        if takes:
+            row["评论要点"] = takes
+        dy = (it["pool"].get("douyin_evidence") or {})
+        top = [str(c.get("t") or "").strip()[:60] for c in (dy.get("top") or [])
+               if isinstance(c, dict) and str(c.get("t") or "").strip()][:3]
+        if top:
+            row["高赞评论"] = top
         if it.get("last_fail"):  # 修复循环：带上一次死因，模型针对性改写
             row["上次被拒原因"] = it["last_fail"][:80]
         spine_inputs.append(row)
@@ -212,12 +216,17 @@ async def _llm_cast(items: list[dict], persona: str, audience_note: str) -> dict
 
 
 async def _llm_judge(items: list[dict]) -> dict[int, dict]:
-    card_inputs = [{"i": it["i"], "source": it["source"], "spine": it.get("spine") or "",
-                    "hook": it.get("hook") or "", "coverage": (it["pool"] or {}).get("coverage") or "",
-                    "热度证据": (it["pool"].get("heat_evidence") or "")[:60],
-                    "一手证据": bool(it["pool"].get("douyin_evidence")),
-                    "peer_covered": bool(it["pool"].get("peer_covered"))}
-                   for it in items]
+    card_inputs = []
+    for it in items:
+        dy = it["pool"].get("douyin_evidence") or {}
+        kind = str(dy.get("kind") or "")
+        ev = ("platform" if dy and kind != "self_story"
+              else "self" if kind == "self_story" else "secondary")
+        card_inputs.append({"i": it["i"], "source": it["source"], "spine": it.get("spine") or "",
+                            "hook": it.get("hook") or "", "coverage": (it["pool"] or {}).get("coverage") or "",
+                            "热度证据": (it["pool"].get("heat_evidence") or "")[:60],
+                            "证据类型": ev,
+                            "peer_covered": bool(it["pool"].get("peer_covered"))})
     data = await gateway.complete_json(
         [{"role": "system", "content": render(
             "judge_cards", JUDGE_LINE=str(int(settings.judge_pass_line or 7)),

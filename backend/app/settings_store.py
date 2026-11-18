@@ -40,7 +40,6 @@ MANAGED: dict[str, str] = {
     "judge_pass_line": "int",         # 总法官三维过线值
     "daily_card_limit": "int",        # 每日进靶子箱上限
     "jail_window_days": "int",        # 弃卡池可捞窗口（天）
-    "pool_pick_max": "int",           # 二手外站精选上限
     "pool_peer_window_hours": "int",  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
     "comment_leadgen_route_min": "int",  # 评论区分型：求学占比≥此%判获客矿归获客线（默认 60）
     "backfill_window_days": "int",   # 存量回填追溯窗（天，默认 30）：话题/账号两条回填线共用日期闸

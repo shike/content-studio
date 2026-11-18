@@ -59,8 +59,7 @@ class Settings(BaseSettings):
     judge_pass_line: int = 7           # 总法官三维（各 1-10）的过线值，任一维低于即 kill
     daily_card_limit: int = 20         # 每日进靶子箱的卡上限（用户拍板；宁缺毋滥，空过合法）
     jail_window_days: int = 7          # 法官弃卡池可捞窗口（过期物理清）
-    pool_pick_max: int = 8             # 二手外站精选条数上限（一手信号不限）
-    pool_peer_window_hours: int = 30   # 池子线视频新鲜窗（小时）：只读窗口内的监控号新视频（"新视频"口径；调宽=允许存量真矿进线）
+    pool_peer_window_hours: int = 72   # 池子线视频新鲜窗（小时）：2026-11-18 用户裁决 30→72——让存量真矿（老视频高评论）进线
     comment_leadgen_route_min: int = 60  # 评论区分型路由：求学词根占比 ≥此百分比(%) 判获客矿→归获客线，人设号不吃（元角度口子另限每批1张）
     backfill_window_days: int = 30     # 存量回填追溯窗（天）：话题/账号两条回填线的日期闸（2026-11-15 用户定版追溯 90 天）
 
