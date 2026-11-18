@@ -216,7 +216,8 @@ class HotCommentIn(BaseModel):
 @router.post("/hotcomment", status_code=202)
 async def hotcomment_script(body: HotCommentIn,
                             user: User = Depends(require_user)) -> dict:
-    """热评→口播稿（2026-11-18 车道二）：高赞热评开场=受众认领，知识库弹药+形态读稿闸。"""
+    """热评→口播稿（v4 2026-11-18）：先过三道门（真事/点名/我的判断），照号主爆款写；
+    素材不足直接跳过，不建视频稿。"""
     job = await runner.submit("script_hotcomment",
                               {"material_id": body.material_id, "comment_idx": body.comment_idx},
                               dedup_key=f"1:hotc:{body.material_id}:{body.comment_idx}",

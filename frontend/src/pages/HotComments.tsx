@@ -42,7 +42,7 @@ export default function HotComments() {
   const fire = (h: HotComment) => {
     const key = `${h.material_id}:${h.idx}`
     setMsg('')
-    setGen((m) => ({ ...m, [key]: { phase: 'busy', label: '弹药匹配+生成中…', text: '' } }))
+    setGen((m) => ({ ...m, [key]: { phase: 'busy', label: '读素材+过门+生成中…', text: '' } }))
     api<{ job_id: number }>('/scripts/hotcomment', {
       method: 'POST', body: JSON.stringify({ material_id: h.material_id, comment_idx: h.idx }),
     })
@@ -50,7 +50,13 @@ export default function HotComments() {
         ...m, [key]: { ...(m[key] || { phase: 'busy', label: '', text: '' }), label: `生成中（${j.progress}%）${j.message || ''}` },
       }))))
       .then(async (j) => {
-        const sid = (j as { result?: { script_id?: number } })?.result?.script_id
+        const res = (j as { result?: { script_id?: number; skipped?: boolean; reason?: string } })?.result
+        if (res?.skipped) {
+          setGen((m) => ({ ...m, [key]: { phase: 'done', label: '', text: `素材不足，未生成：${res.reason || ''}` } }))
+          setMsg('')
+          return
+        }
+        const sid = res?.script_id
         let text = ''
         if (sid) {
           const d = await api<{ versions: { body: string }[] }>(`/scripts/${sid}`)

@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import json
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..db import engine
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
-from ..models import Content, Idea, Material
+from ..models import Content, Idea, Material, MaterialAnalysis, SelfVideo
 from ..prompts import load, render
 from ..selfstyle.service import build_my_style
 
@@ -108,23 +108,154 @@ async def _hotspot_for_comment(comment: str) -> str:
     return str((pick or {}).get("hotspot") or "").strip()
 
 
+_BAD_SAMPLE_BODY = (
+    "有人靠DeepSeek人设赚翻了。六十一个人给这条评论点了赞。说明你也刷到过，对不对。"
+    "什么神提示词，内部玩法，一夜翻身。今天我把话放这儿。这不是AI赚钱。这是拿AI当道具，赚你的钱。"
+    "为什么呢，你拆开看就三步。第一步，你多点过一次这种视频。算法就记住了。往后满屏都是谁谁又赚了。"
+    "这就叫信息茧房。第二步，你就开始慌了，对不对。觉得全世界都翻身了。就你没有。"
+    "第三步，卖课的登场了。教你包装人设，还要收费。说白了，他赚的是你的焦虑。不是DeepSeek替他赚的钱。"
+    "不服你就验证一下。让他拿出一个亲手交付的案例。验收单也行，客户名字也行。拿不出来，对不对。那就是卖梦的。"
+    "真本事能验收，人设不能。记住这句话。说白了，赚翻了的是卖人设的。掏空钱包的是买人设的。"
+    "你刷到过谁，评论区报个数。"
+)
+
+
+def _top_self_videos(limit: int = 2) -> list:
+    """号主播放最高的自有视频（爆款范本）。"""
+    with Session(engine) as s:
+        rows = s.exec(select(SelfVideo)).all()
+    def _play(v) -> int:
+        try:
+            return int((v.stats or {}).get("play") or 0)
+        except (TypeError, ValueError):
+            return 0
+    rows = [v for v in rows if (v.transcript or "").strip()]
+    return sorted(rows, key=_play, reverse=True)[:limit]
+
+
+def _voice_block(rows: list) -> str:
+    """VOICE：号主怎么说话（语气/节奏/口头禅/开场收口），不是业务介绍。"""
+    lines = [
+        "你是做了十几年工厂信息化的 FDE：懂业务、能验收，对行业乱象敢揭短，对学员像带徒弟。",
+        "你只说自己信的话，不端着，不写分析报告。",
+    ]
+    if rows:
+        sa = rows[0].style_analysis or {}
+        if sa.get("tone"):
+            lines.append(f"- 你的语气：{sa['tone']}")
+        if sa.get("rhythm"):
+            lines.append(f"- 你的节奏：{sa['rhythm']}")
+        ph: list = []
+        for v in rows:
+            for x in (v.style_analysis or {}).get("phrases") or []:
+                if str(x) not in ph:
+                    ph.append(str(x))
+        if ph:
+            lines.append(f"- 你常用的词：{'、'.join(ph[:8])}")
+        if sa.get("opening_pattern"):
+            lines.append(f"- 你的开场习惯：{sa['opening_pattern']}")
+        if sa.get("closing_style"):
+            lines.append(f"- 你的收口习惯：{sa['closing_style']}")
+    return "\n".join(lines)
+
+
+def _good_samples_block(rows: list) -> str:
+    """号主自己的爆款全文 + 逐条标注（只学怎么说，不学说什么）。"""
+    out = []
+    for i, v in enumerate(rows, 1):
+        try:
+            play = int((v.stats or {}).get("play") or 0)
+        except (TypeError, ValueError):
+            play = 0
+        out.append(f"【样本{i}《{(v.title or '')[:40]}》{play} 播放】\n{(v.transcript or '').strip()}")
+        sa = v.style_analysis or {}
+        marks = []
+        if sa.get("opening_pattern"):
+            marks.append(f"第一句：{sa['opening_pattern']}")
+        if sa.get("argument_habit"):
+            marks.append(f"中间：{sa['argument_habit']}")
+        if sa.get("closing_style"):
+            marks.append(f"最后：{sa['closing_style']}")
+        if marks:
+            out.append("标注：\n" + "\n".join(f"- {m}" for m in marks))
+    return "\n\n".join(out)
+
+
+def _bad_sample_block() -> str:
+    return (
+        "【视频稿 #50（用户判 0 分）】\n" + _BAD_SAMPLE_BODY +
+        "\n标注：\n"
+        "- 开场念赞数（六十一个人给这条评论点了赞）——观众不关心。\n"
+        "- 复述评论（信息茧房/DeepSeek人设）——没有上下文。\n"
+        "- 三步常识（算法→你慌→卖课）——没有新信息。\n"
+        "- 立场错位（说“你就开始慌了”）——教训观众。\n"
+        "- 金句+互动钩子收尾（评论区报个数）——模板。\n"
+        "- 没有“我”，没有现场，没有具体数字。\n"
+    )
+
+
+def _material_block(material_id: int) -> str:
+    """素材块：拆解 + 评论 + 正文/转写。没有拆解也没有正文=返回空串（不写）。"""
+    with Session(engine) as s:
+        m = s.get(Material, material_id)
+        if m is None:
+            return ""
+        analyses = s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+            MaterialAnalysis.material_id == material_id)).all()  # type: ignore[attr-defined]
+    latest: dict = {}
+    for a in analyses:
+        if a.kind not in latest or (a.version or 0) > (latest[a.kind].version or 0):
+            latest[a.kind] = a
+    breakdown = latest.get("breakdown")
+    body = (m.body or "").strip()
+    if not body and breakdown is None:
+        return ""
+    parts = [f"【素材】《{(m.title or '')[:60]}》 来源：{m.origin_type}"]
+    if body:
+        parts.append("【正文/转写】\n" + body[:6000])
+    if breakdown is not None:
+        p = breakdown.payload or {}
+        parts.append("【拆解】")
+        if p.get("summary"):
+            parts.append("摘要：" + str(p["summary"]))
+        hook = p.get("hook") or {}
+        if isinstance(hook, dict) and hook.get("position_text"):
+            parts.append(f"原片钩子：{hook['position_text']}")
+        for st in (p.get("structure") or [])[:8]:
+            if isinstance(st, dict):
+                parts.append(f"- {st.get('step', '')}：{st.get('content', '')}")
+        hl = p.get("highlights") or []
+        if hl:
+            parts.append("亮点：" + "；".join(str(x) for x in hl[:4]))
+        tv = p.get("topic_value")
+        if isinstance(tv, dict) and tv.get("angle"):
+            parts.append("拆解建议（只是角度，不是素材原判断）：" + str(tv["angle"])[:300])
+    comments = latest.get("comments")
+    if comments is not None:
+        items = (comments.payload or {}).get("items") or []
+        if items:
+            parts.append("【评论存档（只当受众反应，不当开头）】")
+            for it in items[:5]:
+                if isinstance(it, dict):
+                    parts.append(f"- {it.get('d', '?')} 赞：{str(it.get('t', ''))[:100]}")
+    for kind in ("transcript", "summary"):
+        a = latest.get(kind)
+        if a is not None and (a.text or "").strip():
+            parts.append(f"【{kind}】\n" + a.text.strip()[:5000])
+    return "\n".join(parts)
+
+
 @register_executor("script_hotcomment")
 async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
-    """热评→口播稿（2026-11-18 车道二·用户定版）：高赞热评开场=受众认领，知识库弹药垫深度，
-    形态读稿闸收口（代码机械判：平均≤13字/单句≤20字/零书面标点，不过定向重写一次）。"""
-    import json as _json
-
-    from sqlmodel import Session, select
-
+    """热评→口播稿（v4 2026-11-18 用户定版）：先过三道门（真事/点名/我的判断），
+    照号主爆款写；素材不足直接跳过，不建视频稿。"""
     from ..channels.engine import new_script_content
-    from ..db import engine
-    from ..models import Material, MaterialAnalysis
-    from ..tenant_brand import brand_of
+    from ..db import engine as _engine
 
     material_id = int(payload.get("material_id") or 0)
     cidx = int(payload.get("comment_idx") or 0)
     comment = likes = src_title = ""
-    with Session(engine) as s:
+    with Session(_engine) as s:
         m = s.get(Material, material_id)
         if m is None:
             raise RuntimeError(f"素材 #{material_id} 不存在")
@@ -140,70 +271,72 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
     if not comment:
         raise RuntimeError("热评不存在（该素材没有此条评论）")
 
-    with Session(engine) as s:
+    ctx.set_progress(15, "读素材（拆解/评论/原话）")
+    material_block = _material_block(material_id)
+    if not material_block:
+        ctx.set_progress(100, "素材没有拆解/转写，跳过")
+        return {"skipped": True, "reason": "素材没有拆解/转写/正文", "material_id": material_id}
+
+    rows = _top_self_videos(2)
+    ctx.set_progress(35, "过三道门 + 写口播稿")
+    prompt = render("script_hotcomment",
+                    VOICE=_voice_block(rows),
+                    GOOD_SAMPLES=_good_samples_block(rows),
+                    BAD_SAMPLE=_bad_sample_block(),
+                    MATERIAL=material_block,
+                    COMMENT=comment[:300], LIKES=likes or "?")
+    data = await gateway.complete_json([{"role": "user", "content": prompt}], max_tokens=20000)
+
+    if data.get("skip"):
+        reason = str(data.get("reason") or "")[:120]
+        ctx.set_progress(100, f"素材不足，跳过：{reason}")
+        return {"skipped": True, "reason": reason, "material_id": material_id}
+
+    body = str(data.get("body") or "").strip()
+    if not body:
+        vers = data.get("versions") or []
+        if vers and isinstance(vers[0], dict):
+            body = str(vers[0].get("body") or "").strip()
+    if not body:
+        raise RuntimeError("口播稿空响应")
+    story = str(data.get("story") or "")[:160]
+    turn = str(data.get("turn") or "")[:160]
+
+    chk = _speech_form_check(body)
+    if not chk["pass"]:
+        ctx.set_progress(70, f"形态未过（均 {chk['avg']} 字/句·最长 {chk['max']}·书面标点 {chk['book']}），定向重写")
+        again = await gateway.complete_json(
+            [{"role": "user", "content": prompt +
+              f"\n\n【返工·形态读稿闸】上一稿形态不达标：平均句长 {chk['avg']} 字/句（目标 ≤13）、"
+              f"最长句 {chk['max']} 字（目标 ≤20）、书面标点 {chk['book']} 处（目标 0）。"
+              "只逐句拆短重写，意思和顺序不变；只输出 {\"body\": \"完整口播稿\"}。"}],
+            max_tokens=20000)
+        body2 = str((again or {}).get("body") or "").strip()
+        if not body2:
+            vers = (again or {}).get("versions") or []
+            if vers and isinstance(vers[0], dict):
+                body2 = str(vers[0].get("body") or "").strip()
+        if body2:
+            body = body2
+            chk = _speech_form_check(body)
+
+    with Session(_engine) as s:
         script = new_script_content(
             s, tenant_id=1, channel_key="persona",
             title_hint=f"热评口播：{comment[:30]}",
-            payload={"script_state": "generating", "account_type": "persona",
-                     "hot_comment": {"material_id": material_id, "idx": cidx}})
+            payload={"script_state": "generated", "account_type": "persona",
+                     "hot_comment": {"material_id": material_id, "idx": cidx},
+                     "form_check": chk, "story": story, "turn": turn})
+        script.versions = [{"label": "照片子写", "hook": body.split("\n")[0][:40],
+                            "body": body, "notes": turn}]
+        script.status = "review"
+        script.note = (f"热评口播｜来源《{src_title[:24]}》｜形态体检：均 {chk['avg']} 字、"
+                       f"最长 {chk['max']}、书面标点 {chk['book']}")
+        s.add(script)
         s.commit()
         script_id = script.id
-
-    # 失败必须把脚本行标 failed（2026-11-18）：否则每次重试新建的行会永远停在「生成中」
-    try:
-        ctx.set_progress(20, "知识库弹药匹配")
-        ammo = await _kb_ammunition(comment)
-        ctx.set_progress(30, "在榜热点挂靠检查")
-        hotspot = await _hotspot_for_comment(comment)
-        ctx.set_progress(45, "口播稿生成")
-        prompt = render("script_hotcomment", PERSONA=brand_of(1)["persona"],
-                        COMMENT=comment[:300], LIKES=likes or "?",
-                        KB_AMMO=ammo or "（知识库无直接相关弹药——按人设与常识把这条心声讲透，禁编造数字）",
-                        VIRAL_BLOCK=_viral_block(hotspot))
-        data = await gateway.complete_json([{"role": "user", "content": prompt}], max_tokens=20000)
-        versions = _normalize_versions((data.get("versions") or []))[:1]
-        if not versions:
-            raise RuntimeError("口播稿生成空响应")
-        body = str(versions[0].get("body") or "")
-
-        chk = _speech_form_check(body)
-        if not chk["pass"]:
-            ctx.set_progress(70, f"形态未过（均 {chk['avg']} 字/句·最长 {chk['max']}·书面标点 {chk['book']}），定向重写")
-            data = await gateway.complete_json(
-                [{"role": "user", "content": prompt +
-                  f"\n\n【返工·形态读稿闸】上一稿形态不达标：平均句长 {chk['avg']} 字/句（目标 ≤13）、"
-                  f"最长句 {chk['max']} 字（目标 ≤20）、书面标点 {chk['book']} 处（目标 0）。"
-                  "全稿逐句拆短重写：一句一口气，书面标点全清，用口语挂钩词（对不对/为什么呢/说白了）替代书面连接。其余规格照旧。"}],
-                max_tokens=20000)
-            versions = _normalize_versions((data.get("versions") or []))[:1] or versions
-            chk = _speech_form_check(str(versions[0].get("body") or ""))
-
-        with Session(engine) as s:
-            script = s.get(Content, script_id)
-            p = dict(script.payload or {})
-            p["script_state"] = "generated"
-            p["account_type"] = "persona"
-            p["form_check"] = chk
-            script.payload = p
-            script.versions = versions
-            script.status = "review"
-            script.note = (f"热评口播｜来源《{src_title[:24]}》｜形态体检：均 {chk['avg']} 字、最长 {chk['max']}、书面标点 {chk['book']}")
-            s.add(script)
-            s.commit()
-        ctx.set_progress(100, f"完成（形态体检：均 {chk['avg']} 字/最长 {chk['max']}/书面标点 {chk['book']}）")
-        return {"script_id": script_id, "form": chk}
-    except Exception as e:  # noqa: BLE001
-        with Session(engine) as s:
-            sc = s.get(Content, script_id)
-            if sc is not None:
-                p = dict(sc.payload or {})
-                p["script_state"] = "failed"
-                p["error"] = f"{type(e).__name__}: {str(e)[:180]}"
-                sc.payload = p
-                sc.status = "failed"
-                s.add(sc)
-                s.commit()
-        raise
+    ctx.set_progress(100, f"完成（均 {chk['avg']} 字/最长 {chk['max']}/书面标点 {chk['book']}）")
+    return {"script_id": script_id, "form": chk, "story": story, "turn": turn}
 
 
 def _viral_block(hotspot: str) -> str:
