@@ -152,6 +152,26 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
                 idea.status = "approved"
                 idea.content_id = c.id
                 s.add(idea)
+    with Session(engine) as s:
+        c = s.get(Content, content_id)
+        p = dict(c.payload or {})
+        p["note_state"] = "review"
+        p["tags"] = tags
+        p["cover"] = cover_path
+        c.payload = p
+        c.title = title[:30]
+        c.body = body
+        c.status = "review"
+        s.add(c)
+        s.commit()
+        if idea_id := c.idea_id:
+            from ..models import Idea
+
+            idea = s.get(Idea, idea_id)
+            if idea is not None and idea.status == "draft":
+                idea.status = "approved"
+                idea.content_id = c.id
+                s.add(idea)
                 s.commit()
         for mid in material_ids:
             record_usage(s, tenant_id=tenant_id, material_id=int(mid),
@@ -159,3 +179,53 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
     ctx.set_progress(100, "完成")
     return {"content_id": content_id, "title": title, "tags": len(tags),
             "cover": bool(cover_path)}
+
+
+@register_executor("note_revise")
+async def note_revise(ctx: JobContext, payload: dict) -> dict:
+    """对话框内迭代（2026-11-18 用户裁决：实时生成、不行就在框里说改）：按反馈重写笔记标题+正文。
+
+    封面不动（渲染图与封面大字不随改稿重生成）；反馈逐条落实，未点到处保持原样。"""
+    content_id = payload["content_id"]
+    feedback = str(payload.get("feedback") or "").strip()
+    if not feedback:
+        raise RuntimeError("修改反馈为空")
+    with Session(engine) as s:
+        c = s.get(Content, content_id)
+        if c is None or c.kind != "note":
+            raise RuntimeError(f"笔记 #{content_id} 不存在")
+        p = dict(c.payload or {})
+        p["note_state"] = "revising"
+        c.payload = p
+        c.title = c.title  # 占位刷新
+        s.add(c)
+        s.commit()
+        title, body = c.title, c.body or ""
+    if not body.strip():
+        raise RuntimeError("原稿为空，无法按反馈修改")
+    from ..tenant_brand import brand_of
+
+    ctx.set_progress(40, "按反馈重写标题与正文")
+    data = await gateway.complete_json(
+        [{"role": "user", "content": render("note_revise", PERSONA=brand_of(1)["persona"],
+                                            FEEDBACK=feedback[:300], TITLE=title, DRAFT=body)}],
+        max_tokens=2048, thinking="disabled")
+    n_title = str(data.get("title") or "").strip()
+    n_body = str(data.get("body") or "").strip()
+    if not n_title or not n_body:
+        raise RuntimeError("按反馈修改空响应（title/body 缺失），稍后自动重试")
+    n_tags = [str(t).lstrip("#").strip()[:16] for t in (data.get("tags") or []) if str(t).strip()][:8]
+    with Session(engine) as s:
+        c = s.get(Content, content_id)
+        p = dict(c.payload or {})
+        p["note_state"] = "review"
+        if n_tags:
+            p["tags"] = n_tags
+        c.payload = p
+        c.title = n_title[:30]
+        c.body = n_body
+        c.status = "review"
+        s.add(c)
+        s.commit()
+    ctx.set_progress(100, "修改完成")
+    return {"content_id": content_id}

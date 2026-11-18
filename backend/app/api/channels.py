@@ -143,6 +143,23 @@ def get_xhs_note(content_id: int, user: User = Depends(require_user)) -> dict:
         return d
 
 
+class NoteReviseIn(BaseModel):
+    feedback: str
+
+
+@router.post("/xhs/notes/{content_id}/revise", status_code=202)
+async def revise_xhs_note(content_id: int, body: NoteReviseIn,
+                          user: User = Depends(require_user)) -> dict:
+    """对话框内迭代（2026-11-18 用户裁决）：按号主反馈重写笔记标题+正文（封面不动）。"""
+    feedback = body.feedback.strip()
+    if not feedback:
+        raise HTTPException(status_code=400, detail="反馈不能为空")
+    job = await runner.submit("note_revise",
+                              {"content_id": content_id, "feedback": feedback[:300]},
+                              dedup_key=f"1:nrev:{content_id}", actor=(user.tenant_id, user.id, user.role))
+    return {"job_id": job.id}
+
+
 class NoteUpdate(BaseModel):
     title: str | None = None
     body: str | None = None

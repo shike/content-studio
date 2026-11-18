@@ -290,6 +290,8 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         p = dict(script.payload or {})
         p["script_state"] = "generated"
         p["account_type"] = account_type
+        if hotspot:
+            p["hotspot"] = hotspot  # 迭代重写（script_revise）要知道爆款基因模式在挂谁
         script.payload = p
         script.status = "review"
         s.add(script)
@@ -297,6 +299,55 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
 
     ctx.set_progress(100, f"完成，产出 {len(versions)} 版")
     return {"script_id": script_id, "versions": len(versions)}
+
+
+@register_executor("script_revise")
+async def script_revise(ctx: JobContext, payload: dict) -> dict:
+    """对话框内迭代（2026-11-18 用户裁决：实时生成、不行就在框里说改）：按反馈重写当前版本。
+
+    追加新版本留痕（保留最近 5 版）；爆款基因模式随 payload 热点延续。"""
+    script_id = payload["script_id"]
+    feedback = str(payload.get("feedback") or "").strip()
+    if not feedback:
+        raise RuntimeError("修改反馈为空")
+    with Session(engine) as s:
+        script = s.get(Content, script_id)
+        if script is None or script.kind != "video_script":
+            raise RuntimeError(f"脚本 #{script_id} 不存在")
+        p = dict(script.payload or {})
+        p["script_state"] = "revising"
+        script.payload = p
+        s.add(script)
+        s.commit()
+        last = (script.versions or [{}])[-1]
+        draft = str(last.get("body") or "")
+    if not draft.strip():
+        raise RuntimeError("原稿为空，无法按反馈修改")
+    hotspot = str(p.get("hotspot") or "").strip()
+    from ..tenant_brand import brand_of
+    ctx.set_progress(30, "按反馈重写整稿")
+    data = await gateway.complete_json(
+        [{"role": "user", "content": render("script_revise", PERSONA=brand_of(1)["persona"],
+                                            VIRAL_BLOCK=_viral_block(hotspot),
+                                            FEEDBACK=feedback[:300],
+                                            DRAFT=draft)}],
+        max_tokens=20000, thinking="disabled")
+    new_versions = _normalize_versions((data.get("versions") or []))[:1]
+    if not new_versions or not str(new_versions[0].get("body") or "").strip():
+        raise RuntimeError("按反馈修改空响应，稍后自动重试")
+    v = new_versions[0]
+    v["notes"] = ((last.get("notes") or "") + f"｜改：{feedback[:40]}").strip("｜")[:200]
+    with Session(engine) as s:
+        script = s.get(Content, script_id)
+        script.versions = ((script.versions or []) + [v])[-5:]  # 追加留痕，保最近 5 版
+        p2 = dict(script.payload or {})
+        p2["script_state"] = "generated"
+        script.payload = p2
+        script.status = "review"
+        s.add(script)
+        s.commit()
+    ctx.set_progress(100, "修改完成")
+    return {"script_id": script_id}
 
 
 def _cta_rule_of(account_type: str) -> str:

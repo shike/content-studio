@@ -704,6 +704,8 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
     xhsAngle: string
   }>(null)
   const [hs, setHs] = useState<{ loading: boolean; reason: string; done: boolean }>({ loading: false, reason: '', done: false })
+  const [gen, setGen] = useState<null | { phase: 'busy' | 'done'; label: string; text: string; scriptId?: number; noteId?: number; dir: 'script' | 'xhs' }>(null)
+  const [fb, setFb] = useState('')
 
   /** 打开生成框：系统自动匹配当前可挂热点并预填（用户裁决「系统挂，不推给人」），人保留否决权。 */
   const openProd = (d: KbDoc) => {
@@ -1062,12 +1064,102 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                 const { doc, dir, length, angles, useStyle, hotspot, xhsTitle, xhsAngle } = prod
                 if (dir === 'xhs' && !xhsTitle.trim()) { setError('小红书选题标题不能为空'); return }
                 setProd(null)
-                if (dir === 'script') void toScript(doc, length, angles, useStyle, hotspot.trim())
-                else if (dir === 'xhs') void toXhs(doc, xhsTitle.trim(), xhsAngle.trim())
-                else void toArticle(doc)
+                if (dir === 'script') {
+                  // 实时工作台（2026-11-18 用户裁决：生成在框里跑、结果在框里看、不行在框里改）
+                  setGen({ phase: 'busy', label: '生成中（0%）', text: '', dir: 'script' })
+                  void (async () => {
+                    try {
+                      const r = await api<{ job_id: number; script_id: number }>('/scripts/generate', {
+                        method: 'POST', body: JSON.stringify({ kb_id: doc.id, length, angles, use_style: useStyle, hotspot: hotspot.trim() }),
+                      })
+                      await waitJob(r.job_id, (j) => setGen((g) => (g ? { ...g, label: `生成中（${j.progress}%）${j.message || ''}` } : g)))
+                      const d = await api<{ versions: { body: string }[] }>(`/scripts/${r.script_id}`)
+                      setGen({ phase: 'done', label: '', text: d.versions?.[d.versions.length - 1]?.body || '', scriptId: r.script_id, dir: 'script' })
+                    } catch (e) { setGen(null); setError(`生成失败：${apiErrText(e)}`) }
+                  })()
+                } else if (dir === 'xhs') {
+                  setGen({ phase: 'busy', label: '笔记生成中（0%）', text: '', dir: 'xhs' })
+                  void (async () => {
+                    try {
+                      const idea = await api<{ id: number }>('/channels/xhs/ideas', {
+                        method: 'POST', body: JSON.stringify({ title: xhsTitle, angle: xhsAngle, material_ids: [doc.id] }),
+                      })
+                      const c = await api<{ job_id: number; content_id: number }>(`/channels/xhs/ideas/${idea.id}/compose`, { method: 'POST' })
+                      await waitJob(c.job_id, (j) => setGen((g) => (g ? { ...g, label: `笔记生成中（${j.progress}%）${j.message || ''}` } : g)))
+                      const n = await api<{ title: string; body: string }>(`/channels/xhs/notes/${c.content_id}`)
+                      setGen({ phase: 'done', label: '', text: n.body || '', noteId: c.content_id, dir: 'xhs' })
+                    } catch (e) { setGen(null); setError(`笔记生成失败：${apiErrText(e)}`) }
+                  })()
+                } else {
+                  void toArticle(doc)
+                }
               }}
                 className="rounded-full bg-emerald-600 px-4 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700">确认生成</button>
             </div>
+          </div>
+        </div>,
+        document.body)}
+
+      {/* 实时生成工作台（2026-11-18 用户裁决：生成在框里跑、结果在框里看、不行在框里说改） */}
+      {gen && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a2f24]/40 px-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
+            <div className="text-[15px] font-bold text-slate-900">
+              生成内容 · {gen.dir === 'script' ? '视频稿' : '小红书笔记'}
+            </div>
+            {gen.phase === 'busy' ? (
+              <div className="mt-5 space-y-2">
+                <div className="flex items-center gap-2 text-[13px] text-slate-600">
+                  <RefreshCw size={14} className="inline animate-spin text-emerald-600" /> {gen.label || '生成中…'}
+                </div>
+                <div className="text-[11.5px] text-slate-400">生成在后台任务里跑，关掉页面也会继续，完成后可回到这里看稿改稿。</div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <div className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[#f7f8fa] px-3.5 py-3 text-[13px] leading-relaxed text-slate-700">{gen.text}</div>
+                <div className="mt-3">
+                  <div className="text-[12px] font-medium tracking-wide text-slate-400">不满意？说哪里不行，我按你的话改：</div>
+                  <textarea value={fb} onChange={(e) => setFb(e.target.value)} rows={2}
+                    placeholder="例：开头再狠一点，直接质问；故事砍一半；结尾别引导"
+                    className="mt-1.5 w-full resize-none rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] leading-relaxed outline-none focus:border-emerald-400" />
+                  <button onClick={() => {
+                    if (!gen || !fb.trim()) return
+                    const f = fb.trim()
+                    const { scriptId, noteId, dir } = gen
+                    setGen({ ...gen, phase: 'busy', label: '按反馈修改中…' })
+                    void (async () => {
+                      try {
+                        const r = scriptId
+                          ? await api<{ job_id: number }>(`/scripts/${scriptId}/revise`, { method: 'POST', body: JSON.stringify({ feedback: f }) })
+                          : await api<{ job_id: number }>(`/channels/xhs/notes/${noteId}/revise`, { method: 'POST', body: JSON.stringify({ feedback: f }) })
+                        await waitJob(r.job_id, (j) => setGen((g) => (g ? { ...g, label: `修改中（${j.progress}%）` } : g)))
+                        const d = (await (scriptId
+                          ? api<{ versions: { body: string }[] }>(`/scripts/${scriptId}`)
+                          : api<{ body: string }>(`/channels/xhs/notes/${noteId}`))) as { versions?: { body: string }[]; body?: string }
+                        const text = scriptId ? (d.versions?.[d.versions.length - 1]?.body || '') : (d.body || '')
+                        setGen({ phase: 'done', label: '', text, scriptId, noteId, dir })
+                        setFb('')
+                      } catch (e) { setGen({ phase: 'done', label: '', text: gen.text, scriptId, noteId, dir }); setError(`修改失败：${apiErrText(e)}`) }
+                    })()
+                  }}
+                    disabled={!fb.trim()}
+                    className="mt-2 rounded-full bg-emerald-600 px-4 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
+                    按反馈修改
+                  </button>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <button onClick={() => {
+                    setMsg(gen.dir === 'script'
+                      ? '稿子已进「人设号 · 视频稿」——审阅、改标题、定稿都在那边'
+                      : '笔记已生成 → 「小红书」tab 改稿发布')
+                    setGen(null); setFb('')
+                  }}
+                    className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">
+                    完成，去定稿
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>,
         document.body)}

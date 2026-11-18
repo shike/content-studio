@@ -208,6 +208,23 @@ def get_script(script_id: int, user: User = Depends(require_user)) -> dict:
         return script_out(script, channel_key_of(s, script.channel_id))
 
 
+class ReviseIn(BaseModel):
+    feedback: str
+
+
+@router.post("/{script_id}/revise", status_code=202)
+async def revise_script(script_id: int, body: ReviseIn,
+                        user: User = Depends(require_user)) -> dict:
+    """对话框内迭代（2026-11-18 用户裁决）：按号主反馈重写当前版本，追加新版本。"""
+    feedback = body.feedback.strip()
+    if not feedback:
+        raise HTTPException(status_code=400, detail="反馈不能为空")
+    job = await runner.submit("script_revise",
+                              {"script_id": script_id, "feedback": feedback[:300]},
+                              dedup_key=f"1:srev:{script_id}", actor=(user.tenant_id, user.id, user.role))
+    return {"job_id": job.id}
+
+
 @router.post("/{script_id}/polish", status_code=202)
 async def polish(script_id: int, body: PolishIn | None = None,
                  user: User = Depends(require_user)) -> dict:
