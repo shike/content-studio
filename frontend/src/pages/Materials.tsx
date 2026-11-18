@@ -679,7 +679,10 @@ interface KbDoc {
  */
 const SIX_ANGLES = ['反常识判断', '身份定位喊话', '行动指令', '提问式', '对比打假', '数字落差']
 
-function KbTab() {
+/** 稿件 kind → 跳转键（onNavigate 走 App 的 NAVMAP：带 tab 的旧键直达页内） */
+const KIND_NAV: Record<string, string> = { video_script: 'p_content', note: 'xhs', long_article: 'articles' }
+
+function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [docs, setDocs] = useState<KbDoc[]>([])          // 全量（无搜索词时的数据源）
   const [searched, setSearched] = useState<KbDoc[] | null>(null) // 全文检索结果（null=未在搜索）
   const [folder, setFolder] = useState('')
@@ -830,10 +833,11 @@ function KbTab() {
                   {(d.used || []).length > 0 && (
                     <span className="flex shrink-0 items-center gap-1">
                       {d.used.slice(0, 2).map((u) => (
-                        <span key={u.id} title={`《${u.title}》${u.status === 'published' ? '（已发布）' : ''}`}
-                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                        <button key={u.id} title={`《${u.title}》${u.status === 'published' ? '（已发布）' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); onNavigate?.(KIND_NAV[u.kind] || 'tasks') }}
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 transition hover:bg-amber-100">
                           →{u.kind_label} #{u.id}
-                        </span>
+                        </button>
                       ))}
                       {d.used.length > 2 && <span className="text-[11px] text-slate-400">+{d.used.length - 2}</span>}
                     </span>
@@ -909,11 +913,14 @@ function KbTab() {
                     )}
                     {(d.used || []).length > 0 && (
                       <div>
-                        <div className="text-[11px] tracking-wide text-slate-400">已产出（防重复选材）</div>
+                        <div className="text-[11px] tracking-wide text-slate-400">已产出（点击跳转）</div>
                         <ul className="mt-1 space-y-0.5">
                           {d.used.map((u) => (
-                            <li key={u.id} className="text-[12.5px] text-slate-600">
-                              → {u.kind_label} #{u.id}《{u.title}》{u.status === 'published' ? '（已发布）' : ''}
+                            <li key={u.id}>
+                              <button onClick={() => onNavigate?.(KIND_NAV[u.kind] || 'tasks')} title={u.title}
+                                className="text-[12.5px] text-slate-600 transition hover:text-emerald-700 hover:underline">
+                                → {u.kind_label} #{u.id}《{u.title}》{u.status === 'published' ? '（已发布）' : ''}
+                              </button>
                             </li>
                           ))}
                         </ul>
@@ -947,6 +954,20 @@ function KbTab() {
             onClick={(e) => e.stopPropagation()}>
             <div className="text-[15px] font-bold text-slate-900">生成内容</div>
             <div className="mt-1 line-clamp-1 text-[12.5px] text-slate-500">《{prod.doc.title || `文档 #${prod.doc.id}`}》</div>
+            {(prod.doc.used || []).length > 0 && (
+              <div className="mt-3">
+                <div className="text-[12px] font-medium tracking-wide text-slate-400">已生成（点击跳转）</div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {prod.doc.used.map((u) => (
+                    <button key={u.id} onClick={() => { setProd(null); onNavigate?.(KIND_NAV[u.kind] || 'tasks') }}
+                      title={u.title}
+                      className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12px] font-medium text-amber-700 transition hover:bg-amber-100">
+                      →{u.kind_label} #{u.id}{u.status === 'published' ? '（已发布）' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mt-3 text-[12px] font-medium tracking-wide text-slate-400">内容类型</div>
             <div className="mt-1.5 space-y-2">
@@ -1064,7 +1085,7 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
       </div>
       {tab === 'topics' && <TopicsTab />}
       {tab === 'watch' && <WatchTab />}
-      {tab === 'kb' && <KbTab />}
+      {tab === 'kb' && <KbTab onNavigate={onNavigate} />}
     </div>
   )
 }
