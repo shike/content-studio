@@ -742,6 +742,7 @@ interface KbDoc {
   title: string
   author: string
   folder: string
+  tags: string[]
   score: number | null
   why_good: string
   adapt_angle: string
@@ -758,15 +759,19 @@ interface KbDoc {
  * 知识库（2026-11-18 用户定版）：全库内容榜，默认「全部 · 分数降序」——库=收录即认可，
  * 不让"入选"当门禁。三层递进支撑判断：分数排序=质量梯度 → 用处一行（why_good）=初筛 →
  * 展开读原文（懒加载，cap 1.2 万字）后决策送产线。已产出标记（→视频稿/长文/笔记 #id）防重复选材。
- * 目录 chips=用户自己的 ima 分类法，只导航不管理（增删收在底部目录管理卡）。
+ * chips=体裁轴（2026-11-18 用户定版：标签=「这是什么货」7 词表，主1+次1；资讯/软文类不打标
+ * 直接沉底——目录降为行内小字，不再做导航轴）。
  */
 /** 稿件 kind → 跳转键（onNavigate 走 App 的 NAVMAP：带 tab 的旧键直达页内） */
 const KIND_NAV: Record<string, string> = { video_script: 'p_content', note: 'xhs', long_article: 'articles' }
 
+/** 体裁词表（2026-11-18 用户定版 7 个，生产有用的货；打标=kb_genre_tag.py，主在前） */
+const KB_GENRES = ['方法论', '客户案例', '观点判断', '操作教程', '工具资源', '学习路线', '职业发展']
+
 function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [docs, setDocs] = useState<KbDoc[]>([])          // 全量（无搜索词时的数据源）
   const [searched, setSearched] = useState<KbDoc[] | null>(null) // 全文检索结果（null=未在搜索）
-  const [folder, setFolder] = useState('')
+  const [genre, setGenre] = useState('')
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(100)                // 触底续载
   const [bodies, setBodies] = useState<Record<number, string>>({}) // 已拉取的全文缓存
@@ -832,13 +837,14 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
     return () => clearTimeout(t)
   }, [q])
 
-  const folders = useMemo(() => {
+  // 体裁 chips 计数（客户端聚合：docs 已全量在内存）
+  const genreCounts = useMemo(() => {
     const m = new Map<string, number>()
-    for (const d of docs) if (d.folder) m.set(d.folder, (m.get(d.folder) || 0) + 1)
-    return [...m.entries()].sort((a, b) => b[1] - a[1])
+    for (const d of docs) for (const t of (d.tags || [])) m.set(t, (m.get(t) || 0) + 1)
+    return m
   }, [docs])
   const base = searched ?? docs
-  const shown = base.filter((d) => !folder || d.folder === folder)
+  const shown = base.filter((d) => !genre || (d.tags || []).includes(genre))
   const vis = shown.slice(0, limit)
 
   /** 展开行时懒加载全文（GET /kb/docs/{id}）；空串=原文未入库，回落摘录。 */
@@ -897,9 +903,9 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
 
       <div className="mb-3 space-y-2">
         <Chips items={[
-          { v: '', label: `全部目录 ${docs.length}` },
-          ...folders.map(([name, n]) => ({ v: name, label: `${name} ${n}` })),
-        ]} value={folder} onPick={(v) => { setFolder(v); setLimit(100) }} />
+          { v: '', label: `全部 ${docs.length}` },
+          ...KB_GENRES.map((g) => ({ v: g, label: `${g} ${genreCounts.get(g) || 0}` })),
+        ]} value={genre} onPick={(v) => { setGenre(v); setLimit(100) }} />
         <div className="flex flex-wrap items-center gap-2">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜标题 / 作者 / 全文…"
             className="ml-auto w-64 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
@@ -915,7 +921,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
 
       {shown.length === 0 ? (
         <EmptyState icon={BookOpen} title={docs.length === 0 ? '知识库还没有入库文档' : '没有匹配的文档'}
-          desc={docs.length === 0 ? '每日 04:00 自动挖掘进新文档' : '换个目录或关键词'} />
+          desc={docs.length === 0 ? '每日 04:00 自动挖掘进新文档' : '换个体裁或关键词'} />
       ) : (
         <div className="space-y-2">
           {vis.map((d) => {
@@ -1023,6 +1029,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                       </div>
                     )}
                     <div className="flex flex-wrap gap-x-4 text-[12px] text-slate-400">
+                      {(d.tags || []).length > 0 && <span>体裁：{d.tags.join(' · ')}</span>}
                       {d.folder && <span>目录：{d.folder}</span>}
                     </div>
                   </div>

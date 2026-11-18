@@ -137,6 +137,7 @@ def kb_docs(q: str = "", user: User = Depends(require_user)) -> dict:
         items = [{
             "id": m.id, "title": m.title, "author": m.author or "",
             "folder": str((m.quality or {}).get("folder") or ""),
+            "tags": list(m.tags or []),  # 体裁标签（2026-11-18 用户定版 7 词表，资讯/软文类=空）
             "score": (m.quality or {}).get("score"),
             "why_good": str((m.quality or {}).get("why_good") or ""),
             "adapt_angle": str((m.quality or {}).get("adapt_angle") or ""),
@@ -169,6 +170,7 @@ def kb_doc(doc_id: int, user: User = Depends(require_user)) -> dict:
         return {
             "id": m.id, "title": m.title, "author": m.author or "",
             "folder": str(q.get("folder") or ""),
+            "tags": list(m.tags or []),
             "score": q.get("score"),
             "why_good": str(q.get("why_good") or ""),
             "adapt_angle": str(q.get("adapt_angle") or ""),
