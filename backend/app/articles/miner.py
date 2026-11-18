@@ -20,26 +20,14 @@ from ..models import AppSetting, Material, PipelineLedger
 from ..prompts import render
 from .quality import load_cursor, save_cursor
 
-_PER_DAY_DOCS = 18   # 每日评估篇数（游标续读，453 篇编目约 25 天盘完）
+_PER_DAY_DOCS = 18   # 每日评估篇数（游标续读，全库日批盘完）
 _BATCH_DEADLINE = 45 * 60   # 整批硬 deadline（秒）：未知挂死源转 TransientError 走梯子（2026-11-15 卡死复发）
 _DOC_WAIT = 120   # 单篇全文拉取兜底（ima 客户端自带 30/40s 超时，此处再兜一层未知挂死）
 _EVAL_WAIT = 600  # 单篇评估兜底（gateway 自带 600s httpx 超时，此处防连接级停滞）
-_DOC_CAP = 30000     # 单篇全文上限（防异常大文件）
+_DOC_CAP = 100000    # 单篇评估全文上限（2026-11-18 v2：3 万字腰斩曾把长手册打到 2~3 分）
 _READ_SLEEP = 0.8    # ima 限流退避（密集调用 403 教训）
 _EVAL_SLEEP = 0.4    # 评估调用间隔
 _DEFAULT_GEN_LINE = 7.5  # 入清单线（AppSetting.adapt_gen_line 可覆盖）
-
-# 目录 → 栏目兜底映射（评估 prompt 自判优先，自判不出时按目录归）
-_FOLDER_CATEGORY = {
-    "案例-交付实战复盘": "交付现场", "案例-案例集与行业标杆": "交付现场",
-    "案例-行业场景与趋势": "行业拆局", "案例-方法论与工作包": "交付现场",
-    "岗位认知与转型路径": "转行真话", "接单报价与个人品牌": "变现报价",
-    "市场与人才数据": "行业拆局", "研究报告与白皮书": "行业拆局",
-    "能力模型与角色认知": "转行真话", "企业落地与组织": "交付现场",
-    "行业观察与源流": "行业拆局", "工程规范与工具箱": "交付现场",
-    "交付方法论冲刺散篇": "交付现场", "社群与直播运营": "现场实录",
-}
-_CATEGORIES = set(_FOLDER_CATEGORY.values())
 
 
 def _gen_line(s: Session) -> float:
@@ -155,9 +143,6 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
         if score >= line:
             quotes = [str(q).strip() for q in (note or {}).get("best_quotes") or []
                       if str(q).strip()][:3]
-            cat = str((note or {}).get("category") or "").strip()
-            if cat not in _CATEGORIES:
-                cat = _FOLDER_CATEGORY.get(folder_name, "交付现场")
             with Session(engine) as s:
                 again = s.exec(select(Material).where(  # type: ignore[attr-defined]
                     Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
@@ -173,7 +158,7 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                                  "folder": folder_name,
                                  "why_good": str((note or {}).get("why_good") or "")[:200],
                                  "adapt_angle": str((note or {}).get("adapt_angle") or "")[:300],
-                                 "best_quotes": quotes, "category": cat, "priority": 0},
+                                 "best_quotes": quotes, "priority": 0, "rubric": "v2"},
                         stage="pending", status="ready", note="挖掘入清单"))
                     s.commit()
                     added += 1
@@ -188,7 +173,8 @@ async def article_kb_miner(ctx: JobContext, payload: dict) -> dict:
                         tenant_id=1, origin_type="kb_doc", origin_id=mid,
                         title=clean_kb_title(title),
                         body=clean_kb_body(text)[:12000],
-                        quality={"score": score, "folder": folder_name, "priority": 0},
+                        quality={"score": score, "folder": folder_name,
+                                 "priority": 0, "rubric": "v2"},
                         stage="low", status="ignored",
                         note=f"评分 {score} 低于生成线 {line}，未入改编队列"))
                     s.commit()

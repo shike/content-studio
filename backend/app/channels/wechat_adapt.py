@@ -29,7 +29,7 @@ from .wechat import (
 )
 from ..articles.quality import min_chars_or_raise, strip_fence as _strip_fence
 
-_SRC_CAP = 30000      # 源文全文上限
+_SRC_CAP = 100000     # 源文全文上限（2026-11-18：3 万字腰斩，长手册改编只读到半篇）
 _DUP_LINE = 30.0      # 原创度线：与源文重复率百分比上限
 _MIN_CHARS = 1500     # 正文下限（规格 1900~2200）
 
