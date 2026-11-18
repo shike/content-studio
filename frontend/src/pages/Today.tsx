@@ -7,7 +7,7 @@ import KbTab from './KbTab'
 
 /**
  * 今天（2026-11-18 用户定版）：三个平级 tab——
- * 今日=晨报（指标/长文/管线）；热门评论=监控作者高赞评论→口播；知识库=未产出文档→长文图文。
+ * 数据=晨报（指标/长文/管线，tab 名由用户定为「数据」）；热门评论=监控作者高赞评论→口播；知识库=未产出文档→长文图文。
  * 两条产线各占一 tab（源不同、产物不同），素材池归素材库。
  */
 
@@ -28,7 +28,7 @@ const PIPE_LABEL: Record<string, string> = {
 type TodayTab = 'today' | 'comments' | 'kb'
 
 const TABS: { id: TodayTab; label: string }[] = [
-  { id: 'today', label: '今日' },
+  { id: 'today', label: '数据' },
   { id: 'comments', label: '热门评论' },
   { id: 'kb', label: '知识库' },
 ]
