@@ -130,6 +130,49 @@ def _list_self_videos(url: str) -> tuple[Optional[list], Optional[str]]:
 
 
 register_concurrent("self_scan")
+_VIRAL_PLAY_BAR = 30000   # 爆款范本播放线（2026-11-18 实证：12万/7.5万断层 vs 其余 ≤6千）
+_VIRAL_MAX_SAMPLES = 4
+
+
+def _harvest_viral_genes() -> str:
+    """回流循环（2026-11-18 用户裁决「AI 不判爆款、数据判」）：高播放自有视频自动进爆款范本库。
+
+    播放 ≥3 万且带转写的过闸样本进 app_settings.viral_gene_samples（转写截 1400 字，
+    上限 4 条，超额自然淘汰播放最低的）；无变化返回空串。
+    生成端 script_generate 热点模式以此为 few-shot 范本——今天跑出来的爆款，就是明天的生成范本。"""
+    from ..models import AppSetting
+
+    with Session(engine) as s:
+        rows = s.exec(select(SelfVideo).where(  # type: ignore[attr-defined]
+            SelfVideo.scan_status == "approved")).all()  # type: ignore[attr-defined]
+    cand = []
+    for v in rows:
+        play = int((v.stats or {}).get("play") or 0)
+        if play >= _VIRAL_PLAY_BAR and (v.transcript or "").strip():
+            cand.append((play, v))
+    if not cand:
+        return ""
+    cand.sort(key=lambda x: -x[0])
+    cand = cand[:_VIRAL_MAX_SAMPLES]
+    blocks = []
+    for play, v in cand:
+        st = v.stats or {}
+        blocks.append(f"【范本｜{play} 播放·{st.get('comment', '?')} 评】《{(v.title or '')[:40]}》\n"
+                      f"{(v.transcript or '').strip()[:1400]}")
+    value = "\n\n".join(blocks)
+    with Session(engine) as s:
+        row = s.get(AppSetting, "viral_gene_samples")
+        if row is not None and (row.value or "").strip() == value:
+            return ""
+        if row is None:
+            s.add(AppSetting(key="viral_gene_samples", value=value))
+        else:
+            row.value = value
+            s.add(row)
+        s.commit()
+    return f"爆款范本库更新：{len(cand)} 条进 viral_gene_samples（播放线 {_VIRAL_PLAY_BAR}）"
+
+
 @register_executor("self_scan")
 async def self_scan(ctx: JobContext, payload: dict) -> dict:
 
@@ -264,6 +307,9 @@ async def self_scan(ctx: JobContext, payload: dict) -> dict:
                 s.commit()
         notes.append(f"{acc.name}：新增 {created} 条（已自动排队风格拆解）")
 
+    viral_note = _harvest_viral_genes()
+    if viral_note:
+        notes.append(viral_note)
     ctx.set_progress(100, f"完成：新增 {queued} 条")
     return {"queued": queued, "notes": notes}
 

@@ -699,6 +699,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
     length: 'short' | 'long'
     angles: string[]
     useStyle: boolean
+    hotspot: string
     xhsTitle: string
     xhsAngle: string
   }>(null)
@@ -752,11 +753,11 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
     }
   }
 
-  const toScript = async (d: KbDoc, length: 'short' | 'long', angles: string[], useStyle: boolean) => {
+  const toScript = async (d: KbDoc, length: 'short' | 'long', angles: string[], useStyle: boolean, hotspot: string = '') => {
     setError('')
     try {
       const r = await api<{ job_id: number; script_id: number }>('/scripts/generate', {
-        method: 'POST', body: JSON.stringify({ kb_id: d.id, length, angles, use_style: useStyle }),
+        method: 'POST', body: JSON.stringify({ kb_id: d.id, length, angles, use_style: useStyle, hotspot }),
       })
       setMsg(`视频脚本生成中（任务 #${r.job_id}）——完成后在「人设号 · 视频稿」`)
       waitJob(r.job_id, (j) => setMsg(`视频脚本：${j.progress}% ${j.message || ''}`))
@@ -866,7 +867,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                         </button>
                         <span className="text-[11px] text-slate-300">｜</span>
                         <button onClick={() => setProd({
-                          doc: d, dir: 'script', length: 'short', angles: [], useStyle: true,
+                          doc: d, dir: 'script', length: 'short', angles: [], useStyle: true, hotspot: '',
                           xhsTitle: (d.title || '').slice(0, 40),
                           xhsAngle: [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
                             .filter(Boolean).join('；金句：').slice(0, 200),
@@ -1006,6 +1007,15 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                     className="size-4 accent-emerald-600" />
                   套用风格画像（你的历史成稿风格）
                 </label>
+                <div>
+                  <div className="text-[12px] font-medium tracking-wide text-slate-400">挂靠热点（爆款引信，可空）</div>
+                  <input value={prod.hotspot} onChange={(e) => setProd({ ...prod, hotspot: e.target.value })}
+                    placeholder="热点事件/产品名（如：Workbuddy）——填了=爆款基因模式：热点×强立场×一线视角"
+                    className="mt-1.5 w-full rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+                  <div className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
+                    自己账号实证：爆款=热点×立场×一线视角（12万/7.5万播放样本）；不填=纯干货稿（天花板几千播放）
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1035,10 +1045,10 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
               <button onClick={() => setProd(null)}
                 className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">取消</button>
               <button onClick={() => {
-                const { doc, dir, length, angles, useStyle, xhsTitle, xhsAngle } = prod
+                const { doc, dir, length, angles, useStyle, hotspot, xhsTitle, xhsAngle } = prod
                 if (dir === 'xhs' && !xhsTitle.trim()) { setError('小红书选题标题不能为空'); return }
                 setProd(null)
-                if (dir === 'script') void toScript(doc, length, angles, useStyle)
+                if (dir === 'script') void toScript(doc, length, angles, useStyle, hotspot.trim())
                 else if (dir === 'xhs') void toXhs(doc, xhsTitle.trim(), xhsAngle.trim())
                 else void toArticle(doc)
               }}

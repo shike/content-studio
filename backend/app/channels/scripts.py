@@ -22,6 +22,39 @@ def _material_ctx(s: Session, material_id: int) -> dict:
     return material_context(s, int(material_id))
 
 
+def _viral_block(hotspot: str) -> str:
+    """爆款基因块（2026-11-18 用户裁决「AI 不判爆款、数据判」：范本=自有账号过闸真实爆款）。
+
+    挂靠热点才注入（无热点=干货稿，不硬装情绪——实证公式：热点×立场×一线视角缺一不爆）。
+    范本库 app_settings.viral_gene_samples 由回流循环自动更新（self_scan 收尾收割播放 ≥3 万样本）。"""
+    hotspot = (hotspot or "").strip()
+    if not hotspot:
+        return ""
+    from sqlmodel import Session
+
+    from ..db import engine
+    from ..models import AppSetting
+
+    with Session(engine) as s:
+        row = s.get(AppSetting, "viral_gene_samples")
+        samples = (row.value or "").strip() if row else ""
+    if not samples:
+        samples = "（范本库暂空——等自有账号回流积累，先按公式写）"
+    return (
+        f"## 爆款基因模式（本条挂靠热点：{hotspot}）——**本块优先级最高，与下方其他规范冲突时以本块为准**\n"
+        "本账号数据实证公式：**爆款 = 热点对象 × 强情绪立场（骂/质问/站队）× 一线身份视角**，"
+        "热点窗口期 48h 内发布；无热点的纯干货在本账号只有几千播放天花板。本条为爆款稿，硬性动作：\n"
+        f"1. **前 3 秒内必须直接对「{hotspot}」甩出立场**（骂/质问/站队选一），热点词必须出现在第一句——"
+        "像《祝Anthropic早日倒闭》那样标题即立场，像《Workbuddy那么复杂！FDE怎么办》那样开口即质问\n"
+        "2. 全文以**被热点折腾的一线落地者**身份说话，禁旁观评测腔、禁客观分析腔\n"
+        "3. 血肉用一线落地细节作证（在现场看到什么、用户真实反应、踩过的坑）\n"
+        "4. 结尾留站队钩子（让观众必须选边评论），不做圆满总结\n"
+        "以下是自己账号的真实爆款范本（播放量=受众判决；ASR 转写含错别字——"
+        "**只学立场、姿态、节奏与结构，严禁复用其主题与措辞**）：\n\n"
+        + samples
+    )
+
+
 def _script_length_spec(length: str) -> str:
     """两档字数口径（单点定义，生成与打磨两处共用）。
 
@@ -158,6 +191,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
             }
 
     length = payload.get("length", "short")
+    hotspot = str(payload.get("hotspot") or "").strip()  # 2026-11-18 爆款基因模式（挂靠热点才注入）
     # 打法：指定候选（≤3 个，单版直出取最贴合的一个）或自动挑（2026-11-05 一版精品定版）
     angles = [a for a in (payload.get("angles") or []) if a in SIX_ANGLES][:3]
     if angles:
@@ -215,6 +249,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                         ANGLES_SPEC=angles_spec,
                         PERSONA=brand_of(1)["persona"],
                         ACCOUNT_MODE=account_mode,
+                        VIRAL_BLOCK=_viral_block(hotspot),
                         SCAFFOLD=_scaffold(
                             discipline_mode=discipline_mode, card_discipline=card_discipline,
                             my_style=build_my_style(use_style), length_spec=length_spec,
@@ -228,6 +263,21 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     versions = _normalize_versions((data.get("versions") or []))[:1]
     if not versions:
         raise RuntimeError("脚本生成失败：没有任何可用版本")
+
+    # 爆款基因闸（2026-11-18 两轮冒烟教训：模型会绕开热点直接写文档内容）——
+    # 挂了热点但稿子没入题，机械检查后定向重写一次，不靠模型自觉
+    if hotspot:
+        hot_core = hotspot.split()[0]
+        if hot_core.lower() not in json.dumps(versions[0], ensure_ascii=False).lower():
+            ctx.set_progress(50, f"稿子未入题热点「{hot_core}」，定向重写")
+            data = await gateway.complete_json(
+                [{"role": "system", "content": prompt},
+                 {"role": "user", "content": json.dumps(topic_info, ensure_ascii=False)
+                  + f"\n\n【返工要求】上一稿完全没入题热点「{hotspot}」，作废。重写："
+                    f"第一句必须对「{hotspot}」甩出立场（骂/质问/站队选一），"
+                    "文档里的判断和细节只作为论据为热点立场服务——不是写文档的读后感。其余规格照旧。"}],
+                max_tokens=20000)
+            versions = _normalize_versions((data.get("versions") or []))[:1] or versions
 
     # 新契约（PRD R2.3）：生成后自动批判打磨一轮
     ctx.set_progress(60, "自动批判打磨一轮（约 3~8 分钟，慢是正常的）")

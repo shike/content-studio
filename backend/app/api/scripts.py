@@ -57,6 +57,7 @@ class GenerateIn(BaseModel):
     use_style: bool = True
     length: str = "short"
     angles: list[str] = []
+    hotspot: str = ""  # 挂靠热点（2026-11-18 爆款基因模式：填了=热点×立场×一线视角写法）
     account_type: str = ""
 
 
@@ -150,7 +151,7 @@ async def generate(body: GenerateIn, user: User = Depends(require_user)) -> dict
         job = await runner.submit("script_generate",
                                   {"script_id": script_id, "kb_id": body.kb_id,
                                    "length": body.length, "use_style": body.use_style,
-                                   "angles": angles},
+                                   "angles": angles, "hotspot": body.hotspot},
                                   dedup_key=f"kb:{body.kb_id}", actor=(user.tenant_id, user.id, user.role))
         return {"script_id": script_id, "job_id": job.id}
     if not (body.card_id or body.ore_id or body.kb_id):
