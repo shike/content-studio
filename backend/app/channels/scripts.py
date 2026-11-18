@@ -22,7 +22,7 @@ def _material_ctx(s: Session, material_id: int) -> dict:
     return material_context(s, int(material_id))
 
 
-_FORM_BOOK = "——；;、「」『』“”‘’《》〈〉："  # 书面标点黑名单（口播零容忍，2026-11-18 定标）
+_FORM_BOOK = "——；;、「」『』“”‘’《》〈〉：。！？，、…"  # 书面标点黑名单（口播零容忍，2026-11-18 定标）
 
 
 def _speech_form_check(body: str) -> dict:
