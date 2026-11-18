@@ -3,7 +3,6 @@ import Materials from './Materials'
 import LeadgenOre from './LeadgenOre'
 import Scripts from './Scripts'
 import Workshop from './Workshop'
-import ContentItems from './ContentItems'
 import ArticleStyle from './ArticleStyle'
 import AccountTrends from './AccountTrends'
 
@@ -103,18 +102,16 @@ export function LeadgenStage(props: { tab: string; onTab: (t: string) => void; o
   )
 }
 
-/** 公众号（副线）：工场 / 清单 / 画像 */
+/** 公众号（副线）：工场 / 画像（2026-11-18 用户裁决：清单并入知识库，不再单列） */
 export function ArticleStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
   return (
     <StageShell tab={props.tab} onTab={props.onTab} tabs={[
       { id: 'workshop', label: '工场' },
-      { id: 'items', label: '清单' },
       { id: 'style', label: '画像' },
     ]}>
       {({ id }) => (
         <>
           {id === 'workshop' && <Workshop />}
-          {id === 'items' && <ContentItems onNavigate={props.onNavigate} />}
           {id === 'style' && <ArticleStyle />}
         </>
       )}

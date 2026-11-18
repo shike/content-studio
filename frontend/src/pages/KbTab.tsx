@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, RefreshCw } from 'lucide-react'
+import { BookOpen, Loader2, Pickaxe, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import { ConfirmDeleteButton, EmptyState, ErrorLine, relTime } from '../components'
 import { Chips } from './MaterialsShared'
@@ -48,6 +48,16 @@ const KB_GENRES = ['方法论', '客户案例', '观点判断', '操作教程', 
 /** 今天·知识库只放未产出的前 100 篇（2026-11-18 用户定版），素材库·知识库仍全库 */
 const TODAY_LIMIT = 100
 
+/** 改编链状态徽章（2026-11-18：公众号「清单」并入知识库——状态回到行上）。 */
+const STAGE_META: Record<string, { label: string; cls: string }> = {
+  pending: { label: '待改编', cls: 'bg-amber-50 text-amber-700' },
+  running: { label: '改编中', cls: 'bg-sky-50 text-sky-700' },
+  done: { label: '已改编', cls: 'bg-emerald-50 text-emerald-700' },
+  published: { label: '已改编·已发', cls: 'bg-emerald-100 text-emerald-800' },
+  low: { label: '低分未入', cls: 'bg-slate-100 text-slate-400' },
+  dismissed: { label: '不做', cls: 'bg-slate-100 text-slate-400' },
+}
+
 export default function KbTab({ onNavigate, mode = 'full' }: {
   onNavigate?: (k: string) => void; mode?: 'full' | 'today'
 }) {
@@ -59,6 +69,10 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
   const [bodies, setBodies] = useState<Record<number, string>>({}) // 已拉取的全文缓存
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
+  // 挖掘/改编日账（2026-11-18 从「公众号·清单」迁入）
+  interface LedgerRow { id: number; phase: string; produced: string; reason: string; anomaly?: boolean }
+  const [ledger, setLedger] = useState<LedgerRow[]>([])
+  const [mining, setMining] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [edit, setEdit] = useState<{ id: number; title: string } | null>(null)
   const [prod, setProd] = useState<null | {
@@ -90,6 +104,25 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
     })
   }
 
+  const mine = async () => {
+    setMining(true); setError('')
+    try {
+      await api('/articles/mine', { method: 'POST' })
+      setTimeout(() => { setMining(false); load() }, 1500)
+    } catch (e) { setError(apiErrText(e)); setMining(false) }
+  }
+
+  const setStage = async (d: KbDoc, status: 'pending' | 'dismissed') => {
+    setError('')
+    try {
+      await api(`/articles/content-items/${d.id}/status`, {
+        method: 'POST', body: JSON.stringify({ status }),
+      })
+      setMsg(status === 'dismissed' ? '已标不做（文档保留）' : '已恢复待改编')
+      load()
+    } catch (e) { setError(apiErrText(e)) }
+  }
+
   const removeDoc = async (d: KbDoc) => {
     setError('')
     try {
@@ -114,7 +147,11 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
   const load = useCallback(() => {
     api<{ items: KbDoc[] }>('/kb/docs').then((d) => setDocs(d.items || []))
       .catch((e) => setError(apiErrText(e)))
-  }, [])
+    if (mode !== 'today') {
+      api<{ items: any[] }>('/articles/ledger?limit=10')
+        .then((d) => setLedger(d.items || [])).catch(() => {})
+    }
+  }, [mode])
   useEffect(() => { load() }, [load])
 
   // 全文检索（服务端：标题/作者/正文）——300ms 防抖；清词回落全量
@@ -168,10 +205,29 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
     } catch (e) { setError(`改编失败：${apiErrText(e)}`) }
   }
 
+  const phaseLine = (phase: string, name: string) => {
+    const r = ledger.find((x) => x.phase === phase)
+    if (!r) return { text: `${name}：还没跑过`, anomaly: false }
+    if (r.anomaly) return { text: `${name}：成功但无产出且无原因——异常，去任务页查`, anomaly: true }
+    return { text: `${name}：${r.produced || r.reason || '空过'}`, anomaly: false }
+  }
+  const mineLine = phaseLine('mine', '昨次挖掘')
+  const adaptLine = phaseLine('adapt', '昨次改编')
+
   return (
     <div>
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       <ErrorLine text={error} />
+      {mode !== 'today' && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] text-slate-500">
+          <span className={mineLine.anomaly ? 'font-medium text-red-600' : ''}>{mineLine.text}</span>
+          <span className="text-slate-300">·</span>
+          <span className={adaptLine.anomaly ? 'font-medium text-red-600' : ''}>{adaptLine.text}</span>
+          <button className="btn-ghost btn-sm ml-auto flex items-center gap-1" disabled={mining} onClick={mine}>
+            {mining ? <Loader2 size={13} className="animate-spin" /> : <Pickaxe size={13} />} 手动补挖
+          </button>
+        </div>
+      )}
 
       {mode !== 'today' && <div className="mb-3 space-y-2">
         <Chips items={[
@@ -226,6 +282,10 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
                       {d.used.length > 2 && <span className="text-[11px] text-slate-400">+{d.used.length - 2}</span>}
                     </span>
                   )}
+                  {(() => {
+                    const m = STAGE_META[d.stage || '']
+                    return m ? <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${m.cls}`}>{m.label}</span> : null
+                  })()}
                   {d.author && <span className="shrink-0 text-xs text-slate-400">@{d.author}</span>}
                   <span className="shrink-0 text-[11px] text-slate-400">{relTime(d.created_at)}</span>
                 </div>
@@ -253,6 +313,12 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
                           生成内容
                         </button>
                         <span className="text-[11px] text-slate-300">｜</span>
+                        {(d.stage === 'pending' || d.stage === 'dismissed') && (
+                          <button onClick={() => setStage(d, d.stage === 'pending' ? 'dismissed' : 'pending')}
+                            className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600 transition hover:bg-slate-50">
+                            {d.stage === 'pending' ? '不做（移出改编队列）' : '恢复待改编'}
+                          </button>
+                        )}
                         <ConfirmDeleteButton onConfirm={() => removeDoc(d)} title="删除这篇文档（素材删除）" />
                       </div>
                     )}
