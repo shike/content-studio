@@ -690,7 +690,6 @@ function KbTab() {
   const [docs, setDocs] = useState<KbDoc[]>([])          // 全量（无搜索词时的数据源）
   const [searched, setSearched] = useState<KbDoc[] | null>(null) // 全文检索结果（null=未在搜索）
   const [folder, setFolder] = useState('')
-  const [statusF, setStatusF] = useState<'' | 'ready' | 'low'>('')
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(100)                // 触底续载
   const [bodies, setBodies] = useState<Record<number, string>>({}) // 已拉取的全文缓存
@@ -737,10 +736,7 @@ function KbTab() {
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [docs])
   const base = searched ?? docs
-  const shown = base.filter((d) =>
-    (!folder || d.folder === folder) &&
-    (!statusF || (statusF === 'ready' ? d.status === 'ready' : d.status !== 'ready')))
-  const passed = docs.filter((d) => d.status === 'ready').length
+  const shown = base.filter((d) => !folder || d.folder === folder)
   const vis = shown.slice(0, limit)
 
   /** 展开行时懒加载全文（GET /kb/docs/{id}）；空串=原文未入库，回落摘录。 */
@@ -814,11 +810,6 @@ function KbTab() {
           ...folders.map(([name, n]) => ({ v: name, label: `${name} ${n}` })),
         ]} value={folder} onPick={(v) => { setFolder(v); setLimit(100) }} />
         <div className="flex flex-wrap items-center gap-2">
-          <Chips items={[
-            { v: '', label: '全部' },
-            { v: 'ready', label: `入选 ${passed}` },
-            { v: 'low', label: `未过线 ${docs.length - passed}` },
-          ]} value={statusF} onPick={(v) => { setStatusF(v as '' | 'ready' | 'low'); setLimit(100) }} />
           <button onClick={mine} disabled={busy || (ov != null && !ov.configured)}
             className="ml-auto rounded-full bg-emerald-600 px-3 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
             <RefreshCw size={13} className="inline" /> 立即挖掘
@@ -842,16 +833,15 @@ function KbTab() {
         <div className="space-y-2">
           {vis.map((d) => {
             const open = expanded === d.id
-            const low = d.status !== 'ready'
             return (
               <div key={d.id}
-                className={`cursor-pointer rounded-xl border bg-white px-4 py-3 transition ${open ? 'border-emerald-300' : low ? 'border-[#E8ECF0] opacity-70 hover:border-slate-300' : 'border-[#E8ECF0] hover:border-slate-300'}`}
+                className={`cursor-pointer rounded-xl border bg-white px-4 py-3 transition ${open ? 'border-emerald-300' : 'border-[#E8ECF0] hover:border-slate-300'}`}
                 onClick={() => openDoc(d)}>
                 <div className="flex flex-wrap items-baseline gap-2">
-                  <span className={`shrink-0 text-[17px] font-bold num-serif ${low ? 'text-slate-300' : 'text-[#0a2f24]'}`}>
+                  <span className="shrink-0 text-[17px] font-bold num-serif text-[#0a2f24]">
                     {d.score ?? '—'}
                   </span>
-                  <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${low ? 'text-slate-500' : 'text-slate-900'}`}>
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-slate-900">
                     《{d.title || `文档 #${d.id}`}》
                   </span>
                   {(d.used || []).length > 0 && (
@@ -865,7 +855,6 @@ function KbTab() {
                       {d.used.length > 2 && <span className="text-[11px] text-slate-400">+{d.used.length - 2}</span>}
                     </span>
                   )}
-                  {low && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-400">未过线</span>}
                   {d.author && <span className="shrink-0 text-xs text-slate-400">@{d.author}</span>}
                   <span className="shrink-0 text-[11px] text-slate-400">{relTime(d.created_at)}</span>
                 </div>
@@ -952,7 +941,6 @@ function KbTab() {
                     )}
                     <div className="flex flex-wrap gap-x-4 text-[12px] text-slate-400">
                       {d.folder && <span>目录：{d.folder}</span>}
-                      <span>{low ? '评分低于生成线，未入改编队列' : '已入改编队列（改编走公众号·清单）'}</span>
                     </div>
                   </div>
                 )}
