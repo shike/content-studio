@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Inbox, Link2, Package, Plus, Radar, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
-import { EmptyState, ErrorLine, PageHeader, relTime } from '../components'
+import { ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { Chips, Toolbar } from './MaterialsShared'
 import KbTab from './KbTab'
 import FalsifyPanel from './FalsifyPanel'
@@ -88,6 +88,15 @@ function WatchTab() {
       setMsg('已添加采集源')
       load()
     } catch (e) { setError(apiErrText(e)) }
+  }
+
+  const removeSource = async (r: SourceRow) => {
+    setError('')
+    try {
+      await api(`/sources/${r.id}`, { method: 'DELETE' })
+      setMsg(`已删除源：${r.name}`)
+      load()
+    } catch (e) { setError(apiErrText(e)) }  // 有素材的源后端 409：先停用
   }
 
   const toggle = async (r: SourceRow) => {
@@ -306,6 +315,7 @@ function WatchTab() {
                     className="shrink-0 rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600 transition hover:bg-slate-50">
                     {r.enabled ? '停用' : '启用'}
                   </button>
+                  <ConfirmDeleteButton onConfirm={() => removeSource(r)} title="删除此源（已有素材的源后端会拒绝，请先停用）" />
                 </div>
               ))}
             </div>

@@ -198,9 +198,11 @@ export default function Xhs() {
                             {n.status === 'ready' && (
                               <span className="btn-ghost btn-sm cursor-default">人工发布 → 回来贴链接（发布登记在数据域接入后开放本页表单）</span>
                             )}
-                            <button className="btn-ghost btn-sm text-red-500" onClick={() => removeOne(n.id)}>
-                              <Trash2 size={12} className="inline" /> 不用
-                            </button>
+                            {!n.publication?.url && (
+                              <button className="btn-ghost btn-sm text-red-500" onClick={() => removeOne(n.id)}>
+                                <Trash2 size={12} className="inline" /> 不用
+                              </button>
+                            )}
                           </div>
                         </>
                       )}

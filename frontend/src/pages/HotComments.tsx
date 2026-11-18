@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, MessageSquare, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import { EmptyState } from '../components'
@@ -32,11 +32,12 @@ export default function HotComments() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [gen, setGen] = useState<Record<string, GenState>>({})
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api<{ items: HotComment[]; bar: number }>('/kb/hot_comments')
       .then((d) => { setItems(d.items || []); setBar(d.bar || 50); setLoaded(true) })
       .catch((e) => { setError(apiErrText(e)); setLoaded(true) })
   }, [])
+  useEffect(() => { load() }, [load])
 
   const fire = (h: HotComment) => {
     const key = `${h.material_id}:${h.idx}`
@@ -94,7 +95,8 @@ export default function HotComments() {
                     {open ? <>收起 <ChevronUp size={12} /></> : <>原视频拆解 <ChevronDown size={12} /></>}
                   </span>
                 </div>
-                {open && <MaterialDossier materialId={h.material_id} highlightIdx={h.idx} />}
+                {open && <MaterialDossier materialId={h.material_id} highlightIdx={h.idx}
+                  onDeleted={() => { setExpanded(null); load() }} />}
                 {g && (
                   <div className="mt-2 border-t border-[#E8ECF0] pt-2">
                     {g.phase === 'busy' ? (

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BookOpen, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
-import { EmptyState, ErrorLine, relTime } from '../components'
+import { ConfirmDeleteButton, EmptyState, ErrorLine, relTime } from '../components'
 import { Chips } from './MaterialsShared'
 
 /**
@@ -88,6 +88,16 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
       xhsAngle: [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
         .filter(Boolean).join('；金句：').slice(0, 200),
     })
+  }
+
+  const removeDoc = async (d: KbDoc) => {
+    setError('')
+    try {
+      await api(`/materials/${d.id}`, { method: 'DELETE' })
+      setMsg(`已删除《${(d.title || '').slice(0, 20)}》`)
+      setExpanded(null)
+      load()
+    } catch (e) { setError(apiErrText(e)) }
   }
 
   const saveTitle = async () => {
@@ -242,6 +252,8 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
                           className="rounded-md bg-emerald-600 px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-emerald-700">
                           生成内容
                         </button>
+                        <span className="text-[11px] text-slate-300">｜</span>
+                        <ConfirmDeleteButton onConfirm={() => removeDoc(d)} title="删除这篇文档（素材删除）" />
                       </div>
                     )}
                     {(() => {

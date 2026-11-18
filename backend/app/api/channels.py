@@ -128,7 +128,21 @@ def list_xhs_notes(status: str = "", limit: int = 50, offset: int = 0,
         total = s.exec(select(func.count()).select_from(q.subquery())).one() or 0
         rows = s.exec(q.order_by(Content.id.desc())  # type: ignore[attr-defined]
                       .offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()
-        return {"items": [note_out(r) for r in rows], "total": total}
+        items = [note_out(r) for r in rows]
+        # 发布登记在 publications 表（payload.publication 只是旧快照）：列表补真 publication，
+        # 前端据此隐藏已发布笔记的删除入口（2026-11-18）
+        ids = [r.id for r in rows if r.id]
+        pubs = {}
+        if ids:
+            for pb in s.exec(select(Publication).where(  # type: ignore[attr-defined]
+                    Publication.content_id.in_(ids))).all():  # type: ignore[attr-defined]
+                pubs[pb.content_id] = pb
+        for it in items:
+            pb = pubs.get(it["id"])
+            if pb is not None:
+                it["publication"] = {"url": pb.url, "platform": pb.platform,
+                                     "published_at": pb.published_at}
+        return {"items": items, "total": total}
 
 
 @router.get("/xhs/notes/{content_id}")
@@ -225,6 +239,8 @@ def delete_xhs_note(content_id: int, user: User = Depends(require_user)) -> dict
         c = s.get(Content, content_id)
         if c is None or c.kind != "note":
             raise HTTPException(status_code=404, detail="note not found")
+        if s.exec(select(Publication).where(Publication.content_id == content_id)).first():  # type: ignore[attr-defined]
+            raise HTTPException(status_code=409, detail="已发布，不能删除（保留发布记录与数据对照）")
         if c.idea_id:
             idea = s.get(Idea, c.idea_id)
             if idea is not None and idea.content_id == c.id:

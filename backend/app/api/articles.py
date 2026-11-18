@@ -429,6 +429,8 @@ def delete_article(article_id: int) -> dict:
         art = s.get(Content, article_id)
         if art is None or art.kind != "long_article":
             raise HTTPException(404, detail="article not found")
+        if s.exec(select(Publication).where(Publication.content_id == article_id)).first():  # type: ignore[attr-defined]
+            raise HTTPException(409, detail="已发布，不能删除（保留发布记录与数据对照）")
         s.delete(art)
         s.commit()
     return {"ok": True}

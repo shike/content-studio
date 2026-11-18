@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ExternalLink, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
-import { relTime } from '../components'
+import { ConfirmDeleteButton, relTime } from '../components'
 
 /**
  * 素材档案（拆解详情）：给热评卡片/素材行展开用——后拉 GET /api/materials/{id}，
@@ -46,9 +46,10 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   )
 }
 
-export default function MaterialDossier({ materialId, highlightIdx }: {
+export default function MaterialDossier({ materialId, highlightIdx, onDeleted }: {
   materialId: number
   highlightIdx?: number
+  onDeleted?: () => void
 }) {
   const [d, setD] = useState<Dossier | null>(null)
   const [error, setError] = useState('')
@@ -62,6 +63,16 @@ export default function MaterialDossier({ materialId, highlightIdx }: {
       .catch((e) => setError(apiErrText(e)))
   }, [materialId])
   useEffect(() => { load() }, [load])
+
+  const remove = async () => {
+    setError(''); setBusy(true)
+    try {
+      await api(`/materials/${materialId}`, { method: 'DELETE' })
+      onDeleted?.()
+    } catch (err) {
+      setError(`删除失败：${apiErrText(err)}`)
+    } finally { setBusy(false) }
+  }
 
   const enrich = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -218,7 +229,10 @@ export default function MaterialDossier({ materialId, highlightIdx }: {
         </details>
       )}
 
-      {msg && <div className="text-[12px] text-emerald-700">{msg}</div>}
+      <div className="flex items-center justify-between">
+        <span className="text-[12px] text-emerald-700">{msg}</span>
+        <ConfirmDeleteButton onConfirm={remove} title="删除这条素材（含评论存档与拆解）" confirmText="删除素材" />
+      </div>
     </div>
   )
 }

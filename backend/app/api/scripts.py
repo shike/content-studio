@@ -11,7 +11,7 @@ from ..auth import require_user
 from ..channels.engine import channel_key_of, new_script_content, script_out
 from ..db import engine
 from ..jobs.runner import runner
-from ..models import Content, User
+from ..models import Content, Publication, User
 from ..channels import scripts as script_service
 from ._listing import paged_list_response
 
@@ -284,6 +284,8 @@ def delete_script(script_id: int, user: User = Depends(require_user)) -> dict:
         script = s.get(Content, script_id)
         if script is None or script.kind != "video_script":
             raise HTTPException(404, detail="script not found")
+        if s.exec(select(Publication).where(Publication.content_id == script_id)).first():  # type: ignore[attr-defined]
+            raise HTTPException(409, detail="已发布，不能删除（保留发布记录与数据对照）")
         # 解绑引用（置空而非删除，保护下游产物）
         for art in s.exec(select(Content).where(  # type: ignore[attr-defined]
                 Content.parent_content_id == script_id)).all():  # type: ignore[attr-defined]
