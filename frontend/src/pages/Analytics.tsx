@@ -382,6 +382,14 @@ function AccountsTab({ days }: { days: number }) {
   )
 }
 
+/** 作品指标中文名（2026-11-18 用户裁决：作品表现不出现英文指标键）。
+ *  长文侧键来自 _PUB_KEYS，自账号视频侧键来自 stats；未知键回落原文，保证新指标可见。 */
+const METRIC_LABEL: Record<string, string> = {
+  reads: '阅读', welook: '在看', follows: '关注', leads: '线索', exposure: '曝光',
+  likes: '赞', comments: '评论', shares: '转发', collects: '收藏',
+  play: '播放', digg: '点赞', comment: '评论', share: '转发', collect: '收藏',
+}
+
 function PublicationsTab({ days }: { days: number }) {
   const [rows, setRows] = useState<PubRow[]>([])
   const [error, setError] = useState('')
@@ -402,7 +410,7 @@ function PublicationsTab({ days }: { days: number }) {
               <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{KIND[r.kind] || r.kind}</span>
               <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{r.title || '（无标题）'}</span>
               {Object.entries(r.metrics).map(([k, v]) => (
-                <span key={k} className="shrink-0 text-[11.5px] text-slate-500">{k} <b className="num-serif text-slate-800">{num(v)}</b></span>
+                <span key={k} className="shrink-0 text-[11.5px] text-slate-500">{METRIC_LABEL[k] || k} <b className="num-serif text-slate-800">{num(v)}</b></span>
               ))}
               {Object.keys(r.metrics).length === 0 && <span className="shrink-0 text-[11.5px] text-slate-400">指标未回流</span>}
               <span className="shrink-0 text-[11px] text-slate-400">{(r.published_at || '').slice(0, 10)}</span>
