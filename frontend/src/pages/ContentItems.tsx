@@ -43,6 +43,7 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
   const [expanded, setExpanded] = useState<number | null>(null)
   const [booted, setBooted] = useState(false)
   const [mining, setMining] = useState(false)
+  const [note, setNote] = useState('')
   const { guard, busy, error, setError } = usePageGuard()
 
   const load = useCallback(async () => {
@@ -79,6 +80,15 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
     const t = setInterval(() => { load() }, 60_000)
     return () => clearInterval(t)
   }, [items, load])
+
+  const adapt = async (it: ContentItem) => {
+    setError(''); setNote('')
+    await guard(async () => {
+      const r = await api<{ job_id: number }>(`/articles/content-items/${it.id}/generate`, { method: 'POST' })
+      setNote(`改编任务 #${r.job_id} 已排队——跑完进「公众号 · 工场」待发`)
+      await load()
+    })
+  }
 
   const removeOne = async (it: ContentItem) => {
     await guard(async () => {
@@ -122,8 +132,9 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
   return (
     <div>
       <PageHeader icon={ListChecks} title="内容清单"
-        desc="知识库里逐篇评出的高质量源文——每天自动改编一篇成我们号的文章：保源文骨架与最佳原话，换我们的判断口径和读者钩子。低分源文不进队列。" />
+        desc="知识库里评出的高质量源文——挑一篇「立即改编」成我们号的文章：保源文骨架与最佳原话，换我们的判断口径和读者钩子。" />
       {error && <div className="mt-4"><ErrorLine text={error} /></div>}
+      {note && <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[13px] text-sky-800">{note}</div>}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] text-slate-500">
         <span className={mineLine.anomaly || adaptLine.anomaly ? 'font-medium text-red-600' : ''}>
@@ -236,9 +247,11 @@ export default function ContentItems({ onNavigate }: { onNavigate: (k: string) =
                           </div>
                         )}
                         <div className="flex flex-wrap gap-2">
-                          {it.status === 'pending' && it.priority === 0 && (
-                            <button className="btn-accent btn-sm" disabled={!!busy} onClick={(e) => { e.stopPropagation(); act(it, 'pin') }}>
-                              明天改编
+                          {it.status === 'pending' && (
+                            <button className="btn-accent btn-sm" disabled={!!busy}
+                              onClick={(e) => { e.stopPropagation(); adapt(it) }}
+                              title="立即改编成公众号长文（跑完进工场待发）">
+                              立即改编
                             </button>
                           )}
                           {it.status === 'pending' && (
