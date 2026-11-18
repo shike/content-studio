@@ -22,8 +22,8 @@ import Mobile from './Mobile'
 /**
  * 侧重版导航（2026-11-14 用户定版：菜单按业务线组织，主线靠前）：
  * 顶层 9 项=今天/人设号（主线）/获客/公众号/小红书/数据/素材库/任务/设置，目的地由页内 tab 承载
- * （用户批准破「目的地不藏页内 tab」旧规）。2026-11-18 用户定版：推荐选题从素材库移到今天页，
- * 今天=今日/推荐选题两 tab；素材库=监控清单/知识库两 tab（源与库维护）。
+ * （用户批准破「目的地不藏页内 tab」旧规）。2026-11-18 用户定版：今天=今日/热门评论/知识库三平级 tab；
+ * 素材库=监控清单/素材池/知识库（源·池·库）。
  * 旧产线树 16 叶 + 三段式 3 键 + 更早 4 键经 NAVMAP 全量兼容路由（内嵌页 onNavigate 不断链）。
  */
 type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'xhs' | 'analytics' | 'materials' | 'tasks' | 'settings'
@@ -38,10 +38,10 @@ const NAVMAP: Record<string, NavTarget> = {
   p_topics: { key: 'persona', tab: 'topics' },
   p_content: { key: 'persona', tab: 'scripts' },
   l_scripts: { key: 'leadgen', tab: 'scripts' },
-  // 旧「拆解库/素材」三键 → 今天·推荐选题（2026-11-18 推荐选题从素材库移入今天）
-  p_bench: { key: 'today', tab: 'topics' },
-  l_bench: { key: 'today', tab: 'topics' },
-  benchmarks: { key: 'today', tab: 'topics' },
+  // 旧「拆解库/素材」三键 → 素材库·素材池（2026-11-18：素材列表回素材库独立 tab）
+  p_bench: { key: 'materials', tab: 'pool' },
+  l_bench: { key: 'materials', tab: 'pool' },
+  benchmarks: { key: 'materials', tab: 'pool' },
   // 旧「监控/候选」键 → 素材库·监控清单（源维护归素材库）
   l_cand: { key: 'materials', tab: 'watch' },
   p_watch: { key: 'materials', tab: 'watch' },

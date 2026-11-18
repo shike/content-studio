@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { Spark } from '../components'
 import { fetchCardStats } from '../counts'
-import RecommendTopics from './RecommendTopics'
+import HotComments from './HotComments'
+import KbTab from './KbTab'
 
 /**
- * 今天（2026-11-18 用户定版）：页内两 tab——今日=晨报（指标/长文/管线），
- * 推荐选题=每日取料（从素材库移入，素材库收窄为源与库维护）。
- * 待备稿靶子卡已退回「人设号 · 选题」（用户裁决：首页只留取料一件事）。
+ * 今天（2026-11-18 用户定版）：三个平级 tab——
+ * 今日=晨报（指标/长文/管线）；热门评论=监控作者高赞评论→口播；知识库=未产出文档→长文图文。
+ * 两条产线各占一 tab（源不同、产物不同），素材池归素材库。
  */
 
 interface MetricsResp {
@@ -24,19 +25,26 @@ const PIPE_LABEL: Record<string, string> = {
   hl_search_daily: '组局挖掘（获客）',
 }
 
-type TodayTab = 'today' | 'topics'
+type TodayTab = 'today' | 'comments' | 'kb'
 
 const TABS: { id: TodayTab; label: string }[] = [
   { id: 'today', label: '今日' },
-  { id: 'topics', label: '推荐选题' },
+  { id: 'comments', label: '热门评论' },
+  { id: 'kb', label: '知识库' },
 ]
+
+const SUBTITLE: Record<TodayTab, string> = {
+  today: '管线 02:00 自动运转 · 指标 04:00 回流 · 雷达 06:00 已跑',
+  comments: '监控作者的高赞评论=受众用赞投票的共鸣点，一键出「口播稿」',
+  kb: '未产出的高分文档=今天可写什么；全库在「素材库 · 知识库」',
+}
 
 export default function Today({ onNavigate, tab = 'today', onTab }: {
   onNavigate: (k: string) => void
   tab?: string
   onTab?: (t: string) => void
 }) {
-  const active: TodayTab = tab === 'topics' ? 'topics' : 'today'
+  const active: TodayTab = (TABS.some((t) => t.id === tab) ? tab : 'today') as TodayTab
   const [kpis, setKpis] = useState({ fans: 0, fansDelta: 0, play: 0, profileViews: 0 })
   const [fansHist, setFansHist] = useState<number[]>([])
   const [playHist, setPlayHist] = useState<number[]>([])
@@ -103,11 +111,7 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">今天</h1>
-          <p className="mt-1 text-[13px] text-slate-400">
-            {active === 'today'
-              ? '管线 02:00 自动运转 · 指标 04:00 回流 · 雷达 06:00 已跑'
-              : '监控作者热评 + 素材收件箱——每日取料在这里；源与知识库在「素材库」维护'}
-          </p>
+          <p className="mt-1 text-[13px] text-slate-400">{SUBTITLE[active]}</p>
         </div>
         {active === 'today' && (
           <button onClick={trending} className="rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-slate-700">选题工场</button>
@@ -123,7 +127,9 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
         ))}
       </div>
 
-      {active === 'topics' ? <RecommendTopics /> : (
+      {active === 'comments' ? <HotComments />
+        : active === 'kb' ? <KbTab mode="today" onNavigate={onNavigate} />
+          : (
         <>
           {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
           {busy && <div className="mb-3 text-sm text-sky-700">{busy}</div>}
