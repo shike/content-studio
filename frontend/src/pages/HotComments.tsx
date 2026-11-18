@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { MessageSquare, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronUp, MessageSquare, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import { EmptyState } from '../components'
+import MaterialDossier from './MaterialDossier'
 
 /**
  * 热门评论（2026-11-18 用户定版：今天页三 tab 之一，独立于知识库）：
@@ -28,6 +29,7 @@ export default function HotComments() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [showAll, setShowAll] = useState(false)
+  const [expanded, setExpanded] = useState<string | null>(null)
   const [gen, setGen] = useState<Record<string, GenState>>({})
 
   useEffect(() => {
@@ -77,17 +79,26 @@ export default function HotComments() {
           {shown.map((h) => {
             const key = `${h.material_id}:${h.idx}`
             const g = gen[key]
+            const open = expanded === key
             return (
-              <div key={key} className="rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
+              <div key={key}
+                className={`cursor-pointer rounded-xl border bg-white px-4 py-3 transition ${open ? 'border-emerald-300' : 'border-[#E8ECF0] hover:border-slate-300'}`}
+                onClick={() => setExpanded(open ? null : key)}>
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span className="num-serif shrink-0 text-[15px] font-bold text-amber-700">{h.likes}赞</span>
                   <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed text-slate-800">「{h.comment}」</span>
-                  <button onClick={() => fire(h)} disabled={g?.phase === 'busy'}
+                  <button onClick={(e) => { e.stopPropagation(); fire(h) }} disabled={g?.phase === 'busy'}
                     className="shrink-0 rounded-full bg-emerald-600 px-3 py-1 text-[12px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
                     生成口播稿
                   </button>
                 </div>
-                <div className="mt-1 truncate text-[11.5px] text-slate-400">来源：{h.author || '监控号'}《{h.source}》</div>
+                <div className="mt-1 flex items-center gap-2 text-[11.5px] text-slate-400">
+                  <span className="truncate">来源：{h.author || '监控号'}《{h.source}》</span>
+                  <span className="ml-auto flex shrink-0 items-center gap-0.5 text-slate-400">
+                    {open ? <>收起 <ChevronUp size={12} /></> : <>原视频拆解 <ChevronDown size={12} /></>}
+                  </span>
+                </div>
+                {open && <MaterialDossier materialId={h.material_id} highlightIdx={h.idx} />}
                 {g && (
                   <div className="mt-2 border-t border-[#E8ECF0] pt-2">
                     {g.phase === 'busy' ? (
