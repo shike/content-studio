@@ -18,6 +18,7 @@ from sqlmodel import Session, select  # noqa: E402
 
 from app.articles.ima_kb import fetch_full_doc, kb_config, topic_kb_id  # noqa: E402
 from app.db import engine  # noqa: E402
+from app.materials.service import clean_kb_body  # noqa: E402
 from app.models import Material  # noqa: E402
 
 _DOC_CAP = 30000
@@ -47,10 +48,13 @@ async def main() -> int:
                 print(f"  [{i}/{len(todo)}] 拉取失败 {m.title[:24]}: {type(e).__name__}", flush=True)
                 await asyncio.sleep(_READ_SLEEP)
                 continue
-            if not text.strip():
+            body = clean_kb_body(text)[:_BODY_CAP]
+            if not body.strip():
                 failed += 1
+                print(f"  [{i}/{len(todo)}] 非文本内容，拒收 {m.title[:24]}", flush=True)
+                await asyncio.sleep(_READ_SLEEP)
                 continue
-            m.body = text[:_BODY_CAP]
+            m.body = body
             s.add(m)
             s.commit()
             done += 1

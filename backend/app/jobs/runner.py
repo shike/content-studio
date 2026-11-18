@@ -108,6 +108,7 @@ _POLICIES: dict[str, RetryPolicy] = {
     "self_profile_update": RetryPolicy(task_timeout=1800),
     "material_watch_scan": RetryPolicy(task_timeout=3600),
     "material_backfill": RetryPolicy(task_timeout=3600),  # 存量回填：账号数×锚点列表逐号枚举
+    "comment_recapture": RetryPolicy(task_timeout=14400),  # 评论补采批量：100 视频×(抓取窗+静默) 上限 4h
     "self_scan": RetryPolicy(task_timeout=2700),
     "material_resolve": RetryPolicy(task_timeout=1800),
     "material_discover": RetryPolicy(task_timeout=3600),

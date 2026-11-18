@@ -234,8 +234,11 @@ async def hotspot_suggest(doc_id: int, user: User = Depends(require_user)) -> di
 @router.get("/hot_comments")
 def hot_comments(user: User = Depends(require_user)) -> dict:
     """热评雷达（2026-11-18 车道二·用户定版「别人视频的热门评论适合做口播」）：
-    同行视频高赞评论=受众用赞投票的共鸣点，口播选题源。准入线赞数 AppSetting.hot_comment_bar（默认 50）。"""
-    from ..models import MaterialAnalysis
+    高赞评论=受众用赞投票的共鸣点，口播选题源。准入线赞数 AppSetting.hot_comment_bar（默认 50）。
+    口径收窄（2026-11-18 用户裁决）：**只出监控清单作者**（active peer_account，扫描入库
+    按 source_id、存量按作者名双匹配）——监控号自己的评论存档太薄（273 个视频待补采），
+    扩量靠评论补采任务+存量回填。"""
+    from ..models import MaterialAnalysis, Source
 
     with Session(engine) as s:
         row = s.get(AppSetting, "hot_comment_bar")
@@ -243,10 +246,19 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
             bar = int(row.value) if row is not None and row.value else 50
         except (TypeError, ValueError):
             bar = 50
+        mon = s.exec(select(Source).where(  # type: ignore[attr-defined]
+            Source.kind == "peer_account",  # type: ignore[attr-defined]
+            Source.status == "active",  # type: ignore[attr-defined]
+            Source.platform == "douyin")).all()  # type: ignore[attr-defined]
+        mon_ids = {x.id for x in mon if x.id is not None}
+        mon_names = {x.name for x in mon}
         items: list[dict] = []
         for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
                 MaterialAnalysis.kind == "comments")).all():  # type: ignore[attr-defined]
             m = s.get(Material, a.material_id)
+            if m is None or ((m.source_id or 0) not in mon_ids
+                             and (m.author or "") not in mon_names):
+                continue  # 只出监控清单作者（雷达口径收窄，2026-11-18）
             for i, it in enumerate((a.payload or {}).get("items") or []):
                 if not isinstance(it, dict):
                     continue
@@ -257,7 +269,8 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
                     continue
                 if d >= bar and t:
                     items.append({"material_id": a.material_id, "idx": i, "comment": t[:200],
-                                  "likes": d, "source": (m.title if m else "") or ""})
+                                  "likes": d, "author": m.author or "",
+                                  "source": m.title or ""})
     items.sort(key=lambda x: -x["likes"])
     return {"items": items[:50], "bar": bar, "total": len(items)}
 

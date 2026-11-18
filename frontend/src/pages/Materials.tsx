@@ -185,7 +185,7 @@ function TopicsTab() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
   // 热评雷达（2026-11-18 车道二：受众用赞投票的共鸣点=口播选题源）
-  interface HotComment { material_id: number; idx: number; comment: string; likes: number; source: string }
+  interface HotComment { material_id: number; idx: number; comment: string; likes: number; author?: string; source: string }
   const [hc, setHc] = useState<HotComment[]>([])
   const [hcBar, setHcBar] = useState(50)
   const [hcOpen, setHcOpen] = useState(true)
@@ -322,7 +322,7 @@ function TopicsTab() {
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/40 px-4 py-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[13px] font-semibold text-slate-900">
-              热评雷达 <span className="text-[11.5px] font-normal text-slate-500">受众用赞投票的共鸣点（赞≥{hcBar}）——口播选题源，生成走「弹药匹配+形态读稿闸」</span>
+              热评雷达 <span className="text-[11.5px] font-normal text-slate-500">监控号的高赞评论=受众用赞投票的共鸣点（赞≥{hcBar}）——口播选题源，生成走「弹药匹配+形态读稿闸」</span>
             </div>
             <button onClick={() => setHcOpen(!hcOpen)} className="shrink-0 text-[12px] text-slate-500 hover:text-slate-700">
               {hcOpen ? '收起' : `展开 ${hc.length} 条`}
@@ -343,7 +343,7 @@ function TopicsTab() {
                         生成口播稿
                       </button>
                     </div>
-                    <div className="mt-0.5 truncate text-[11px] text-slate-400">来源：《{h.source}》</div>
+                    <div className="mt-0.5 truncate text-[11px] text-slate-400">来源：{h.author || '监控号'}《{h.source}》</div>
                     {g && (
                       <div className="mt-1.5 border-t border-[#EDE7D8] pt-1.5">
                         {g.phase === 'busy' ? (
