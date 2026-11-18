@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -31,6 +32,17 @@ class _Ctx:
         print(f"  [{p:3}%] {m}", flush=True)
 
 
+def _yield_window_wait() -> float:
+    """夜间让路（2026-11-18 04:00 例行挖掘与驱动撞 ima 403 教训）：
+    北京 04:00/05:00 是例行挖掘/改编档期（UTC 20:00/21:00），驱动在
+    UTC 19:50–21:30 窗口内暂停批循环，把 ima 让给服务内调度。"""
+    now = datetime.now(timezone.utc)
+    if dtime(19, 50) <= now.time() <= dtime(21, 30):
+        end_dt = datetime.combine(now.date(), dtime(21, 30), tzinfo=timezone.utc)
+        return (end_dt - now).total_seconds() + 30
+    return 0.0
+
+
 async def main() -> int:
     max_batches = 60
     if "--max-batches" in sys.argv:
@@ -39,6 +51,10 @@ async def main() -> int:
              "failed": 0, "already": 0, "non_text": 0, "errors": 0}
     consec_fail = 0
     for _ in range(max_batches):
+        yield_s = _yield_window_wait()
+        if yield_s > 0:
+            print(f"[full-mine] 夜间让路：例行挖掘/改编档期，暂停 {int(yield_s)}s", flush=True)
+            await asyncio.sleep(yield_s)
         try:
             r = await article_kb_miner(_Ctx(), {})
             consec_fail = 0

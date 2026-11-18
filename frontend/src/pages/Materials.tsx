@@ -805,21 +805,6 @@ function KbTab() {
 
   return (
     <div>
-      <Toolbar
-        left={ov ? <>
-          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${ov.configured ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-            {ov.configured ? '凭证已配置' : '凭证未配置（设置页 ima_*）'}
-          </span>
-          <span className="text-[13px] text-slate-600">
-            共 <b className="num-serif text-slate-900">{docs.length}</b> 篇（入选 <b className="num-serif text-slate-900">{passed}</b> ·
-            低分 <b className="num-serif text-slate-900">{docs.length - passed}</b>）
-            {ov.last_mine && <> · 最近挖掘 {relTime(ov.last_mine.updated_at)}：{ov.last_mine.message?.slice(0, 36) || ov.last_mine.status}</>}
-          </span>
-        </> : <span className="text-[13px] text-slate-400">载入中…</span>}
-        actions={<button onClick={mine} disabled={busy || (ov != null && !ov.configured)}
-          className="rounded-full bg-emerald-600 px-3 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
-          <RefreshCw size={13} className="inline" /> 立即挖掘
-        </button>} />
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       <ErrorLine text={error} />
 
@@ -834,8 +819,12 @@ function KbTab() {
             { v: 'ready', label: `入选 ${passed}` },
             { v: 'low', label: `未过线 ${docs.length - passed}` },
           ]} value={statusF} onPick={(v) => { setStatusF(v as '' | 'ready' | 'low'); setLimit(100) }} />
+          <button onClick={mine} disabled={busy || (ov != null && !ov.configured)}
+            className="ml-auto rounded-full bg-emerald-600 px-3 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
+            <RefreshCw size={13} className="inline" /> 立即挖掘
+          </button>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜标题 / 作者 / 全文…"
-            className="ml-auto w-64 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+            className="w-64 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
         </div>
         {searched !== null && (
           <div className="text-[12.5px] text-slate-500">
