@@ -210,6 +210,11 @@ export default function Workshop() {
                   <span className="hidden shrink-0 text-xs text-slate-400 sm:block">
                     {charsOf(a)} 字{q && <> · 自评 <span className="font-medium text-slate-600">{q}</span></>} · {relTime(a.created_at)}
                   </span>
+                  {a.status !== 'published' && (
+                    <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <ConfirmDeleteButton onConfirm={() => removeOne(a)} title="删除此篇（不可恢复）" />
+                    </span>
+                  )}
                 </div>
                 {isOpen && (
                   <div className="border-t border-[#E8ECF0] px-4 py-4">
@@ -284,7 +289,6 @@ export default function Workshop() {
                               {a.stats?.filled_at ? '改回流数据' : '48h 补数据'}
                             </button>
                           )}
-                          {a.status !== 'published' && <ConfirmDeleteButton onConfirm={() => removeOne(a)} confirmText="不用" />}
                         </div>
                         {pubFor === a.id && (
                           <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 px-3 py-2.5">
