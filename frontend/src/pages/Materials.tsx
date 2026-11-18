@@ -687,6 +687,7 @@ function KbTab() {
   const [msg, setMsg] = useState('')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [edit, setEdit] = useState<{ id: number; title: string } | null>(null)
+  const [prod, setProd] = useState<{ doc: KbDoc; dir: 'script' | 'xhs' | 'article'; length: 'short' | 'long' } | null>(null)
 
   const saveTitle = async () => {
     if (!edit) return
@@ -737,11 +738,11 @@ function KbTab() {
     }
   }
 
-  const toScript = async (d: KbDoc) => {
+  const toScript = async (d: KbDoc, length: 'short' | 'long' = 'short') => {
     setError('')
     try {
       const r = await api<{ job_id: number; script_id: number }>('/scripts/generate', {
-        method: 'POST', body: JSON.stringify({ kb_id: d.id, length: 'short' }),
+        method: 'POST', body: JSON.stringify({ kb_id: d.id, length }),
       })
       setMsg(`视频脚本生成中（任务 #${r.job_id}）——完成后在「人设号 · 视频稿」`)
       waitJob(r.job_id, (j) => setMsg(`视频脚本：${j.progress}% ${j.message || ''}`))
@@ -850,15 +851,15 @@ function KbTab() {
                           改标题
                         </button>
                         <span className="text-[11px] text-slate-300">｜</span>
-                        <button onClick={() => toScript(d)} title="人设号·视频稿"
+                        <button onClick={() => setProd({ doc: d, dir: 'script', length: 'short' })} title="人设号·视频稿"
                           className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] font-medium text-emerald-700 transition hover:bg-emerald-100">
                           视频脚本
                         </button>
-                        <button onClick={() => toXhs(d)} title="小红书图文笔记"
+                        <button onClick={() => setProd({ doc: d, dir: 'xhs', length: 'short' })} title="小红书图文笔记"
                           className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[12px] font-medium text-rose-600 transition hover:bg-rose-100">
                           小红书笔记
                         </button>
-                        <button onClick={() => toArticle(d)} title="入公众号改编队列"
+                        <button onClick={() => setProd({ doc: d, dir: 'article', length: 'short' })} title="入公众号改编队列"
                           className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[12px] font-medium text-sky-700 transition hover:bg-sky-100">
                           改编公众号
                         </button>
@@ -931,6 +932,49 @@ function KbTab() {
         </div>
       )}
 
+      {/* 生产方向确认框（2026-11-18 用户裁决：三按钮不再点即执行，先选方向再确认） */}
+      {prod && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0a2f24]/40 px-4"
+          onClick={() => setProd(null)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="text-[15px] font-bold text-slate-900">选择生产方向</div>
+            <div className="mt-1 line-clamp-1 text-[12.5px] text-slate-500">《{prod.doc.title || `文档 #${prod.doc.id}`}》</div>
+            <div className="mt-3 space-y-2">
+              {([
+                { v: 'script', title: '人设号 · 视频稿', desc: '改编角度做切角、金句做钩子、原文做事实底，产出口播脚本' },
+                { v: 'xhs', title: '小红书 · 图文笔记', desc: '以文档为原料生成笔记与封面，到小红书 tab 改稿后发布' },
+                { v: 'article', title: '公众号 · 改编长文', desc: '入每日 05:00 自动改编队列，保骨架保原话成长文' },
+              ] as const).map((o) => (
+                <button key={o.v} onClick={() => setProd({ ...prod, dir: o.v })}
+                  className={`block w-full rounded-xl border px-3.5 py-2.5 text-left transition ${prod.dir === o.v ? 'border-emerald-400 bg-emerald-50' : 'border-[#E8ECF0] hover:border-slate-300'}`}>
+                  <div className="text-[13.5px] font-semibold text-slate-900">{o.title}</div>
+                  <div className="mt-0.5 text-[12px] text-slate-500">{o.desc}</div>
+                </button>
+              ))}
+            </div>
+            {prod.dir === 'script' && (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-[12.5px] text-slate-500">篇幅：</span>
+                <Chips items={[{ v: 'short', label: '短版 240~320 字' }, { v: 'long', label: '长版 600~900 字' }]}
+                  value={prod.length} onPick={(v) => setProd({ ...prod, length: v as 'short' | 'long' })} />
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setProd(null)}
+                className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">取消</button>
+              <button onClick={() => {
+                const { doc, dir, length } = prod
+                setProd(null)
+                if (dir === 'script') void toScript(doc, length)
+                else if (dir === 'xhs') void toXhs(doc)
+                else void toArticle(doc)
+              }}
+                className="rounded-full bg-emerald-600 px-4 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700">确认生成</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
