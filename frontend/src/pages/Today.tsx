@@ -33,12 +33,6 @@ const TABS: { id: TodayTab; label: string }[] = [
   { id: 'kb', label: '知识库' },
 ]
 
-const SUBTITLE: Record<TodayTab, string> = {
-  today: '管线 02:00 自动运转 · 指标 04:00 回流 · 雷达 06:00 已跑',
-  comments: '监控作者的高赞评论=受众用赞投票的共鸣点，一键出「口播稿」',
-  kb: '未产出的高分文档=今天可写什么；全库在「素材库 · 知识库」',
-}
-
 export default function Today({ onNavigate, tab = 'today', onTab }: {
   onNavigate: (k: string) => void
   tab?: string
@@ -109,10 +103,7 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">今天</h1>
-          <p className="mt-1 text-[13px] text-slate-400">{SUBTITLE[active]}</p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">今天</h1>
         {active === 'today' && (
           <button onClick={trending} className="rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-slate-700">选题工场</button>
         )}
