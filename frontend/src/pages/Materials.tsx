@@ -75,15 +75,6 @@ interface SourceRow {
   video_recent_7d?: number
 }
 
-interface KbOverview {
-  configured: boolean
-  folders: { folder_id: string; name: string; docs: number; latest: string | null }[]
-  unknown_folder_docs: number
-  docs_total: number
-  stage: { pending: number; low: number }
-  last_mine: { status: string; message: string; updated_at: string } | null
-}
-
 const TYPE_LABEL: Record<string, string> = {
   douyin_video: '抖音视频', douyin_image: '抖音图文', wechat_article: '公众号文章',
   web_page: '网页', kb_doc: '知识库', manual_note: '手动记录', test_record: '实测',
@@ -686,7 +677,6 @@ interface KbDoc {
  * 目录 chips=用户自己的 ima 分类法，只导航不管理（增删收在底部目录管理卡）。
  */
 function KbTab() {
-  const [ov, setOv] = useState<KbOverview | null>(null)
   const [docs, setDocs] = useState<KbDoc[]>([])          // 全量（无搜索词时的数据源）
   const [searched, setSearched] = useState<KbDoc[] | null>(null) // 全文检索结果（null=未在搜索）
   const [folder, setFolder] = useState('')
@@ -695,7 +685,6 @@ function KbTab() {
   const [bodies, setBodies] = useState<Record<number, string>>({}) // 已拉取的全文缓存
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
-  const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [edit, setEdit] = useState<{ id: number; title: string } | null>(null)
 
@@ -711,8 +700,6 @@ function KbTab() {
   }
 
   const load = useCallback(() => {
-    api<KbOverview>('/kb/overview').then(setOv)
-      .catch((e) => setError(apiErrText(e)))
     api<{ items: KbDoc[] }>('/kb/docs').then((d) => setDocs(d.items || []))
       .catch((e) => setError(apiErrText(e)))
   }, [])
@@ -789,16 +776,6 @@ function KbTab() {
     } catch (e) { setError(`入队失败：${apiErrText(e)}`) }
   }
 
-  const mine = async () => {
-    setError(''); setBusy(true)
-    try {
-      const r = await api<{ job_id: number }>('/articles/mine', { method: 'POST' })
-      await waitJob(r.job_id, (j) => setMsg(`挖掘：${j.progress}% ${j.message || ''}`))
-      setMsg('挖掘完成')
-      load()
-    } catch (e) { setError(`挖掘失败：${apiErrText(e)}`) } finally { setBusy(false) }
-  }
-
   return (
     <div>
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
@@ -810,12 +787,8 @@ function KbTab() {
           ...folders.map(([name, n]) => ({ v: name, label: `${name} ${n}` })),
         ]} value={folder} onPick={(v) => { setFolder(v); setLimit(100) }} />
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={mine} disabled={busy || (ov != null && !ov.configured)}
-            className="ml-auto rounded-full bg-emerald-600 px-3 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
-            <RefreshCw size={13} className="inline" /> 立即挖掘
-          </button>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜标题 / 作者 / 全文…"
-            className="w-64 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+            className="ml-auto w-64 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
         </div>
         {searched !== null && (
           <div className="text-[12.5px] text-slate-500">
@@ -828,7 +801,7 @@ function KbTab() {
 
       {shown.length === 0 ? (
         <EmptyState icon={BookOpen} title={docs.length === 0 ? '知识库还没有入库文档' : '没有匹配的文档'}
-          desc={docs.length === 0 ? '点上方「立即挖掘」跑一批，或每日 04:00 自动挖掘' : '换个目录、状态或关键词'} />
+          desc={docs.length === 0 ? '每日 04:00 自动挖掘进新文档' : '换个目录或关键词'} />
       ) : (
         <div className="space-y-2">
           {vis.map((d) => {
