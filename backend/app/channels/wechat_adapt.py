@@ -265,8 +265,19 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             if polished and _content_signature(polished) == _content_signature(md_text):
                 md_text = polished
 
+        # ── 语言审校（2026-11-18 用户裁决：专业严谨优先）：AI味/翻译腔/硬造词/口水 → 定向修订一次 ──
+        from ..articles.review import review_facts, review_language, review_reader, revise_once, score_titles
+        ctx.set_progress(80, "语言审校（AI味/翻译腔/硬造词/口水）")
+        lang_issues = await review_language(md_text)
+        if lang_issues:
+            revised = await revise_once(md_text, lang_issues)
+            if revised and _content_signature(revised) == _content_signature(md_text):
+                md_text = revised
+            lang_left = await review_language(md_text) if lang_issues else []
+        else:
+            lang_left = []
+
         # ── 审校组（问题清单制）：事实对源=硬闸（拦编造），读者弃读点=建议（落 note 不拦）──
-        from ..articles.review import review_facts, review_reader, revise_once, score_titles
         ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
         issues = await review_facts(md_text, source)
         reader_points = await review_reader(md_text, persona_text)
@@ -331,6 +342,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             p = dict(art.payload or {})
             p["html"] = render_wechat_html(art.body)
             p["article_state"] = "rendered"
+            if lang_left:  # 语言审校修订后仍有残留：落 note 让用户终审时知道（不拦发布）
+                p["note"] = (p.get("note") or "") + "｜语言审校残留：" + "；".join(
+                    x[:44] for x in lang_left[:2])[:200]
             if reader_points:  # 读者审校=编辑口味建议，落 note 给用户终审参考，不拦发布
                 p["note"] = (p.get("note") or "") + "｜读者审校建议：" + "；".join(
                     x[:44] for x in reader_points[:2])[:200]

@@ -88,6 +88,44 @@ def content_signature(t: str) -> tuple:
     return (sorted(re.findall(r"\d+(?:\.\d+)?", t)), t.count("!["))
 
 
+_AI_CLICHE = ("赋能", "抓手", "闭环", "底层逻辑", "护城河", "降维打击", "颗粒度",
+              "组合拳", "顶层设计", "生态位")
+_AI_PHRASES = (
+    (r"不仅[^。！？\n]{0,20}(而且|更是)", "「不仅…而且/更是」并列套话"),
+    (r"在这个[^。！？\n]{0,12}(时代|背景下)", "「在这个…的时代」开场套话"),
+    (r"值得[^。，\n]{0,4}(深思|思考)", "「值得深思」空话"),
+    (r"让我们[^。！？\n]{0,6}(一起|来看|看看)", "「让我们…」讲稿腔"),
+)
+_TRANS_PATTERNS = (
+    (r"进行[^。，\n]{0,6}(操作|处理|优化|管理)", "「进行…的操作」翻译腔"),
+    (r"通过[^。，\n]{0,10}的?方式", "「通过…的方式」翻译腔"),
+    (r"对于[^。，\n]{0,10}(而言|来说)", "「对于…而言」翻译腔"),
+    (r"被(广泛)?认为", "无主语的「被认为」"),
+    (r"一个由[^。，\n]{4,30}(构成|组成)", "长定语套嵌（「一个由…构成的…」）"),
+)
+_COLLOQ_MARKS = ("说白了", "其实", "不得不说", "老实说", "讲真", "你有没有发现", "简直")
+
+
+def _language_style_violations(md: str) -> list[str]:
+    """专业语言机检（2026-11-18 用户裁决：AI味/翻译腔/硬造词/口水）——正则兜底，
+    命中走 article_kb_polish 定向重写；硬造词无法机检，交给语言审校（LLM）。"""
+    out: list[str] = []
+    cliche = [w for w in _AI_CLICHE if w in md]
+    if len(cliche) >= 2 or any(md.count(w) >= 2 for w in cliche):
+        out.append(f"AI 套话检出：{'、'.join(cliche[:4])}——改为具体动作或对象描述")
+    for pat, label in _AI_PHRASES:
+        hits = re.findall(pat, md)
+        if hits:
+            out.append(f"{label}出现 {len(hits)} 处，删除并直陈")
+    trans = [label for pat, label in _TRANS_PATTERNS if re.search(pat, md)]
+    if trans:
+        out.append(f"翻译腔/机翻痕迹：{'；'.join(trans[:3])}——拆成主谓直陈句")
+    coll = [w for w in _COLLOQ_MARKS if w in md]
+    if len(coll) >= 2 or any(md.count(w) >= 3 for w in coll):
+        out.append(f"口水词检出：{'、'.join(coll[:4])}——删掉，改写成有信息量的陈述")
+    return out
+
+
 def kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
     """成文文风禁令机检：返回违规描述清单（空=干净）。提示词里的禁令靠模型自觉
     不可靠（#8 实测「不是X而是Y」×5）——代码正则兜底，命中走定向重写。"""
@@ -117,6 +155,7 @@ def kb_style_violations(md: str, anchor_texts: list[str]) -> list[str]:
         longest = max(m, key=lambda b: b.size) if m else None
         if longest is not None and longest.size >= 40:
             out.append(f"正文与范本存在 {longest.size} 字连续重复（「{md[longest.a:longest.a + 30]}…」），必须改为原创表达")
+    out.extend(_language_style_violations(md))
     return out
 
 
