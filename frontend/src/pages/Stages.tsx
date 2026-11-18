@@ -122,8 +122,8 @@ export function ArticleStage(props: { tab: string; onTab: (t: string) => void; o
   )
 }
 
-/** 素材库（唯一进料口，重构 P2）：收件箱 / 全部素材 / 采集源 / 账号候选 */
+/** 素材库（唯一进料口，重构 P2）：监控清单 / 知识库（2026-11-18 推荐选题移「今天」页） */
 export function MaterialsStage(props: { tab: string; onTab: (t: string) => void; onNavigate: (k: string) => void }) {
-  // 素材库自带三 tab（推荐选题/监控清单/知识库），不再叠 StageShell——旧版双排 tab 即用户指的「菜单重复」
+  // 素材库自带两 tab（监控清单/知识库），不再叠 StageShell——旧版双排 tab 即用户指的「菜单重复」
   return <Materials onNavigate={props.onNavigate} tabId={props.tab} onTabChange={props.onTab} />
 }

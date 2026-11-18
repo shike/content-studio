@@ -21,8 +21,9 @@ import Mobile from './Mobile'
 
 /**
  * 侧重版导航（2026-11-14 用户定版：菜单按业务线组织，主线靠前）：
- * 顶层 7 项=今天/人设号（主线）/获客/公众号/监控/任务/设置，目的地由页内 tab 承载
- * （用户批准破「目的地不藏页内 tab」旧规）。
+ * 顶层 9 项=今天/人设号（主线）/获客/公众号/小红书/数据/素材库/任务/设置，目的地由页内 tab 承载
+ * （用户批准破「目的地不藏页内 tab」旧规）。2026-11-18 用户定版：推荐选题从素材库移到今天页，
+ * 今天=今日/推荐选题两 tab；素材库=监控清单/知识库两 tab（源与库维护）。
  * 旧产线树 16 叶 + 三段式 3 键 + 更早 4 键经 NAVMAP 全量兼容路由（内嵌页 onNavigate 不断链）。
  */
 type SectionKey = 'today' | 'persona' | 'leadgen' | 'article' | 'xhs' | 'analytics' | 'materials' | 'tasks' | 'settings'
@@ -37,12 +38,13 @@ const NAVMAP: Record<string, NavTarget> = {
   p_topics: { key: 'persona', tab: 'topics' },
   p_content: { key: 'persona', tab: 'scripts' },
   l_scripts: { key: 'leadgen', tab: 'scripts' },
-  // 旧「监控」四键 → 素材库（重构 P2 监控页退役；2026-11-17 素材库改三 tab：推荐选题/监控清单/知识库）
-  p_bench: { key: 'materials', tab: 'topics' },
-  l_bench: { key: 'materials', tab: 'topics' },
+  // 旧「拆解库/素材」三键 → 今天·推荐选题（2026-11-18 推荐选题从素材库移入今天）
+  p_bench: { key: 'today', tab: 'topics' },
+  l_bench: { key: 'today', tab: 'topics' },
+  benchmarks: { key: 'today', tab: 'topics' },
+  // 旧「监控/候选」键 → 素材库·监控清单（源维护归素材库）
   l_cand: { key: 'materials', tab: 'watch' },
   p_watch: { key: 'materials', tab: 'watch' },
-  benchmarks: { key: 'materials', tab: 'topics' },
   watch: { key: 'materials', tab: 'watch' },
   cand: { key: 'materials', tab: 'watch' },
   radar: { key: 'materials', tab: 'watch' },
@@ -52,10 +54,11 @@ const NAVMAP: Record<string, NavTarget> = {
 }
 
 const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
+  today: 'today',
   persona: 'topics',
   leadgen: 'topics',
   article: 'workshop',
-  materials: 'topics',
+  materials: 'watch',
 }
 
 export default function App() {
@@ -164,7 +167,10 @@ export default function App() {
       {/* 主区域 */}
       <main className="h-full flex-1 overflow-y-auto">
         <div key={active} className="fade-in mx-auto max-w-7xl px-8 py-8">
-          {active === 'today' && <Today onNavigate={navTo} />}
+          {active === 'today' && (
+            <Today onNavigate={navTo} tab={stageTab.today ?? DEFAULT_TAB.today!}
+              onTab={(t) => setStageTab((m) => ({ ...m, today: t }))} />
+          )}
           {active === 'persona' && (
             <PersonaStage tab={stageTab.persona ?? DEFAULT_TAB.persona!}
               onTab={(t) => setStageTab((m) => ({ ...m, persona: t }))} onNavigate={navTo} />
