@@ -109,16 +109,69 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
                 blocks.append("\n".join(parts))
         if angle:
             blocks.append(f"【切角要求】{angle}")
+        # 知识库素材 → 生产资料包（2026-11-18 车道一：因果链/操作/边界/数字账，深度的原料）
+        kit = {"chain": [], "actions": [], "boundaries": [], "numbers": []}
+        for m in [x for x in mats if x is not None] if material_ids else []:
+            if m.origin_type == "kb_doc":
+                from ..articles.prod_kit import ensure_prod_kit, kit_block
 
-    ctx.set_progress(15, "生成笔记稿（标题/正文/标签）")
+                kit = await ensure_prod_kit(m.id)
+                break
+
+    ctx.set_progress(15, "生成笔记稿（候选标题/正文/标签）")
     data = await gateway.complete_json(
-        [{"role": "user", "content": render("note_generate", PERSONA=persona_text)
+        [{"role": "user", "content": render("note_generate", PERSONA=persona_text, KIT=kit_block(kit))
           + "\n\n选题：" + (idea_title or "（无标题，按素材自由发挥）")
           + ("\n\n素材：\n" + "\n\n".join(blocks) if blocks else "\n\n素材：（无——按选题与人设写常青干货）")}],
-        max_tokens=2000, thinking="disabled")
+        max_tokens=2048, thinking="disabled")
+    options = [str(t).strip() for t in (data.get("title_options") or []) if str(t).strip()][:5]
     title = str(data.get("title") or "").strip()
     body = str(data.get("body") or "").strip()
     tags = [str(t).lstrip("#").strip()[:16] for t in (data.get("tags") or []) if str(t).strip()][:8]
+    if options and not title:
+        title = options[0]
+
+    # 标题点击力评分选主（2026-11-18 车道一：数字/身份词/信息差三维，此前无标题评分）
+    if len(options) >= 2:
+        ctx.set_progress(18, "候选标题点击力评分选主")
+        pick = await gateway.complete_json(
+            [{"role": "user", "content":
+              "小红书标题点击力评分（收藏率导向）：数字具体度/身份词命中/信息差承诺，各 0~10。\n"
+              "候选：\n" + "\n".join(f"{i+1}. {t}" for i, t in enumerate(options)) +
+              '\n输出 JSON：{"best": 最佳序号}'}],
+            max_tokens=1024, thinking="disabled")
+        try:
+            bi = int((pick or {}).get("best") or 1)
+            if 1 <= bi <= len(options):
+                title = options[bi - 1]
+        except (TypeError, ValueError):
+            pass
+
+    # 深度覆盖核检（知识库素材时）：资料包 actions/chain/boundaries 是否讲到，缺项补写一次
+    if any(kit.values()):
+        import json as _json
+
+        ctx.set_progress(22, "深度覆盖核检（对照资料包）")
+        chk = await gateway.complete_json(
+            [{"role": "user", "content":
+              "对照资料包核检笔记覆盖：chain/actions/boundaries 每条判定 covered|missing（numbers 不查）。\n"
+              "资料包：\n" + _json.dumps(kit, ensure_ascii=False) + "\n\n笔记正文：\n" + body +
+              '\n输出 JSON：{"missing": ["未覆盖条目原文，最多 3 条"]} 全覆盖给空数组'}],
+            max_tokens=1024, thinking="disabled")
+        missing = [str(x)[:120] for x in (chk or {}).get("missing") or []][:3]
+        if missing:
+            ctx.set_progress(26, f"深度缺 {len(missing)} 项，定向补写")
+            fix = await gateway.complete_json(
+                [{"role": "user", "content":
+                  render("note_revise", PERSONA=persona_text, FEEDBACK="补讲这些缺失环节（因果链讲到位、操作落到步骤）："
+                                                                   + "；".join(missing), TITLE=title, DRAFT=body)}],
+                max_tokens=2048, thinking="disabled")
+            n_body = str(fix.get("body") or "").strip()
+            if n_body:
+                body = n_body
+            n_title = str(fix.get("title") or "").strip()
+            if n_title:
+                title = n_title[:30]
     cover_title = str(data.get("cover_title") or "").strip()[:10]
     if not title or not body:
         raise RuntimeError("笔记生成空响应（title/body 缺失），稍后自动重试")

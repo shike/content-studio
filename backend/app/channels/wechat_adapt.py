@@ -168,18 +168,50 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         title_from_call, title_alts = await _gen_titles(
             persona_text, length_specs("deep"),
             "\n\n选题素材：\n" + source[:6000])
-        ctx.set_progress(30, "改编成文（保骨架保原话换口径）")
+        from ..articles.prod_kit import ensure_prod_kit, kit_block
+
+        ctx.set_progress(28, "抽取生产资料包（因果链/操作/边界/数字账）")
+        kit = await ensure_prod_kit(item_id, text=source[:8000])
+        kit_text = kit_block(kit)
+        ctx.set_progress(30, "改编成文（保骨架保原话换口径，含深度四件套）")
         quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
                                                 PERSONA=persona_text,
                                                 SOURCE=source, ANGLE=angle,
-                                                QUOTES=quotes_block)}],
+                                                QUOTES=quotes_block, KIT=kit_text)}],
             max_tokens=20000, thinking="enabled")
         body = _strip_fence(body)
         lines = body.split("\n")
         if not lines or not lines[0].lstrip().startswith("# "):
             raise TransientError("改编输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
+
+        # ── 深度覆盖核检（2026-11-18 车道一）：对照资料包逐条核对，缺环节定向补写一次 ──
+        if kit_text:
+            import json as _json
+
+            ctx.set_progress(40, "深度覆盖核检（对照资料包）")
+            chk = await gateway.complete_json(
+                [{"role": "user", "content":
+                  "对照生产资料包逐条核检这篇长文的覆盖：chain/actions/boundaries 每条判定是否被讲到"
+                  "（numbers 不查；讲到一半也算 covered）。\n资料包：\n" + _json.dumps(kit, ensure_ascii=False)
+                  + "\n\n成文：\n" + body[:6000] +
+                  '\n输出 JSON：{"missing": ["没讲到的资料包条目原文，最多 3 条"]}，全覆盖给空数组'}],
+                max_tokens=1024, thinking="disabled")
+            missing = [str(x)[:120] for x in (chk or {}).get("missing") or []][:3]
+            if missing:
+                ctx.set_progress(45, f"深度缺 {len(missing)} 项，定向补写")
+                body = _strip_fence(await gateway.complete(
+                    [{"role": "user", "content":
+                      "下面这篇公众号长文漏掉了资料包里的关键环节，定向补写：只补缺失环节的讲透"
+                      "（因果链一步步、操作落到步骤），其余内容原样保留，不新增编造。\n"
+                      "缺失环节：\n- " + "\n- ".join(missing) +
+                      "\n\n资料包对照：\n" + kit_text +
+                      "\n\n成文全文（在此基础修订，输出完整修订后全文，# 标题开头）：\n" + body}],
+                    max_tokens=20000, thinking="enabled"))
+                lines = body.split("\n")
+                if not lines or not lines[0].lstrip().startswith("# "):
+                    raise TransientError("深度补写输出缺「# 标题」首行，稍后自动重试")
         title = lines[0].lstrip()[2:].strip() or title_from_call or src_title[:30]
         md_text = "\n".join(lines[1:]).strip()
         min_chars_or_raise(md_text, "改编稿")

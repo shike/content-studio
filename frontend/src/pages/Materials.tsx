@@ -677,8 +677,6 @@ interface KbDoc {
  * 展开读原文（懒加载，cap 1.2 万字）后决策送产线。已产出标记（→视频稿/长文/笔记 #id）防重复选材。
  * 目录 chips=用户自己的 ima 分类法，只导航不管理（增删收在底部目录管理卡）。
  */
-const SIX_ANGLES = ['反常识判断', '身份定位喊话', '行动指令', '提问式', '对比打假', '数字落差']
-
 /** 稿件 kind → 跳转键（onNavigate 走 App 的 NAVMAP：带 tab 的旧键直达页内） */
 const KIND_NAV: Record<string, string> = { video_script: 'p_content', note: 'xhs', long_article: 'articles' }
 
@@ -695,16 +693,11 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [edit, setEdit] = useState<{ id: number; title: string } | null>(null)
   const [prod, setProd] = useState<null | {
     doc: KbDoc
-    dir: 'script' | 'xhs' | 'article'
-    length: 'short' | 'long'
-    angles: string[]
-    useStyle: boolean
-    hotspot: string
+    dir: 'xhs' | 'article'
     xhsTitle: string
     xhsAngle: string
   }>(null)
-  const [hs, setHs] = useState<{ loading: boolean; reason: string; done: boolean }>({ loading: false, reason: '', done: false })
-  const [gen, setGen] = useState<null | { phase: 'busy' | 'done'; label: string; text: string; scriptId?: number; noteId?: number; dir: 'script' | 'xhs' }>(null)
+  const [gen, setGen] = useState<null | { phase: 'busy' | 'done'; label: string; text: string; noteId?: number; dir: 'xhs' }>(null)
   const [fb, setFb] = useState('')
   const [elapsed, setElapsed] = useState(0)
 
@@ -717,21 +710,14 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
     return () => clearInterval(t)
   }, [gen?.phase, gen?.label === '' ? 0 : 1])
 
-  /** 打开生成框：系统自动匹配当前可挂热点并预填（用户裁决「系统挂，不推给人」），人保留否决权。 */
+  /** 打开生成框（2026-11-18 用户定版：知识库 → 公众号长文 + 小红书图文两方向；口播入口移至热评线）。 */
   const openProd = (d: KbDoc) => {
     setProd({
-      doc: d, dir: 'script', length: 'short', angles: [], useStyle: true, hotspot: '',
+      doc: d, dir: 'xhs',
       xhsTitle: (d.title || '').slice(0, 40),
       xhsAngle: [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
         .filter(Boolean).join('；金句：').slice(0, 200),
     })
-    setHs({ loading: true, reason: '', done: false })
-    api<{ hotspot: string; reason: string }>(`/kb/docs/${d.id}/hotspot_suggest`)
-      .then((r) => {
-        setHs({ loading: false, reason: r.reason || '', done: true })
-        if (r.hotspot) setProd((p) => (p && !p.hotspot ? { ...p, hotspot: r.hotspot } : p))
-      })
-      .catch(() => setHs({ loading: false, reason: '', done: true }))
   }
 
   const saveTitle = async () => {
@@ -996,12 +982,11 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
               </div>
             )}
 
-            <div className="mt-3 text-[12px] font-medium tracking-wide text-slate-400">内容类型</div>
+            <div className="mt-3 text-[12px] font-medium tracking-wide text-slate-400">内容类型（知识库 → 公众号长文 + 小红书图文两出口，2026-11-18 定版）</div>
             <div className="mt-1.5 space-y-2">
               {([
-                { v: 'script', title: '人设号 · 视频稿', desc: '改编角度做切角、金句做钩子、原文做事实底，产出口播脚本' },
-                { v: 'xhs', title: '小红书 · 图文笔记', desc: '以文档为原料生成笔记与封面，到小红书 tab 改稿后发布' },
-                { v: 'article', title: '公众号 · 改编长文', desc: '立即改编：保骨架保原话成文 → 原创度闸 → 双审校 → 排版，完成后进「公众号 · 清单」' },
+                { v: 'xhs', title: '小红书 · 图文笔记', desc: '生产资料包（因果链/操作/边界/数字账）喂入 → 收藏体清单化 + 标题点击力评分选主' },
+                { v: 'article', title: '公众号 · 改编长文', desc: '立即改编：资料包保深度成文 → 原创度闸 → 双审校 → 排版，完成后进「公众号 · 清单」' },
               ] as const).map((o) => (
                 <button key={o.v} onClick={() => setProd({ ...prod, dir: o.v })}
                   className={`block w-full rounded-xl border px-3.5 py-2.5 text-left transition ${prod.dir === o.v ? 'border-emerald-400 bg-emerald-50' : 'border-[#E8ECF0] hover:border-slate-300'}`}>
@@ -1010,40 +995,6 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                 </button>
               ))}
             </div>
-
-            {prod.dir === 'script' && (
-              <div className="mt-4 space-y-3">
-                <div>
-                  <div className="text-[12px] font-medium tracking-wide text-slate-400">篇幅</div>
-                  <div className="mt-1.5"><Chips items={[
-                    { v: 'short', label: '短版 240~320 字' }, { v: 'long', label: '长版 600~900 字' },
-                  ]} value={prod.length} onPick={(v) => setProd({ ...prod, length: v as 'short' | 'long' })} /></div>
-                </div>
-                <div>
-                  <div className="text-[12px] font-medium tracking-wide text-slate-400">流量打法（最多 3 个，不选=按文档自动）</div>
-                  <div className="mt-1.5"><Chips items={SIX_ANGLES.map((a) => ({
-                    v: a, label: prod.angles.includes(a) ? `✓ ${a}` : a,
-                  }))} value="" onPick={(v) => setProd({ ...prod, angles: prod.angles.includes(v)
-                    ? prod.angles.filter((x) => x !== v)
-                    : prod.angles.length < 3 ? [...prod.angles, v] : prod.angles })} /></div>
-                </div>
-                <label className="flex cursor-pointer items-center gap-2 text-[13px] text-slate-700">
-                  <input type="checkbox" checked={prod.useStyle} onChange={(e) => setProd({ ...prod, useStyle: e.target.checked })}
-                    className="size-4 accent-emerald-600" />
-                  套用风格画像（你的历史成稿风格）
-                </label>
-                <div>
-                  <div className="text-[12px] font-medium tracking-wide text-slate-400">挂靠热点（系统自动匹配，可改可清）</div>
-                  <input value={prod.hotspot} onChange={(e) => setProd({ ...prod, hotspot: e.target.value })}
-                    placeholder="正在为你匹配当前热点…也可手动填写热点事件/产品名"
-                    className="mt-1.5 w-full rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
-                  <div className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
-                    {hs.loading ? '正在匹配当前在榜热点…'
-                      : hs.reason || '自己账号实证：爆款=热点×立场×一线视角；清空=纯干货稿（天花板几千播放）'}
-                  </div>
-                </div>
-              </div>
-            )}
 
             {prod.dir === 'xhs' && (
               <div className="mt-4 space-y-3">
@@ -1071,23 +1022,11 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
               <button onClick={() => setProd(null)}
                 className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">取消</button>
               <button onClick={() => {
-                const { doc, dir, length, angles, useStyle, hotspot, xhsTitle, xhsAngle } = prod
+                const { doc, dir, xhsTitle, xhsAngle } = prod
                 if (dir === 'xhs' && !xhsTitle.trim()) { setError('小红书选题标题不能为空'); return }
                 setProd(null)
-                if (dir === 'script') {
+                if (dir === 'xhs') {
                   // 实时工作台（2026-11-18 用户裁决：生成在框里跑、结果在框里看、不行在框里改）
-                  setGen({ phase: 'busy', label: '生成中（0%）', text: '', dir: 'script' })
-                  void (async () => {
-                    try {
-                      const r = await api<{ job_id: number; script_id: number }>('/scripts/generate', {
-                        method: 'POST', body: JSON.stringify({ kb_id: doc.id, length, angles, use_style: useStyle, hotspot: hotspot.trim() }),
-                      })
-                      await waitJob(r.job_id, (j) => setGen((g) => (g ? { ...g, label: `生成中（${j.progress}%）${j.message || ''}` } : g)))
-                      const d = await api<{ versions: { body: string }[] }>(`/scripts/${r.script_id}`)
-                      setGen({ phase: 'done', label: '', text: d.versions?.[d.versions.length - 1]?.body || '', scriptId: r.script_id, dir: 'script' })
-                    } catch (e) { setGen(null); setError(`生成失败：${apiErrText(e)}`) }
-                  })()
-                } else if (dir === 'xhs') {
                   setGen({ phase: 'busy', label: '笔记生成中（0%）', text: '', dir: 'xhs' })
                   void (async () => {
                     try {
@@ -1114,9 +1053,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
       {gen && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a2f24]/40 px-4">
           <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
-            <div className="text-[15px] font-bold text-slate-900">
-              生成内容 · {gen.dir === 'script' ? '视频稿' : '小红书笔记'}
-            </div>
+            <div className="text-[15px] font-bold text-slate-900">生成内容 · 小红书笔记</div>
             {gen.phase === 'busy' ? (
               <div className="mt-5 space-y-2">
                 <div className="flex items-center gap-2 text-[13px] text-slate-600">
@@ -1140,21 +1077,16 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                   <button onClick={() => {
                     if (!gen || !fb.trim()) return
                     const f = fb.trim()
-                    const { scriptId, noteId, dir } = gen
+                    const { noteId } = gen
                     setGen({ ...gen, phase: 'busy', label: '按反馈修改中…' })
                     void (async () => {
                       try {
-                        const r = scriptId
-                          ? await api<{ job_id: number }>(`/scripts/${scriptId}/revise`, { method: 'POST', body: JSON.stringify({ feedback: f }) })
-                          : await api<{ job_id: number }>(`/channels/xhs/notes/${noteId}/revise`, { method: 'POST', body: JSON.stringify({ feedback: f }) })
+                        const r = await api<{ job_id: number }>(`/channels/xhs/notes/${noteId}/revise`, { method: 'POST', body: JSON.stringify({ feedback: f }) })
                         await waitJob(r.job_id, (j) => setGen((g) => (g ? { ...g, label: `修改中（${j.progress}%）` } : g)))
-                        const d = (await (scriptId
-                          ? api<{ versions: { body: string }[] }>(`/scripts/${scriptId}`)
-                          : api<{ body: string }>(`/channels/xhs/notes/${noteId}`))) as { versions?: { body: string }[]; body?: string }
-                        const text = scriptId ? (d.versions?.[d.versions.length - 1]?.body || '') : (d.body || '')
-                        setGen({ phase: 'done', label: '', text, scriptId, noteId, dir })
+                        const d = await api<{ body: string }>(`/channels/xhs/notes/${noteId}`)
+                        setGen({ phase: 'done', label: '', text: d.body || '', noteId, dir: 'xhs' })
                         setFb('')
-                      } catch (e) { setGen({ phase: 'done', label: '', text: gen.text, scriptId, noteId, dir }); setError(`修改失败：${apiErrText(e)}`) }
+                      } catch (e) { setGen({ phase: 'done', label: '', text: gen.text, noteId, dir: 'xhs' }); setError(`修改失败：${apiErrText(e)}`) }
                     })()
                   }}
                     disabled={!fb.trim()}
@@ -1164,9 +1096,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                 </div>
                 <div className="mt-4 flex justify-end">
                   <button onClick={() => {
-                    setMsg(gen.dir === 'script'
-                      ? '稿子已进「人设号 · 视频稿」——审阅、改标题、定稿都在那边'
-                      : '笔记已生成 → 「小红书」tab 改稿发布')
+                    setMsg('笔记已生成 → 「小红书」tab 改稿发布')
                     setGen(null); setFb('')
                   }}
                     className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">
