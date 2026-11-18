@@ -2,12 +2,13 @@
 
 数据：self_videos（创作者中心每日刷新的播放/赞/评/转/藏+发布时间）
      + account_metrics_daily（粉丝/主页访问日级）。
-计算：纯 SQL/Python 聚合（质量分=收藏率×3+转发率×3+评论×2+点赞×1.5+播放规模封顶3）；
+计算：纯 SQL/Python 聚合（质量分=播放定档〔<1000<30、<1万<70、≥1万 70~100〕+互动率档内 ±5 修正，2026-11-18 重设）；
 解读：一次 LLM 小调用（按周缓存，绝不重复烧钱）。
 周期：上一个完整的自然周（周一~周日）。"""
 from __future__ import annotations
 
 import json
+import math
 import statistics
 from datetime import date, timedelta
 
@@ -25,11 +26,28 @@ def _week_window(today: date | None = None) -> tuple[date, date]:
 
 
 def video_score(play: int, digg: int, comment: int, share: int, collect: int) -> float:
-    """质量分：课程号的钱途信号加权（收藏=学习意图、转发=圈层传播）。"""
-    p = max(play, 1)
-    return round(collect / p * 100 * 3 + share / p * 100 * 3
-                 + digg / p * 100 * 1.5 + comment / p * 100 * 2
-                 + min(play / 300, 3), 1)
+    """视频质量分（2026-11-18 用户裁决重设权重：播放定档，互动率只做档内修正）。
+
+    硬规则：播放 <1000 → 分 <30；<10000 → 分 <70；≥10000 → 70~100。
+    - 档位基线：<1000 线性 0→30；1000~9999 对数 30→70；≥1万 对数 70→100（10万封顶）。
+    - 互动率（收藏/转发=学习意图权重最高）换算 ±5 的档内修正，封顶在档上限内
+      （29.9 / 69.9），保证不跨档——播放量是门槛，互动只决定同档里谁更好。
+    """
+    p = max(play, 0)
+    if p < 1000:
+        base = 30.0 * p / 1000
+        cap = 29.9
+    elif p < 10000:
+        base = 30.0 + 40.0 * math.log10(p / 1000.0)
+        cap = 69.9
+    else:
+        base = 70.0 + 30.0 * min(1.0, math.log10(p / 10000.0))
+        cap = 100.0
+    r = max(p, 1)
+    eng = (collect / r * 100 * 3 + share / r * 100 * 3
+           + comment / r * 100 * 2 + digg / r * 100 * 1.5)
+    adj = max(-5.0, min(5.0, (eng - 10.0) / 4.0))  # 典型率值 ~10 → 0 修正
+    return round(max(0.0, min(cap, base + adj)), 1)
 
 
 def _card_matches(tenant_id: int) -> tuple[list[dict], int]:
