@@ -163,7 +163,7 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       <ErrorLine text={error} />
 
-      <div className="mb-3 space-y-2">
+      {mode !== 'today' && <div className="mb-3 space-y-2">
         <Chips items={[
           { v: '', label: `全部 ${statsSrc.length}` },
           ...KB_GENRES.map((g) => ({ v: g, label: `${g} ${genreCounts.get(g) || 0}` })),
@@ -179,7 +179,7 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
               className="ml-2 text-emerald-700 hover:underline">清除</button>
           </div>
         )}
-      </div>
+      </div>}
 
       {shown.length === 0 ? (
         <EmptyState icon={BookOpen}
