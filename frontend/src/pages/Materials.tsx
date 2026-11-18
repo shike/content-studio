@@ -1027,7 +1027,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
             {prod.dir === 'article' && (
               <div className="mt-4 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
                 点「确认生成」立即开始改编（约几分钟）：按文档的改编角度保骨架、保原话，过原创度闸与双审校后排版，
-                完成进「公众号 · 清单」排版待发。每日 05:00 的自动队列照常运转，互不影响。
+                完成进「公众号 · 清单」排版待发。
               </div>
             )}
 

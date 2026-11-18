@@ -211,19 +211,8 @@ async def _run_kb_miner() -> str:
 register_schedule(Schedule(key="material_kb_mine", label="知识库挖掘（源文评估入清单）",
                            daily_hour=4, enabled_by="ima_kb_enabled",
                            run=_run_kb_miner))
-async def _run_article_adapt() -> str:
-    """改编器（2026-11-11 源文改编产线）：每日从清单取一项源文改编成文进待发。"""
-    from .runner import runner
-    job = await runner.submit("article_adapt", {},
-                              dedup_key=f"1:adapt:{datetime.now():%Y%m%d}",
-                              actor=(1, 0, "platform_admin"))
-    return f"job #{job.id}（清单取项 → 改编成文）"
-
-
-# 改编器（2026-11-11）：5 点改编，与 4 点挖掘错峰；清单空=诚实空过，宁缺勿滥
-register_schedule(Schedule(key="wechat_adapt_daily", label="源文改编成文（清单取项·进待发）",
-                           daily_hour=5, enabled_by="ima_kb_enabled",
-                           run=_run_article_adapt))
+# （改编器每日调度已下线，2026-11-18 用户裁决：公众号长文改手动直接执行——
+#   知识库「生成内容」入口按项立即改编，走同一执行器与闸；队列不再自动消化）
 register_schedule(Schedule(key="self_scan", label="自我扫描（我的账号）",
                            daily_hour=1, hour_from_settings=True,
                            enabled_by="watch_scan_enabled", run=_run_self_scan))
