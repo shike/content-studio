@@ -45,6 +45,9 @@ const KIND_NAV: Record<string, string> = { video_script: 'p_content', note: 'xhs
 /** 体裁词表（2026-11-18 用户定版 7 个，生产有用的货；打标=kb_genre_tag.py，主在前） */
 const KB_GENRES = ['方法论', '客户案例', '观点判断', '操作教程', '工具资源', '学习路线', '职业发展']
 
+/** 今天·知识库只放未产出的前 100 篇（2026-11-18 用户定版），素材库·知识库仍全库 */
+const TODAY_LIMIT = 100
+
 export default function KbTab({ onNavigate, mode = 'full' }: {
   onNavigate?: (k: string) => void; mode?: 'full' | 'today'
 }) {
@@ -127,8 +130,11 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
     return m
   }, [statsSrc])
   const base = (searched ?? docs).filter((d) => mode !== 'today' || (d.used || []).length === 0)
-  const shown = base.filter((d) => !genre || (d.tags || []).includes(genre))
-  const vis = shown.slice(0, limit)
+  // today 模式（2026-11-18 用户定版）：只放未产出的前 100 篇，按评分降序（无分垫底）
+  const sorted = mode !== 'today' ? base
+    : [...base].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).slice(0, TODAY_LIMIT)
+  const shown = sorted.filter((d) => !genre || (d.tags || []).includes(genre))
+  const vis = mode === 'today' ? shown : shown.slice(0, limit)
 
   /** 展开行时懒加载全文（GET /kb/docs/{id}）；空串=原文未入库，回落摘录。 */
   const openDoc = (d: KbDoc) => {
@@ -160,7 +166,7 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
       <div className="mb-3 space-y-2">
         {mode === 'today' && (
           <div className="text-[12px] text-slate-400">
-            推荐口径：未产出的文档，按分数降序——已写成内容的沉在全库，可在「素材库 · 知识库」回看
+            推荐口径：只取未产出的文档，按评分降序前 {TODAY_LIMIT} 篇（未产出共 {statsSrc.length} 篇）——已写成内容的在「素材库 · 知识库」回看
           </div>
         )}
         <Chips items={[
@@ -303,7 +309,7 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
               </div>
             )
           })}
-          {shown.length > limit && (
+          {mode !== 'today' && shown.length > limit && (
             <div className="pt-2 text-center">
               <button onClick={() => setLimit(limit + 100)}
                 className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">
