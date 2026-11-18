@@ -22,6 +22,174 @@ def _material_ctx(s: Session, material_id: int) -> dict:
     return material_context(s, int(material_id))
 
 
+_FORM_BOOK = "——；;、「」『』“”‘’《》〈〉："  # 书面标点黑名单（口播零容忍，2026-11-18 定标）
+
+
+def _speech_form_check(body: str) -> dict:
+    """口播形态读稿闸（2026-11-18 用户定标，代码判不经 AI 品味）：
+    平均句长 ≤13 字、单句 ≤20 字、零书面标点——标尺=号主 12 万播放真实转写（21 气口均 12.2 字、最长 20、零书面标点）。"""
+    import re
+
+    units = [u for u in re.split(r"[。！？\n]", (body or "").strip()) if u.strip()]
+    lens = [len(re.sub(r"\s", "", u)) for u in units] or [0]
+    book = sum(body.count(ch) for ch in _FORM_BOOK)
+    avg = sum(lens) / len(lens)
+    mx = max(lens)
+    ok = avg <= 13 and mx <= 20 and book == 0
+    return {"pass": ok, "avg": round(avg, 1), "max": mx, "book": book,
+            "long": sum(1 for l in lens if l > 20), "sentences": len(units)}
+
+
+async def _kb_ammunition(comment: str) -> str:
+    """热评 → 知识库弹药：按热评主题从入选清单挑 1~3 篇，抽资料包拼弹药块（无相关返回空串）。"""
+    from sqlmodel import Session, select
+
+    from ..articles.prod_kit import ensure_prod_kit, kit_block
+    from ..db import engine
+    from ..models import Material
+
+    with Session(engine) as s:
+        rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
+            Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+            Material.status == "ready")).all()  # type: ignore[attr-defined]
+    if not rows:
+        return ""
+    rows = sorted(rows, key=lambda d: float((d.quality or {}).get("score") or 0), reverse=True)[:200]
+    index = "\n".join(f"{i + 1}. 《{(d.title or '')[:40]}》{str((d.quality or {}).get('why_good') or '')[:60]}"
+                      for i, d in enumerate(rows))
+    pick = await gateway.complete_json(
+        [{"role": "user", "content":
+          "一条高赞热评（受众心声）：\n「" + comment[:200] + "」\n"
+          "从知识库清单挑 1~3 篇能给口播当「弹药」（判断/机制/数字账）的文档，没有相关就空数组。\n"
+          "清单：\n" + index +
+          '\n输出 JSON：{"ids": [序号数组]}'}],
+        max_tokens=1024, thinking="disabled")
+    by_id = {d.id: d for d in rows if d.id is not None}
+    ids: list[int] = []
+    for x in (pick or {}).get("ids") or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= i <= len(rows) and rows[i - 1].id in by_id:
+            ids.append(rows[i - 1].id)
+    ammo = []
+    for mid in list(dict.fromkeys(ids))[:3]:
+        kit = await ensure_prod_kit(mid)
+        blk = kit_block(kit)
+        if blk:
+            ammo.append(f"《{(by_id[mid].title or '')[:40]}》\n{blk}")
+    return "\n\n".join(ammo)
+
+
+async def _hotspot_for_comment(comment: str) -> str:
+    """热评 → 在榜热点引信：与热评直接关联的在榜热点才挂（无=空串，不硬挂）。"""
+    import asyncio as _aio
+
+    from ..materials.collectors.hotlist import fetch_baidu_hot, fetch_tech_news
+
+    try:
+        baidu, _ = await _aio.to_thread(fetch_baidu_hot, 12)
+        news, _ = await _aio.to_thread(fetch_tech_news, 6, 48)
+    except Exception:  # noqa: BLE001 热点源挂=不挂，口播照出
+        return ""
+    items = [str(h.get("title") or "")[:40] for h in baidu[:8]]
+    items += [str(n.get("title") or "")[:60] for n in news[:10]]
+    if not items:
+        return ""
+    pick = await gateway.complete_json(
+        [{"role": "user", "content":
+          "热评心声：「" + comment[:200] + "」\n当前在榜热点：\n" + "\n".join(f"- {x}" for x in items) +
+          '\n有直接关联的在榜热点就给它的原文标题（当爆款引信），没有给空串，宁缺勿滥。'
+          '输出 JSON：{"hotspot": "标题或空串"}'}],
+        max_tokens=1024, thinking="disabled")
+    return str((pick or {}).get("hotspot") or "").strip()
+
+
+@register_executor("script_hotcomment")
+async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
+    """热评→口播稿（2026-11-18 车道二·用户定版）：高赞热评开场=受众认领，知识库弹药垫深度，
+    形态读稿闸收口（代码机械判：平均≤13字/单句≤20字/零书面标点，不过定向重写一次）。"""
+    import json as _json
+
+    from sqlmodel import Session, select
+
+    from ..channels.engine import new_script_content
+    from ..db import engine
+    from ..models import Material, MaterialAnalysis
+    from ..tenant_brand import brand_of
+
+    material_id = int(payload.get("material_id") or 0)
+    cidx = int(payload.get("comment_idx") or 0)
+    comment = likes = src_title = ""
+    with Session(engine) as s:
+        m = s.get(Material, material_id)
+        if m is None:
+            raise RuntimeError(f"素材 #{material_id} 不存在")
+        src_title = m.title or ""
+        for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+                MaterialAnalysis.material_id == material_id)).all():  # type: ignore[attr-defined]
+            if a.kind == "comments":
+                items = (a.payload or {}).get("items") or []
+                if cidx < len(items):
+                    comment = str((items[cidx] or {}).get("t") or "")
+                    likes = str((items[cidx] or {}).get("d") or "0")
+                break
+    if not comment:
+        raise RuntimeError("热评不存在（该素材没有此条评论）")
+
+    with Session(engine) as s:
+        script = new_script_content(
+            s, tenant_id=1, channel_key="persona",
+            title_hint=f"热评口播：{comment[:30]}",
+            payload={"script_state": "generating", "account_type": "persona",
+                     "hot_comment": {"material_id": material_id, "idx": cidx}})
+        s.commit()
+        script_id = script.id
+
+    ctx.set_progress(20, "知识库弹药匹配")
+    ammo = await _kb_ammunition(comment)
+    ctx.set_progress(30, "在榜热点挂靠检查")
+    hotspot = await _hotspot_for_comment(comment)
+    ctx.set_progress(45, "口播稿生成")
+    prompt = render("script_hotcomment", PERSONA=brand_of(1)["persona"],
+                    COMMENT=comment[:300], LIKES=likes or "?",
+                    KB_AMMO=ammo or "（知识库无直接相关弹药——按人设与常识把这条心声讲透，禁编造数字）",
+                    VIRAL_BLOCK=_viral_block(hotspot))
+    data = await gateway.complete_json([{"role": "user", "content": prompt}], max_tokens=20000)
+    versions = _normalize_versions((data.get("versions") or []))[:1]
+    if not versions:
+        raise RuntimeError("口播稿生成空响应")
+    body = str(versions[0].get("body") or "")
+
+    chk = _speech_form_check(body)
+    if not chk["pass"]:
+        ctx.set_progress(70, f"形态未过（均 {chk['avg']} 字/句·最长 {chk['max']}·书面标点 {chk['book']}），定向重写")
+        data = await gateway.complete_json(
+            [{"role": "user", "content": prompt +
+              f"\n\n【返工·形态读稿闸】上一稿形态不达标：平均句长 {chk['avg']} 字/句（目标 ≤13）、"
+              f"最长句 {chk['max']} 字（目标 ≤20）、书面标点 {chk['book']} 处（目标 0）。"
+              "全稿逐句拆短重写：一句一口气，书面标点全清，用口语挂钩词（对不对/为什么呢/说白了）替代书面连接。其余规格照旧。"}],
+            max_tokens=20000)
+        versions = _normalize_versions((data.get("versions") or []))[:1] or versions
+        chk = _speech_form_check(str(versions[0].get("body") or ""))
+
+    with Session(engine) as s:
+        script = s.get(Content, script_id)
+        p = dict(script.payload or {})
+        p["script_state"] = "generated"
+        p["account_type"] = "persona"
+        p["form_check"] = chk
+        script.payload = p
+        script.versions = versions
+        script.status = "review"
+        script.note = (f"热评口播｜来源《{src_title[:24]}》｜形态体检：均 {chk['avg']} 字、最长 {chk['max']}、书面标点 {chk['book']}")
+        s.add(script)
+        s.commit()
+    ctx.set_progress(100, f"完成（形态体检：均 {chk['avg']} 字/最长 {chk['max']}/书面标点 {chk['book']}）")
+    return {"script_id": script_id, "form": chk}
+
+
 def _viral_block(hotspot: str) -> str:
     """爆款基因块（2026-11-18 用户裁决「AI 不判爆款、数据判」：范本=自有账号过闸真实爆款）。
 

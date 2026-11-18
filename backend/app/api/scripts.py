@@ -208,6 +208,22 @@ def get_script(script_id: int, user: User = Depends(require_user)) -> dict:
         return script_out(script, channel_key_of(s, script.channel_id))
 
 
+class HotCommentIn(BaseModel):
+    material_id: int
+    comment_idx: int = 0
+
+
+@router.post("/hotcomment", status_code=202)
+async def hotcomment_script(body: HotCommentIn,
+                            user: User = Depends(require_user)) -> dict:
+    """热评→口播稿（2026-11-18 车道二）：高赞热评开场=受众认领，知识库弹药+形态读稿闸。"""
+    job = await runner.submit("script_hotcomment",
+                              {"material_id": body.material_id, "comment_idx": body.comment_idx},
+                              dedup_key=f"1:hotc:{body.material_id}:{body.comment_idx}",
+                              actor=(user.tenant_id, user.id, user.role))
+    return {"job_id": job.id}
+
+
 class ReviseIn(BaseModel):
     feedback: str
 

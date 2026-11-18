@@ -184,6 +184,40 @@ function TopicsTab() {
   const [msg, setMsg] = useState('')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
+  // 热评雷达（2026-11-18 车道二：受众用赞投票的共鸣点=口播选题源）
+  interface HotComment { material_id: number; idx: number; comment: string; likes: number; source: string }
+  const [hc, setHc] = useState<HotComment[]>([])
+  const [hcBar, setHcBar] = useState(50)
+  const [hcOpen, setHcOpen] = useState(true)
+  const [hcGen, setHcGen] = useState<Record<string, { phase: 'busy' | 'done'; label: string; text: string; scriptId?: number }>>({})
+
+  useEffect(() => {
+    api<{ items: HotComment[]; bar: number }>('/kb/hot_comments')
+      .then((d) => { setHc(d.items || []); setHcBar(d.bar || 50) })
+      .catch(() => {})
+  }, [])
+
+  const hcFire = (h: HotComment) => {
+    const key = `${h.material_id}:${h.idx}`
+    setHcGen((m) => ({ ...m, [key]: { phase: 'busy', label: '弹药匹配+生成中…', text: '' } }))
+    api<{ job_id: number }>('/scripts/hotcomment', {
+      method: 'POST', body: JSON.stringify({ material_id: h.material_id, comment_idx: h.idx }),
+    })
+      .then((r) => waitJob(r.job_id, (j) => setHcGen((m) => ({
+        ...m, [key]: { ...(m[key] || { phase: 'busy', label: '', text: '' }), label: `生成中（${j.progress}%）${j.message || ''}` },
+      }))))
+      .then(async (j) => {
+        const sid = (j as { result?: { script_id?: number } })?.result?.script_id
+        let text = ''
+        if (sid) {
+          const d = await api<{ versions: { body: string }[] }>(`/scripts/${sid}`)
+          text = d.versions?.[d.versions.length - 1]?.body || ''
+        }
+        setHcGen((m) => ({ ...m, [key]: { phase: 'done', label: '', text, scriptId: sid } }))
+        setMsg('口播稿已生成 → 「人设号 · 视频稿」可打磨定稿')
+      })
+      .catch((e) => setHcGen((m) => ({ ...m, [key]: { phase: 'done', label: '', text: `生成失败：${apiErrText(e)}` } })))
+  }
 
   const load = useCallback(() => {
     const params = new URLSearchParams({ limit: '100' })
@@ -283,6 +317,55 @@ function TopicsTab() {
         }))} value={chip} onPick={(v) => setChip(v as TopicChip)} />
         <span className="text-[12px] text-slate-400">共 {total} 条{chip === 'ready' ? '（按热度排）' : ''}</span>
       </div>
+      {/* 热评雷达（2026-11-18 车道二：别人视频的高赞评论=受众用赞投票的共鸣点，口播选题源） */}
+      {hc.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/40 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[13px] font-semibold text-slate-900">
+              热评雷达 <span className="text-[11.5px] font-normal text-slate-500">受众用赞投票的共鸣点（赞≥{hcBar}）——口播选题源，生成走「弹药匹配+形态读稿闸」</span>
+            </div>
+            <button onClick={() => setHcOpen(!hcOpen)} className="shrink-0 text-[12px] text-slate-500 hover:text-slate-700">
+              {hcOpen ? '收起' : `展开 ${hc.length} 条`}
+            </button>
+          </div>
+          {hcOpen && (
+            <div className="mt-2 space-y-1.5">
+              {hc.slice(0, 10).map((h) => {
+                const key = `${h.material_id}:${h.idx}`
+                const g = hcGen[key]
+                return (
+                  <div key={key} className="rounded-lg border border-[#EDE7D8] bg-white px-3 py-2">
+                    <div className="flex items-baseline gap-2">
+                      <span className="num-serif shrink-0 text-[13px] font-bold text-amber-700">{h.likes}赞</span>
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-slate-700">「{h.comment}」</span>
+                      <button onClick={() => hcFire(h)} disabled={g?.phase === 'busy'}
+                        className="shrink-0 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
+                        生成口播稿
+                      </button>
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-slate-400">来源：《{h.source}》</div>
+                    {g && (
+                      <div className="mt-1.5 border-t border-[#EDE7D8] pt-1.5">
+                        {g.phase === 'busy' ? (
+                          <div className="flex items-center gap-2 text-[12px] text-slate-500">
+                            <RefreshCw size={12} className="inline animate-spin text-emerald-600" /> {g.label}
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="whitespace-pre-wrap rounded bg-[#f7f8fa] px-2.5 py-2 text-[12.5px] leading-relaxed text-slate-700">{g.text}</div>
+                            <div className="mt-1 text-[11px] text-slate-400">已进「人设号 · 视频稿」——打磨/改标题/定稿在那边</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {hc.length > 10 && <div className="text-[11.5px] text-slate-400">雷达共 {hc.length} 条，这里只展示赞数前 10</div>}
+            </div>
+          )}
+        </div>
+      )}
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       <ErrorLine text={error} />
       {!loaded ? null : rows.length === 0 ? (

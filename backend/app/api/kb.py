@@ -231,6 +231,37 @@ async def hotspot_suggest(doc_id: int, user: User = Depends(require_user)) -> di
                                                   or (screen or {}).get("reason") or "")[:120]}
 
 
+@router.get("/hot_comments")
+def hot_comments(user: User = Depends(require_user)) -> dict:
+    """热评雷达（2026-11-18 车道二·用户定版「别人视频的热门评论适合做口播」）：
+    同行视频高赞评论=受众用赞投票的共鸣点，口播选题源。准入线赞数 AppSetting.hot_comment_bar（默认 50）。"""
+    from ..models import MaterialAnalysis
+
+    with Session(engine) as s:
+        row = s.get(AppSetting, "hot_comment_bar")
+        try:
+            bar = int(row.value) if row is not None and row.value else 50
+        except (TypeError, ValueError):
+            bar = 50
+        items: list[dict] = []
+        for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+                MaterialAnalysis.kind == "comments")).all():  # type: ignore[attr-defined]
+            m = s.get(Material, a.material_id)
+            for i, it in enumerate((a.payload or {}).get("items") or []):
+                if not isinstance(it, dict):
+                    continue
+                t = str(it.get("t") or "").strip()
+                try:
+                    d = int(it.get("d") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if d >= bar and t:
+                    items.append({"material_id": a.material_id, "idx": i, "comment": t[:200],
+                                  "likes": d, "source": (m.title if m else "") or ""})
+    items.sort(key=lambda x: -x["likes"])
+    return {"items": items[:50], "bar": bar, "total": len(items)}
+
+
 class FolderIn(BaseModel):
     folder_id: str
     name: str
