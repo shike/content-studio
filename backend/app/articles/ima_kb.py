@@ -13,6 +13,7 @@ import asyncio
 import httpx
 from sqlmodel import Session
 
+from ..jobs.errors import QuotaExhaustedError
 from ..models import AppSetting
 
 BASE = "https://ima.qq.com"
@@ -83,9 +84,14 @@ async def list_folder_docs(client_id: str, api_key: str, kb_id: str,
                     if r.status_code == 403 and attempt < 3:
                         await asyncio.sleep(45)
                         continue
+                    if r.status_code == 403:
+                        # 2026-11-18：403 是限流/额度窗（等待即解），不是确定性错误——按 quota 进退避梯子
+                        raise QuotaExhaustedError("ima 列目录 403（突发量惩罚/额度窗口，等待后重试）")
                     r.raise_for_status()
                     break
                 data = r.json()
+                if data.get("code") == 220021:  # 资料获取次数已达上限（按天重置）
+                    raise QuotaExhaustedError(f"ima 额度耗尽：{data.get('msg')}（明日恢复）")
                 if data.get("code") != 0:
                     raise RuntimeError(f"ima 列目录失败: {data.get('msg')}")
                 payload = data.get("data") or {}
@@ -123,6 +129,8 @@ async def fetch_full_doc(client_id: str, api_key: str, media_id: str, cap: int =
         if text[:5] == "%PDF":
             return ""
         return text[:cap]
+    except QuotaExhaustedError:
+        raise
     except Exception as e:  # noqa: BLE001
         print(f"[ima-kb] 全文获取失败（{media_id[:24]}）: {type(e).__name__}: {str(e)[:80]}")
         return ""
@@ -135,8 +143,12 @@ async def _post(cfg: dict, path: str, body: dict) -> dict:
             "ima-openapi-apikey": cfg["api_key"],
             "ima-openapi-ctx": CTX,
         })
+        if r.status_code == 403:
+            raise QuotaExhaustedError(f"ima {path} 403（限流/额度窗口，等待后重试）")
         r.raise_for_status()
         data = r.json()
+    if data.get("code") == 220021:
+        raise QuotaExhaustedError(f"ima 额度耗尽：{data.get('msg')}（明日恢复）")
     if data.get("code") != 0:
         raise RuntimeError(f"ima {path} 业务错误: {data.get('msg')}")
     return data.get("data") or {}
