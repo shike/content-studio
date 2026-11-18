@@ -174,7 +174,9 @@ class JobContext:
 async def recover_interrupted_jobs() -> None:
     """启动自愈：queued **原行**直接回内存队列（不新建任务行——旧行为"改 superseded 再 submit"
     因 dedup 必 miss 导致每次重启每任务膨胀一行、且新行断租户归属）；running 标失败并按
-    transient 排自动重试。须在 runner.start() 之后调用。
+    transient 排自动重试。**例外**：register_owed 的欠任务类型中断改 superseded——
+    owed 下一轮按实体缺口重建整批，旧批留着重试只会与重建批重复（见下）。须在
+    runner.start() 之后调用。
     """
     requeued: list[tuple[int, int]] = []
     requeued_types: list[tuple[int, str, str]] = []
@@ -187,6 +189,13 @@ async def recover_interrupted_jobs() -> None:
                 # 原行入内存队列即可：worker 只认内存队列，DB 行保持 queued 语义不变
                 requeued.append((job.id, job.tenant_id))
                 requeued_types.append((job.id, job.type, _lane_of(job.type)))
+            elif job.type in _OWNED and job.dedup_key:
+                # 欠任务类型中断不留重试：owed 下一轮会从实体缺口重建整批，旧批再重试
+                # = 同一个活扫两遍（2026-11-18 评论补采每次重启叠一批，实测堆出 26 条
+                # 同批任务）。前提契约：register_owed 的声明必须能从实体状态重建完整缺口。
+                job.status = "superseded"
+                job.next_retry_at = None
+                job.message = "服务重启中断，由欠任务补队重建（不留重试，避免重复批）"
             else:
                 # 重启中断不是任务的错：按 transient 排 90 秒后自动重试
                 job.status = "failed"
@@ -437,6 +446,24 @@ class JobRunner:
             if job is None or job.status != "failed":
                 return
             job_type = job.type
+            # 同批去重：别的行以同一 dedup_key 已在跑/在排 = 同一个活正在做，本行合并终态。
+            # 没有这道闸，两行会各扫一遍同一缺口（2026-11-18 重启叠批事故的兜底）。
+            if job.dedup_key:
+                dup = s.exec(
+                    select(Job).where(
+                        Job.type == job_type,  # type: ignore[attr-defined]
+                        Job.dedup_key == job.dedup_key,  # type: ignore[attr-defined]
+                        Job.id != job.id,  # type: ignore[attr-defined]
+                        Job.status.in_(["queued", "running"]),  # type: ignore[attr-defined]
+                    )
+                ).first()
+                if dup is not None:
+                    job.status = "superseded"
+                    job.next_retry_at = None
+                    job.message = f"已有同批任务 #{dup.id} 在跑/在排，本次合并"
+                    s.add(job)
+                    s.commit()
+                    return
             # light 同类在跑：保持 failed+到期时间不动（下轮到点再查），先行置 queued 会让
             # 该行永远滞留（light 不进内存队列无人消费）且污染 dedup
             if job_type in _CONCURRENT_TYPES and self._inflight.get(job_type):

@@ -321,6 +321,9 @@ content: drafting ──► review ──► ready ──► published
 - **重试策略**：`RetryPolicy` 按 type 注册；人工重试清零自动重试计数。
 - **闭环判定**：同 type+同 dedup/实体且 id 更大的 succeeded 任务存在=`covered_by`。
 - **服务重启自愈**：`queued` 原行回内存队列；`running` 排 90s 自动重试。
+  **例外**：注册了 owed 声明的欠任务类型（`comment_recapture`/`material_analyze`）中断改
+  `superseded`——owed 下一轮从实体缺口重建整批，旧批再重试=同活扫两遍（2026-11-18
+  重启叠出 26 条同批补采的实测事故）。到期重试前另有同 `type+dedup_key` 在跑/在排即合并的兜底闸。
 - **归档制**：终态任务 7 天后 `archived=1`，不物理删除。
 
 **调度 REGISTRY（11 项，均为代码事实；`daily_backup` 已于 2026-11-18 按用户裁决下线——部署前 pg_dump 快照仍保留 5 份，手工备份=`python -m app.ops backup`）**：

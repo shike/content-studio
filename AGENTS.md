@@ -8,7 +8,7 @@
 
 - 后端 8100：`scripts/launchd.sh install`（正式常驻+看门狗，装前自动 alembic）/ `start-absolute.sh`（临时）；Linux `deploy-linux.sh install`；一键起 `dev.sh`。本地开发数据库=pgserver（`data/pgdata`，重启 Mac 后需重跑 TDD §12 启动片段）；`.env` 必配 `DATABASE_URL`。
 - 发服务器唯一流程 `scripts/sync-server.sh`（rsync+重启+健康检查；在途任务拒发，`CS_FORCE_RESTART=1` 强发；裸 rsync 不重启=旧代码照跑）。
-- 重启自愈（queued 回队/running 标 failed）须在 `runner.start()` 之后。前端改完必 `npx tsc --noEmit && npm run build`。
+- 重启自愈（queued 回队/running 标 failed；owed 类型 `comment_recapture`/`material_analyze` 中断改 superseded，交给 owed 重建，防叠批）须在 `runner.start()` 之后。前端改完必 `npx tsc --noEmit && npm run build`。
 
 ## 验收纪律（违反 = 白干）
 
