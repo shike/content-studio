@@ -706,6 +706,16 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const [hs, setHs] = useState<{ loading: boolean; reason: string; done: boolean }>({ loading: false, reason: '', done: false })
   const [gen, setGen] = useState<null | { phase: 'busy' | 'done'; label: string; text: string; scriptId?: number; noteId?: number; dir: 'script' | 'xhs' }>(null)
   const [fb, setFb] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+
+  // busy 期间秒级计时（2026-11-18 用户裁决：实时进度要上页面——长调用期间进度条不跳，计时在走=活着）
+  useEffect(() => {
+    if (gen?.phase !== 'busy') return
+    setElapsed(0)
+    const t0 = Date.now()
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [gen?.phase, gen?.label === '' ? 0 : 1])
 
   /** 打开生成框：系统自动匹配当前可挂热点并预填（用户裁决「系统挂，不推给人」），人保留否决权。 */
   const openProd = (d: KbDoc) => {
@@ -1112,7 +1122,12 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
                 <div className="flex items-center gap-2 text-[13px] text-slate-600">
                   <RefreshCw size={14} className="inline animate-spin text-emerald-600" /> {gen.label || '生成中…'}
                 </div>
-                <div className="text-[11.5px] text-slate-400">生成在后台任务里跑，关掉页面也会继续，完成后可回到这里看稿改稿。</div>
+                <div className="num-serif text-[20px] font-bold text-[#0a2f24]">
+                  {Math.floor(elapsed / 60)} 分 {elapsed % 60} 秒
+                </div>
+                <div className="text-[11.5px] leading-relaxed text-slate-400">
+                  计时在走就是活着。写作/打磨是单次大模型长调用，几分钟不跳进度是正常的；挂热点时多一道入题检查，可能多一倍时长。
+                </div>
               </div>
             ) : (
               <div className="mt-3">

@@ -255,7 +255,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                             my_style=build_my_style(use_style), length_spec=length_spec,
                             version_label="打法名", version_note="打法一句话"))
     # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
-    ctx.set_progress(20, "生成精品脚本（单版全预算）")
+    ctx.set_progress(20, "生成精品脚本（单版全预算）——大模型整篇写作中，本步约 2~4 分钟")
     data = await gateway.complete_json(
         [{"role": "system", "content": prompt},
          {"role": "user", "content": json.dumps(topic_info, ensure_ascii=False)}],
@@ -282,7 +282,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
     # 新契约（PRD R2.3）：生成后自动批判打磨一轮
     ctx.set_progress(60, "自动批判打磨一轮（约 3~8 分钟，慢是正常的）")
     versions = await _polish_core(versions, use_style=bool(payload.get("use_style", True)),
-                                  length=length, cta_rule=_cta_rule_of(account_type))
+                                  length=length, cta_rule=_cta_rule_of(account_type), ctx=ctx)
 
     with Session(engine) as s:
         script = s.get(Content, script_id)
@@ -360,9 +360,14 @@ def _cta_rule_of(account_type: str) -> str:
 
 
 async def _polish_core(versions: list[dict], cta_rule: str,
-                       use_style: bool = True, length: str = "short") -> list[dict]:
-    """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。"""
+                       use_style: bool = True, length: str = "short",
+                       ctx: JobContext | None = None) -> list[dict]:
+    """批判打磨核心：评审→重写→逐版合并（critique 以「｜改进：」并入 notes）。
+
+    ctx 传入时逐阶段回报进度（2026-11-18：单次长调用期间页面无输出被用户判「卡死」）。"""
     length_spec = _script_length_spec(length)
+    ctx_set = (lambda p, m: ctx.set_progress(p, m)) if ctx is not None else (lambda p, m: None)
+    ctx_set(65, "批判评审中（整稿挑毛病）")
     data = await gateway.complete_json(
         [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style),
                                               LENGTH=length_spec, CTA_RULE=cta_rule)},
@@ -370,6 +375,7 @@ async def _polish_core(versions: list[dict], cta_rule: str,
         max_tokens=20000)  # 同上，v5 动刀清单变长
     polished = _normalize_versions(data.get("versions") or [])
     critiques = data.get("critiques") or []
+    ctx_set(85, "按评审重写")
     merged = list(versions)
     for i, v in enumerate(polished):
         if i < len(merged):
