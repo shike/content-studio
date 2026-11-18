@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
   Check,
-  FolderPlus,
   Inbox,
   Link2,
   Package,
@@ -695,7 +694,6 @@ function KbTab() {
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(100)                // 触底续载
   const [bodies, setBodies] = useState<Record<number, string>>({}) // 已拉取的全文缓存
-  const [form, setForm] = useState({ folder_id: '', name: '' })
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -754,26 +752,6 @@ function KbTab() {
         .then((r) => setBodies((m) => ({ ...m, [next]: r.body || '' })))
         .catch(() => setBodies((m) => ({ ...m, [next]: '' })))
     }
-  }
-
-  const addFolder = async () => {
-    setError('')
-    try {
-      await api('/kb/folders', { method: 'POST', body: JSON.stringify(form) })
-      setForm({ folder_id: '', name: '' })
-      setMsg('已加入挖掘目录')
-      load()
-    } catch (e) { setError(apiErrText(e)) }
-  }
-
-  const removeFolder = async (fid: string, name: string) => {
-    setError('')
-    try {
-      await api(`/kb/folders/${encodeURIComponent(fid)}`, { method: 'DELETE' })
-      if (folder === name) setFolder('')
-      setMsg(`已移除目录「${name}」——已入库文档不受影响`)
-      load()
-    } catch (e) { setError(apiErrText(e)) }
   }
 
   const toScript = async (d: KbDoc) => {
@@ -1003,34 +981,6 @@ function KbTab() {
         </div>
       )}
 
-      <div className="mt-6 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
-        <div className="mb-2 text-[12px] font-medium tracking-wide text-slate-400">
-          目录管理（每日 04:00 自动翻一遍；移除目录不影响已入库文档）
-        </div>
-        {(ov?.folders || []).length > 0 && (
-          <div className="mb-2.5 flex flex-wrap gap-1.5">
-            {ov!.folders.map((f) => (
-              <span key={f.folder_id}
-                className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[12px] text-slate-600">
-                {f.name}
-                <button title="移除该挖掘目录" onClick={() => removeFolder(f.folder_id, f.name)}
-                  className="text-slate-400 transition hover:text-red-500">✕</button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <input value={form.folder_id} onChange={(e) => setForm({ ...form, folder_id: e.target.value })}
-            placeholder="folder_id（如 folder_7520…）"
-            className="w-56 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="目录名称"
-            className="w-44 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
-          <button onClick={addFolder} disabled={!form.folder_id.trim()}
-            className="rounded-full bg-[#0a2f24] px-3 py-1.5 text-[12.5px] font-medium text-[#f0e9d5] transition hover:opacity-90 disabled:opacity-40">
-            <FolderPlus size={13} className="inline" /> 添加目录
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
