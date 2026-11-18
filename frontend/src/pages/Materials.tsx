@@ -668,23 +668,33 @@ interface KbDoc {
   title: string
   author: string
   folder: string
-  category: string
   score: number | null
   why_good: string
   adapt_angle: string
   best_quotes: string[]
   excerpt?: string
+  body?: string
+  used: { kind: string; kind_label: string; id: number; title: string; status: string }[]
   status: string
   stage: string
   created_at: string
 }
 
-/** 知识库：高质量内容榜（评分降序，低分灰显可翻案视野）+ ima 线管理细带（凭证/挖掘/目录增删）。 */
+/**
+ * 知识库（2026-11-18 用户定版）：全库内容榜，默认「全部 · 分数降序」——库=收录即认可，
+ * 不让"入选"当门禁。三层递进支撑判断：分数排序=质量梯度 → 用处一行（why_good）=初筛 →
+ * 展开读原文（懒加载，cap 1.2 万字）后决策送产线。已产出标记（→视频稿/长文/笔记 #id）防重复选材。
+ * 目录 chips=用户自己的 ima 分类法，只导航不管理（增删收在底部目录管理卡）。
+ */
 function KbTab() {
   const [ov, setOv] = useState<KbOverview | null>(null)
-  const [docs, setDocs] = useState<KbDoc[]>([])
+  const [docs, setDocs] = useState<KbDoc[]>([])          // 全量（无搜索词时的数据源）
+  const [searched, setSearched] = useState<KbDoc[] | null>(null) // 全文检索结果（null=未在搜索）
   const [folder, setFolder] = useState('')
+  const [statusF, setStatusF] = useState<'' | 'ready' | 'low'>('')
   const [q, setQ] = useState('')
+  const [limit, setLimit] = useState(100)                // 触底续载
+  const [bodies, setBodies] = useState<Record<number, string>>({}) // 已拉取的全文缓存
   const [form, setForm] = useState({ folder_id: '', name: '' })
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
@@ -711,16 +721,40 @@ function KbTab() {
   }, [])
   useEffect(() => { load() }, [load])
 
+  // 全文检索（服务端：标题/作者/正文）——300ms 防抖；清词回落全量
+  useEffect(() => {
+    const kw = q.trim()
+    if (!kw) { setSearched(null); return }
+    const t = setTimeout(() => {
+      api<{ items: KbDoc[] }>(`/kb/docs?q=${encodeURIComponent(kw)}`)
+        .then((d) => setSearched(d.items || []))
+        .catch((e) => setError(apiErrText(e)))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [q])
+
   const folders = useMemo(() => {
     const m = new Map<string, number>()
     for (const d of docs) if (d.folder) m.set(d.folder, (m.get(d.folder) || 0) + 1)
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [docs])
-  const kw = q.trim().toLowerCase()
-  const shown = docs.filter((d) =>
+  const base = searched ?? docs
+  const shown = base.filter((d) =>
     (!folder || d.folder === folder) &&
-    (!kw || (d.title + ' ' + d.author).toLowerCase().includes(kw)))
+    (!statusF || (statusF === 'ready' ? d.status === 'ready' : d.status !== 'ready')))
   const passed = docs.filter((d) => d.status === 'ready').length
+  const vis = shown.slice(0, limit)
+
+  /** 展开行时懒加载全文（GET /kb/docs/{id}）；空串=原文未入库，回落摘录。 */
+  const openDoc = (d: KbDoc) => {
+    const next = expanded === d.id ? null : d.id
+    setExpanded(next)
+    if (next != null && bodies[next] === undefined) {
+      api<KbDoc>(`/kb/docs/${next}`)
+        .then((r) => setBodies((m) => ({ ...m, [next]: r.body || '' })))
+        .catch(() => setBodies((m) => ({ ...m, [next]: '' })))
+    }
+  }
 
   const addFolder = async () => {
     setError('')
@@ -811,33 +845,41 @@ function KbTab() {
       {msg && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">{msg}</div>}
       <ErrorLine text={error} />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 space-y-2">
         <Chips items={[
-          { v: '', label: `全部 ${docs.length}` },
-          ...folders.map(([name, n]) => {
-            const fid = ov?.folders.find((f) => f.name === name)?.folder_id
-            return {
-              v: name, label: `${name} ${n}`,
-              onRemove: fid ? () => removeFolder(fid, name) : undefined,
-            }
-          }),
-        ]} value={folder} onPick={setFolder} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜标题 / 作者…"
-          className="ml-auto w-52 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+          { v: '', label: `全部目录 ${docs.length}` },
+          ...folders.map(([name, n]) => ({ v: name, label: `${name} ${n}` })),
+        ]} value={folder} onPick={(v) => { setFolder(v); setLimit(100) }} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Chips items={[
+            { v: '', label: '全部' },
+            { v: 'ready', label: `入选 ${passed}` },
+            { v: 'low', label: `未过线 ${docs.length - passed}` },
+          ]} value={statusF} onPick={(v) => { setStatusF(v as '' | 'ready' | 'low'); setLimit(100) }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜标题 / 作者 / 全文…"
+            className="ml-auto w-64 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+        </div>
+        {searched !== null && (
+          <div className="text-[12.5px] text-slate-500">
+            全文检索「{q.trim()}」：{searched.length} 篇
+            <button onClick={() => { setQ(''); setSearched(null) }}
+              className="ml-2 text-emerald-700 hover:underline">清除</button>
+          </div>
+        )}
       </div>
 
       {shown.length === 0 ? (
         <EmptyState icon={BookOpen} title={docs.length === 0 ? '知识库还没有入库文档' : '没有匹配的文档'}
-          desc={docs.length === 0 ? '点上方「立即挖掘」跑一批，或每日 04:00 自动挖掘' : '换个目录或关键词'} />
+          desc={docs.length === 0 ? '点上方「立即挖掘」跑一批，或每日 04:00 自动挖掘' : '换个目录、状态或关键词'} />
       ) : (
         <div className="space-y-2">
-          {shown.map((d) => {
+          {vis.map((d) => {
             const open = expanded === d.id
             const low = d.status !== 'ready'
             return (
               <div key={d.id}
                 className={`cursor-pointer rounded-xl border bg-white px-4 py-3 transition ${open ? 'border-emerald-300' : low ? 'border-[#E8ECF0] opacity-70 hover:border-slate-300' : 'border-[#E8ECF0] hover:border-slate-300'}`}
-                onClick={() => setExpanded(open ? null : d.id)}>
+                onClick={() => openDoc(d)}>
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span className={`shrink-0 text-[17px] font-bold num-serif ${low ? 'text-slate-300' : 'text-[#0a2f24]'}`}>
                     {d.score ?? '—'}
@@ -845,15 +887,23 @@ function KbTab() {
                   <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${low ? 'text-slate-500' : 'text-slate-900'}`}>
                     《{d.title || `文档 #${d.id}`}》
                   </span>
-                  {low && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-400">未过线</span>}
-                  {d.category && (
-                    <span className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">{d.category}</span>
+                  {(d.used || []).length > 0 && (
+                    <span className="flex shrink-0 items-center gap-1">
+                      {d.used.slice(0, 2).map((u) => (
+                        <span key={u.id} title={`《${u.title}》${u.status === 'published' ? '（已发布）' : ''}`}
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                          →{u.kind_label} #{u.id}
+                        </span>
+                      ))}
+                      {d.used.length > 2 && <span className="text-[11px] text-slate-400">+{d.used.length - 2}</span>}
+                    </span>
                   )}
+                  {low && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-400">未过线</span>}
                   {d.author && <span className="shrink-0 text-xs text-slate-400">@{d.author}</span>}
                   <span className="shrink-0 text-[11px] text-slate-400">{relTime(d.created_at)}</span>
                 </div>
                 {d.why_good && (
-                  <div className="mt-1 line-clamp-1 text-[12.5px] text-slate-500">为什么好：{d.why_good}</div>
+                  <div className="mt-1 line-clamp-1 text-[12.5px] text-slate-500">用处：{d.why_good}</div>
                 )}
                 {open && (
                   <div className="mt-3 space-y-2 border-t border-[#E8ECF0] pt-3" onClick={(e) => e.stopPropagation()}>
@@ -885,12 +935,26 @@ function KbTab() {
                         </button>
                       </div>
                     )}
-                    {d.excerpt && (
-                      <div>
-                        <div className="text-[11px] tracking-wide text-slate-400">原文摘录（前 300 字，真货优先）</div>
-                        <div className="mt-1 text-[13px] leading-relaxed text-slate-700">{d.excerpt}…</div>
-                      </div>
-                    )}
+                    {(() => {
+                      const full = bodies[d.id]
+                      if (full === undefined) {
+                        return <div className="text-[12px] text-slate-400">读原文中…</div>
+                      }
+                      if (!full) {
+                        return d.excerpt ? (
+                          <div>
+                            <div className="text-[11px] tracking-wide text-slate-400">原文摘录（全文未入库）</div>
+                            <div className="mt-1 text-[13px] leading-relaxed text-slate-700">{d.excerpt}…</div>
+                          </div>
+                        ) : <div className="text-[12px] text-slate-400">原文未入库</div>
+                      }
+                      return (
+                        <div>
+                          <div className="text-[11px] tracking-wide text-slate-400">原文（{full.length} 字）</div>
+                          <div className="mt-1 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[#f7f8fa] px-3 py-2.5 text-[13px] leading-relaxed text-slate-700">{full}</div>
+                        </div>
+                      )
+                    })()}
                     {d.adapt_angle && (
                       <div>
                         <div className="text-[11px] tracking-wide text-slate-400">改编角度（AI 评估）</div>
@@ -907,6 +971,18 @@ function KbTab() {
                         </ul>
                       </div>
                     )}
+                    {(d.used || []).length > 0 && (
+                      <div>
+                        <div className="text-[11px] tracking-wide text-slate-400">已产出（防重复选材）</div>
+                        <ul className="mt-1 space-y-0.5">
+                          {d.used.map((u) => (
+                            <li key={u.id} className="text-[12.5px] text-slate-600">
+                              → {u.kind_label} #{u.id}《{u.title}》{u.status === 'published' ? '（已发布）' : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-x-4 text-[12px] text-slate-400">
                       {d.folder && <span>目录：{d.folder}</span>}
                       <span>{low ? '评分低于生成线，未入改编队列' : '已入改编队列（改编走公众号·清单）'}</span>
@@ -916,13 +992,33 @@ function KbTab() {
               </div>
             )
           })}
+          {shown.length > limit && (
+            <div className="pt-2 text-center">
+              <button onClick={() => setLimit(limit + 100)}
+                className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">
+                显示更多（已显 {vis.length} / {shown.length} 篇）
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       <div className="mt-6 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
         <div className="mb-2 text-[12px] font-medium tracking-wide text-slate-400">
-          目录管理（每日 04:00 自动翻一遍；目录上方 chips 可点 ✕ 移除，已入库文档不受影响）
+          目录管理（每日 04:00 自动翻一遍；移除目录不影响已入库文档）
         </div>
+        {(ov?.folders || []).length > 0 && (
+          <div className="mb-2.5 flex flex-wrap gap-1.5">
+            {ov!.folders.map((f) => (
+              <span key={f.folder_id}
+                className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[12px] text-slate-600">
+                {f.name}
+                <button title="移除该挖掘目录" onClick={() => removeFolder(f.folder_id, f.name)}
+                  className="text-slate-400 transition hover:text-red-500">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <input value={form.folder_id} onChange={(e) => setForm({ ...form, folder_id: e.target.value })}
             placeholder="folder_id（如 folder_7520…）"

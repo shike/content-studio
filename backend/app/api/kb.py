@@ -8,12 +8,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlmodel import Session, func, select
 
 from ..articles.ima_kb import kb_config, topic_folders
 from ..auth import require_user
 from ..db import engine
-from ..models import AppSetting, Job, Material, User
+from ..models import AppSetting, Content, Job, Material, MaterialUsage, User
+
+# 稿件 kind → 已产出标记文案（知识库行上「→视频稿 #12」这类）
+_KIND_LABEL = {"video_script": "视频稿", "long_article": "长文", "note": "笔记"}
 
 router = APIRouter(prefix="/api/kb")
 
@@ -85,25 +89,57 @@ def kb_overview(user: User = Depends(require_user)) -> dict:
         }
 
 
-@router.get("/docs")
-def kb_docs(user: User = Depends(require_user)) -> dict:
-    """知识库内容榜：全量 kb 文档（评分降序，低分含内、无分垫底）——高质量内容展示数据源。
+def _used_map(s: Session, material_ids: list[int]) -> dict[int, list[dict]]:
+    """kb 文档的产线引用（material_usages→contents）：已产出标记数据源。"""
+    out: dict[int, list[dict]] = {}
+    if not material_ids:
+        return out
+    usages = s.exec(select(MaterialUsage).where(  # type: ignore[attr-defined]
+        MaterialUsage.material_id.in_(material_ids))).all()  # type: ignore[attr-defined]
+    cids = sorted({u.target_id for u in usages if u.target_type == "content"})
+    cmap: dict[int, Content] = {}
+    if cids:
+        for c in s.exec(select(Content).where(Content.id.in_(cids))).all():  # type: ignore[attr-defined]
+            cmap[c.id or 0] = c
+    for u in usages:
+        if u.target_type != "content":
+            continue
+        c = cmap.get(u.target_id)
+        if c is None:
+            continue
+        out.setdefault(u.material_id, []).append({
+            "kind": c.kind, "kind_label": _KIND_LABEL.get(c.kind, c.kind),
+            "id": c.id, "title": (c.title or "")[:60], "status": c.status})
+    return out
 
-    字段取自 quality（score/folder/category/why_good/adapt_angle/best_quotes，挖掘器写入）；
-    一次全量返回（~几百篇量级），目录/关键词筛选在客户端做。
-    """
+
+@router.get("/docs")
+def kb_docs(q: str = "", user: User = Depends(require_user)) -> dict:
+    """知识库内容榜：全量 kb 文档（评分降序，低分含内、无分垫底）。
+
+    q=服务端检索（标题/作者/正文 ILIKE；空=全量）——正文 1.2 万字/篇，
+    全量带正文会把列表撑爆，故列表只带 300 字 excerpt，读全文走 /kb/docs/{id}。
+    每行带 used=产线引用标记（→视频稿/长文/笔记 #id）。"""
     with Session(engine) as s:
-        rows = s.exec(
-            select(Material).where(Material.origin_type == "kb_doc")).all()  # type: ignore[attr-defined]
+        stmt = select(Material).where(Material.origin_type == "kb_doc")  # type: ignore[attr-defined]
+        kw = q.strip().replace("%", "").replace("_", "")
+        if kw:
+            like = f"%{kw}%"
+            stmt = stmt.where(or_(  # type: ignore[arg-type]
+                Material.title.ilike(like),  # type: ignore[attr-defined]
+                Material.author.ilike(like),  # type: ignore[attr-defined]
+                Material.body.ilike(like)))  # type: ignore[attr-defined]
+        rows = s.exec(stmt).all()  # type: ignore[attr-defined]
+        used = _used_map(s, [m.id for m in rows if m.id is not None])
         items = [{
             "id": m.id, "title": m.title, "author": m.author or "",
             "folder": str((m.quality or {}).get("folder") or ""),
-            "category": str((m.quality or {}).get("category") or ""),
             "score": (m.quality or {}).get("score"),
             "why_good": str((m.quality or {}).get("why_good") or ""),
             "adapt_angle": str((m.quality or {}).get("adapt_angle") or ""),
             "best_quotes": (m.quality or {}).get("best_quotes") or [],
             "excerpt": (m.body or "").strip()[:300],
+            "used": used.get(m.id or 0, []),
             "status": m.status, "stage": m.stage,
             "created_at": str(m.created_at or "").replace(" ", "T"),
         } for m in rows]
@@ -116,6 +152,28 @@ def kb_docs(user: User = Depends(require_user)) -> dict:
         for d in items:
             d["score"] = _score(d)
         return {"items": items, "total": len(items)}
+
+
+@router.get("/docs/{doc_id}")
+def kb_doc(doc_id: int, user: User = Depends(require_user)) -> dict:
+    """单篇详情（展开行时懒加载）：含全文 body（入库 cap 1.2 万字）+ 产线引用标记。"""
+    with Session(engine) as s:
+        m = s.get(Material, doc_id)
+        if m is None or m.origin_type != "kb_doc":  # type: ignore[attr-defined]
+            raise HTTPException(status_code=404, detail="文档不存在")
+        used = _used_map(s, [doc_id]).get(doc_id, [])
+        q = m.quality or {}
+        return {
+            "id": m.id, "title": m.title, "author": m.author or "",
+            "folder": str(q.get("folder") or ""),
+            "score": q.get("score"),
+            "why_good": str(q.get("why_good") or ""),
+            "adapt_angle": str(q.get("adapt_angle") or ""),
+            "best_quotes": q.get("best_quotes") or [],
+            "body": m.body or "",
+            "used": used, "status": m.status, "stage": m.stage,
+            "created_at": str(m.created_at or "").replace(" ", "T"),
+        }
 
 
 class FolderIn(BaseModel):
