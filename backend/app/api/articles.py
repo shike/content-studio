@@ -128,6 +128,24 @@ def set_content_item_status(item_id: int, body: ItemStatusIn,
         return _kb_item_out(it)
 
 
+@router.post("/content-items/{item_id}/generate", status_code=202)
+async def adapt_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
+    """立即改编指定清单项（2026-11-18 用户裁决：手动生成直接执行，不等每日 05:00 队列）。
+
+    同一套改编器与闸（原创度/机检/双审校/标题评分）；跑完 stage=done 进「公众号 · 清单」。"""
+    from ..models import Material
+
+    with Session(engine) as s:
+        it = s.get(Material, item_id)
+        if it is None or it.origin_type != "kb_doc":
+            raise HTTPException(status_code=404, detail="清单项不存在")
+        if (it.stage or "") != "pending":
+            raise HTTPException(status_code=409, detail=f"当前状态 {it.stage} 不能改编（done=已改编过）")
+    job = await runner.submit("article_adapt", {"item_id": item_id},
+                              dedup_key=f"1:adapt:{item_id}")
+    return {"job_id": job.id}
+
+
 @router.post("/content-items/{item_id}/pin")
 def pin_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
     """置顶：「明天改编」——priority=9，改编器先取（再看质量分）。"""

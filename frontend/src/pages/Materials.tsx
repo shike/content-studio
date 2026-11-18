@@ -782,11 +782,12 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
   const toArticle = async (d: KbDoc) => {
     setError('')
     try {
-      await api(`/articles/content-items/${d.id}/status`, {
-        method: 'POST', body: JSON.stringify({ status: 'pending' }),
-      })
-      setMsg('已入公众号改编队列（每日 05:00 自动出长文）——队列在「公众号 · 清单」')
-    } catch (e) { setError(`入队失败：${apiErrText(e)}`) }
+      const r = await api<{ job_id: number }>(`/articles/content-items/${d.id}/generate`, { method: 'POST' })
+      setMsg(`长文改编中（任务 #${r.job_id}）——保骨架保原话成文约需几分钟`)
+      await waitJob(r.job_id, (j) => setMsg(`改编：${j.progress}% ${j.message || ''}`))
+      setMsg('长文已生成 → 「公众号 · 清单」排版待发')
+      load()
+    } catch (e) { setError(`改编失败：${apiErrText(e)}`) }
   }
 
   return (
@@ -974,7 +975,7 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
               {([
                 { v: 'script', title: '人设号 · 视频稿', desc: '改编角度做切角、金句做钩子、原文做事实底，产出口播脚本' },
                 { v: 'xhs', title: '小红书 · 图文笔记', desc: '以文档为原料生成笔记与封面，到小红书 tab 改稿后发布' },
-                { v: 'article', title: '公众号 · 改编长文', desc: '入每日 05:00 自动改编队列，保骨架保原话成长文' },
+                { v: 'article', title: '公众号 · 改编长文', desc: '立即改编：保骨架保原话成文 → 原创度闸 → 双审校 → 排版，完成后进「公众号 · 清单」' },
               ] as const).map((o) => (
                 <button key={o.v} onClick={() => setProd({ ...prod, dir: o.v })}
                   className={`block w-full rounded-xl border px-3.5 py-2.5 text-left transition ${prod.dir === o.v ? 'border-emerald-400 bg-emerald-50' : 'border-[#E8ECF0] hover:border-slate-300'}`}>
@@ -1025,8 +1026,8 @@ function KbTab({ onNavigate }: { onNavigate?: (k: string) => void }) {
 
             {prod.dir === 'article' && (
               <div className="mt-4 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
-                入队后由每日 05:00 的自动改编接手：按文档的改编角度保骨架、保原话成文，过原创度闸与事实审校后进「公众号 · 清单」。
-                队列按评分高低顺序消化，每天出一篇。
+                点「确认生成」立即开始改编（约几分钟）：按文档的改编角度保骨架、保原话，过原创度闸与双审校后排版，
+                完成进「公众号 · 清单」排版待发。每日 05:00 的自动队列照常运转，互不影响。
               </div>
             )}
 

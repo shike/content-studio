@@ -62,7 +62,9 @@ def _today() -> str:
 
 @register_executor("article_adapt", on_fail=_article_generate_fail)
 async def article_adapt(ctx: JobContext, payload: dict) -> dict:
-    """每日改编：清单取项（CAS）→ 拉源文全文 → 保骨架保原话换口径成文 → 原创度闸 → 机检 → 排版。"""
+    """每日改编：清单取项（CAS）→ 拉源文全文 → 保骨架保原话换口径成文 → 原创度闸 → 机检 → 排版。
+
+    payload.item_id 存在时改编指定清单项（手动生成直接执行），否则取队首（每日 05:00 调度）。"""
     from ..tenant_brand import brand_of
     from ..articles.ima_kb import fetch_full_doc, kb_config
 
@@ -79,12 +81,20 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 it.stage = "pending"
                 s.add(it)
         s.commit()
-        item = s.exec(select(Material).where(  # type: ignore[attr-defined]
-            Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
-            Material.stage == "pending")  # type: ignore[attr-defined]
-            .order_by(Material.quality.op('->')('priority').desc().nulls_last(),
-                      Material.quality.op('->')('score').desc().nulls_last(),
-                      Material.id)).first()  # type: ignore[attr-defined]
+        target_id = int(payload.get("item_id") or 0)  # 2026-11-18：手动生成直接改编指定项（知识库「生成内容」入口）
+        if target_id:
+            item = s.get(Material, target_id)
+            if item is None or item.origin_type != "kb_doc":  # type: ignore[attr-defined]
+                raise RuntimeError(f"改编目标不存在（#{target_id}）")
+            if (item.stage or "") != "pending":
+                raise RuntimeError(f"清单项 #{target_id} 状态为 {item.stage}，不重复改编")
+        else:
+            item = s.exec(select(Material).where(  # type: ignore[attr-defined]
+                Material.origin_type == "kb_doc",  # type: ignore[attr-defined]
+                Material.stage == "pending")  # type: ignore[attr-defined]
+                .order_by(Material.quality.op('->')('priority').desc().nulls_last(),
+                          Material.quality.op('->')('score').desc().nulls_last(),
+                          Material.id)).first()  # type: ignore[attr-defined]
         if item is None:
             s.add(PipelineLedger(day=_today(), pipeline="wechat_adapt", ok=True,
                               produced="", reason="清单空：无待改编项（宁缺勿滥）"))
