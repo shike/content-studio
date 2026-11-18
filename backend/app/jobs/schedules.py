@@ -171,11 +171,6 @@ async def _run_self_scan() -> str:
     return f"job #{job.id}"
 
 
-async def _run_daily_backup() -> str:
-    from ..db import backup_db
-    return f"快照 {backup_db('daily').name}"
-
-
 async def _run_media_cleanup() -> str:
     from ..materials.enrich import cleanup_completed_media
     n = await asyncio.to_thread(cleanup_completed_media)
@@ -253,8 +248,6 @@ async def _run_weekly_report() -> str:
 
 register_schedule(Schedule(key="data_weekly_report", label="视频表现周报（每日 5 点自愈，按周幂等）",
                            daily_hour=5, run=_run_weekly_report))
-register_schedule(Schedule(key="daily_backup", label="业务库每日备份",
-                           daily_hour=3, run=_run_daily_backup))
 register_schedule(Schedule(key="media_cleanup", label="拆解媒体清扫（每日 6 点）",
                            daily_hour=6, run=_run_media_cleanup))
 def _run_crawl_probe() -> Awaitable[str]:

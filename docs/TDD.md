@@ -98,7 +98,7 @@ channels/；纯能力（渲染器/图表/配图/机检/审校/ima 客户端）�
 ## 4. 配置与密钥（分层：.env 引导项 + 数据库运行时项）
 
 **分层原则**：`.env` 只放"进程启动前就必须知道"的引导/部署项；其余运行时可改项存数据库
-（`app_settings`，随每日备份进快照）。数据库值优先于 .env 默认值；密钥只写不读
+（`app_settings`，随部署前 pg_dump 快照）。数据库值优先于 .env 默认值；密钥只写不读
 （GET 只回报是否已配置）。
 
 | 键 | 默认 | 说明 |
@@ -323,7 +323,7 @@ content: drafting ──► review ──► ready ──► published
 - **服务重启自愈**：`queued` 原行回内存队列；`running` 排 90s 自动重试。
 - **归档制**：终态任务 7 天后 `archived=1`，不物理删除。
 
-**调度 REGISTRY（12 项，均为代码事实）**：
+**调度 REGISTRY（11 项，均为代码事实；`daily_backup` 已于 2026-11-18 按用户裁决下线——部署前 pg_dump 快照仍保留 5 份，手工备份=`python -m app.ops backup`）**：
 
 | 钟点 | key | 执行体 | 说明 |
 |---|---|---|---|
@@ -331,7 +331,6 @@ content: drafting ──► review ──► ready ──► published
 | 1:00 | `material_watch_scan` | `material_watch_scan` | 同行采集源扫描（`watch_scan_hour` 可配） |
 | 1:00 | `material_self_scan` | `material_self_scan` | 自有账号作品回流/风格素材 |
 | 2:00 | `material_hl_search` | `material_hl_search` | 同城组局号搜索矩阵 |
-| 3:00 | `daily_backup` | 内联 | `pg_dump` 每日快照 |
 | 4:00 | `material_kb_mine` | `material_kb_mine` | ima 知识库评估入素材（`ima_kb_enabled`） |
 | 4:00 | `data_creator_sync` | `data_creator_sync` | 自有账号日级指标（`creator_data_enabled`） |
 | 5:00 | `wechat_adapt_daily` | `wechat_adapt` | 清单取项改编成文（`ima_kb_enabled`） |
@@ -513,7 +512,7 @@ PY
   漏一个就会摸到生产。
 - **调度类执行器**必须在隔离实例至少触发一次真实调度；模块拆分后用 `dis` 全量扫描
   本次涉及模块的顶层函数与嵌套 code object 的 LOAD_GLOBAL，逐一核对 globals 可解析。
-- **数据卫生**：测试残留=0；生产对账走每日备份与失败中台指纹。
+- **数据卫生**：测试残留=0；生产对账走部署前快照与失败中台指纹。
 - **审计对账清单**：
   - [ ] openapi 端点 ↔ §6 逐条一致；前端 api() 每个路径都有后端实现
   - [ ] 页面零报错/未登录业务页被门禁拦截/队列仅手动进入
