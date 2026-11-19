@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, MessageSquare, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
-import { EmptyState } from '../components'
+import { ConfirmDeleteButton, EmptyState } from '../components'
 import MaterialDossier from './MaterialDossier'
 
 /**
@@ -68,6 +68,24 @@ export default function HotComments() {
       .catch((e) => setGen((m) => ({ ...m, [key]: { phase: 'done', label: '', text: `生成失败：${apiErrText(e)}` } })))
   }
 
+  const remove = async (h: HotComment) => {
+    setMsg(''); setError('')
+    try {
+      const r = await api<{ ok: boolean; removed: string; remaining: number }>(
+        `/kb/hot_comments/${h.material_id}/${h.idx}`, { method: 'DELETE' })
+      setMsg(`已删除热评「${(r.removed || '').slice(0, 40)}」（该视频评论存档剩 ${r.remaining} 条）`)
+      setExpanded(null)
+      setGen((m) => {
+        const next = { ...m }
+        delete next[`${h.material_id}:${h.idx}`]
+        return next
+      })
+      load()
+    } catch (e) {
+      setError(`删除失败：${apiErrText(e)}`)
+    }
+  }
+
   const shown = showAll ? items : items.slice(0, 10)
 
   return (
@@ -100,6 +118,9 @@ export default function HotComments() {
                   <span className="ml-auto flex shrink-0 items-center gap-0.5 text-slate-400">
                     {open ? <>收起 <ChevronUp size={12} /></> : <>原视频拆解 <ChevronDown size={12} /></>}
                   </span>
+                  <ConfirmDeleteButton onConfirm={() => remove(h)}
+                    title="删除这条热评（只从评论存档摘掉，不删视频素材）"
+                    confirmText="确认删除" size={12} />
                 </div>
                 {open && <MaterialDossier materialId={h.material_id} highlightIdx={h.idx}
                   onDeleted={() => { setExpanded(null); load() }} />}

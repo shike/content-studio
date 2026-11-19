@@ -239,7 +239,7 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
     高赞评论=受众用赞投票的共鸣点，口播选题源。准入线赞数 AppSetting.hot_comment_bar（默认 50）。
     口径收窄（2026-11-18 用户裁决）：**只出监控清单作者**（active peer_account，扫描入库
     按 source_id、存量按作者名双匹配）——监控号自己的评论存档太薄（273 个视频待补采），
-    扩量靠评论补采任务+存量回填。"""
+    扩量靠评论补采任务+存量回填。评论存档多版本时只取最新版（否则同条评论重复出现）。"""
     from ..models import MaterialAnalysis, Source
 
     with Session(engine) as s:
@@ -254,9 +254,14 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
             Source.platform == "douyin")).all()  # type: ignore[attr-defined]
         mon_ids = {x.id for x in mon if x.id is not None}
         mon_names = {x.name for x in mon}
-        items: list[dict] = []
+        latest: dict[int, MaterialAnalysis] = {}
         for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
                 MaterialAnalysis.kind == "comments")).all():  # type: ignore[attr-defined]
+            cur = latest.get(a.material_id)
+            if cur is None or (a.version or 0) > (cur.version or 0):
+                latest[a.material_id] = a
+        items: list[dict] = []
+        for a in latest.values():
             m = s.get(Material, a.material_id)
             if m is None or ((m.source_id or 0) not in mon_ids
                              and (m.author or "") not in mon_names):
@@ -275,6 +280,33 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
                                   "source": m.title or ""})
     items.sort(key=lambda x: -x["likes"])
     return {"items": items[:50], "bar": bar, "total": len(items)}
+
+
+@router.delete("/hot_comments/{material_id}/{idx}")
+def delete_hot_comment(material_id: int, idx: int,
+                       user: User = Depends(require_user)) -> dict:
+    """删掉一条热门评论（2026-11-19 用户要求）：从该素材最新版评论存档里摘掉，
+    雷达不再出现。只动存档条目，不删素材本身；历史版本不动（列表只认最新版）。"""
+    from ..models import MaterialAnalysis
+
+    with Session(engine) as s:
+        a = s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+            MaterialAnalysis.material_id == material_id,  # type: ignore[attr-defined]
+            MaterialAnalysis.kind == "comments")  # type: ignore[attr-defined]
+            .order_by(MaterialAnalysis.version.desc())).first()  # type: ignore[attr-defined]
+        if a is None:
+            raise HTTPException(status_code=404, detail="该素材没有评论存档")
+        payload = dict(a.payload or {})
+        items = list(payload.get("items") or [])
+        if idx < 0 or idx >= len(items):
+            raise HTTPException(status_code=404, detail="这条评论已不存在（列表可能已刷新）")
+        removed = items.pop(idx)
+        payload["items"] = items
+        a.payload = payload
+        s.add(a)
+        s.commit()
+    text = str((removed or {}).get("t") or "")[:200]
+    return {"ok": True, "removed": text, "remaining": len(items)}
 
 
 class FolderIn(BaseModel):
