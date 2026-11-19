@@ -26,6 +26,7 @@ from .wechat import (
     _kb_style_violations,
 )
 from ..articles.quality import (
+    _KB_METAPHOR_TERMS,
     _structure_violations,
     dedupe_paragraphs,
     min_chars_or_raise,
@@ -211,6 +212,17 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         title = lines[0].lstrip()[2:].strip() or src_title[:30]
         md_text = "\n".join(lines[1:]).strip()
         min_chars_or_raise(md_text, "改编稿")
+        if any(w in title for w in _KB_METAPHOR_TERMS):
+            ctx.set_progress(32, "标题含比喻造词，重拟")
+            td = await gateway.complete_json(
+                [{"role": "user", "content":
+                  "为这篇公众号长文重拟一个判断句标题：≤32 字，直接说判断或结论，克制具体；"
+                  "禁用比喻造词（承重动作/死法/判死刑/没活/赘生物）与 AI 套话。\n正文：\n"
+                  + md_text[:3000] + '\n输出 JSON：{"title": "..."}'}],
+                max_tokens=512, thinking="disabled")
+            nt = str((td or {}).get("title") or "").strip()[:40]
+            if nt:
+                title = nt
 
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
         ctx.set_progress(55, "原创度检测（与源文比对）")
