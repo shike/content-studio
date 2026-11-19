@@ -53,8 +53,10 @@ def _hotcomment_style_check(body: str) -> list[str]:
         out.append(f"共 {len(lines)} 句，超过 9 句——砍到 9 句以内，只留一个故事")
     if len(lines) < 5:
         out.append(f"只有 {len(lines)} 句，太薄——补到 5 句以上，只补这个故事的事实")
-    if re.search(r"你们[^。\n]{0,8}(做AI交付|做交付|FDE|同行)", body):
-        out.append("在对 FDE 同行说话——你的观众是不懂代码的传统行业人，改成对他们说")
+    if re.search(r"你们[^。\n]{0,10}(卖AI|搞AI|做AI|做交付|交付|FDE|同行)", body) \
+            or "你们这种卖法" in body or "你们先别笑" in body:
+        out.append("在对 AI 卖家/FDE 同行说话——你的观众是不懂代码的传统行业人；"
+                   "骂卖家改用“他们/这些卖AI的”，观众是旁边听的人")
     for p in ("我跟你讲的很直接一点", "这才是最可怕的事情", "这个才是最吓人的东西"):
         if p in body:
             out.append(f"照抄了样本原句「{p}」——换成你自己的话")
