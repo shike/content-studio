@@ -198,7 +198,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                                                 PERSONA=persona_text,
                                                 SOURCE=source, ANGLE=angle,
                                                 QUOTES=quotes_block, KIT=kit_text)}],
-            max_tokens=40000, thinking="enabled", timeout=1200)
+            max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理（40000 预算仍空正文），关掉后 83s 正常出稿
         body = _strip_fence(body)
         lines = body.split("\n")
         if not lines or not lines[0].lstrip().startswith("# "):
@@ -226,7 +226,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                       "缺失环节：\n- " + "\n- ".join(missing) +
                       "\n\n资料包对照：\n" + kit_text +
                       "\n\n成文全文（在此基础修订，输出完整修订后全文，# 标题开头）：\n" + body}],
-                    max_tokens=40000, thinking="enabled", timeout=1200))
+                    max_tokens=20000, thinking="disabled"))  # 2026-11-19：4 万字源文开思考链会无限推理（40000 预算仍空正文），关掉后 83s 正常出稿
                 lines = body.split("\n")
                 if not lines or not lines[0].lstrip().startswith("# "):
                     raise TransientError("深度补写输出缺「# 标题」首行，稍后自动重试")
@@ -256,7 +256,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                       "缺失章节：\n- " + "\n- ".join(missing_ch) +
                       "\n\n源文全文：\n" + source +
                       "\n\n成文全文（在此基础修订，输出完整修订后全文，# 标题开头）：\n" + body}],
-                    max_tokens=40000, thinking="enabled", timeout=1200))
+                    max_tokens=20000, thinking="disabled"))  # 2026-11-19：4 万字源文开思考链会无限推理（40000 预算仍空正文），关掉后 83s 正常出稿
                 lines = body.split("\n")
                 if not lines or not lines[0].lstrip().startswith("# "):
                     raise TransientError("章节补写输出缺「# 标题」首行，稍后自动重试")
