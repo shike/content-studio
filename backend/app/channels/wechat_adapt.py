@@ -60,6 +60,33 @@ def _dup_ratio(adapted: str, source: str) -> tuple[float, list[str]]:
     return (round(hit / total * 100, 1) if total else 0.0), hits[:8]
 
 
+_CHAPTER_RE = re.compile(r"^#{1,3}\s*第[一二三四五六七八九十百]+章\s*[　:：]?\s*(.{2,40})$", re.M)
+
+
+def _chapter_terms(source: str) -> list[str]:
+    """源文章名核心词（「## 第五章　侦察：…」→「侦察」）。非分章文档返回空。"""
+    terms: list[str] = []
+    for m in _CHAPTER_RE.finditer(source or ""):
+        t = (m.group(1) or "").strip()
+        key = re.split(r"[：:，,、\s（(]", t)[0][:8]
+        if len(key) >= 2:
+            terms.append(key)
+    return list(dict.fromkeys(terms))
+
+
+def _enumeration_gaps(md: str, terms: list[str]) -> list[str]:
+    """行内同时出现 ≥3 个章名 = 文章在列举阶段；列举过的章必须在正文再次出现（≥2 次）。
+    返回只出现在列举行、没有后续内容的章名（2026-11-19「五阶段只写三段」事故）。"""
+    if len(terms) < 3:
+        return []
+    for line in (md or "").splitlines():
+        present = [t for t in terms if t in line]
+        if len(present) >= 3:
+            gaps = [t for t in present if (md or "").count(t) <= 1]
+            return gaps
+    return []
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -252,8 +279,18 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
 
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         mech = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
+        chapter_terms = _chapter_terms(source)
+
+        def _with_enum_gaps(hard_list: list[str], text: str) -> list[str]:
+            gaps = _enumeration_gaps(text, chapter_terms)
+            if gaps:
+                return [f"列举了阶段（{'、'.join(gaps)}）但正文没有对应内容：每一环至少 2~4 句，"
+                        f"篇幅不够就删掉列举，不许列了又缺"] + hard_list
+            return hard_list
+
         ctx.set_progress(80, "合并审校（事实/归属/体裁/语言/口吻）")
         hard, soft = await review_adapt(md_text, source)
+        hard = _with_enum_gaps(hard, md_text)
         if mech:
             soft = [f"机检：{v}" for v in mech[:6]] + soft
         for _round in range(2):  # 最多两轮修订：修订本身可能引入新问题，复审兜底
@@ -265,6 +302,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
             hard, soft = await review_adapt(md_text, source)
+            hard = _with_enum_gaps(hard, md_text)
             mech2 = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
             if mech2:
                 soft = [f"机检：{v}" for v in mech2[:6]] + soft
@@ -293,11 +331,14 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             ctx.set_progress(100, f"审校未过（hard {len(hard)} 项），本篇不进待发")
             return {"adapted": False, "issues": len(hard), "message": "审校未过"}
 
-        # ── 收尾长度兜底（修订可能加长；超线再压一次，压完不再审，只删不增）──
-        if len(md_text) > _MAX_CHARS:
-            t = await _trim_once(md_text, 1)
-            if t:
-                md_text = t
+        # ── 收尾长度兜底（修订可能加长；超线最多再压两轮，压完不再审，只删不增）──
+        for _round in range(2):
+            if len(md_text) <= _MAX_CHARS:
+                break
+            t = await _trim_once(md_text, _round + 1)
+            if not t:
+                break
+            md_text = t
 
         # ── 结构兜底：完全重复的长段确定性去重（#56 实测：检验清单同时出现在开头与结尾）──
         deduped = dedupe_paragraphs(md_text)
