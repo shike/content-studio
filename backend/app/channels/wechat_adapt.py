@@ -60,19 +60,6 @@ def _dup_ratio(adapted: str, source: str) -> tuple[float, list[str]]:
     return (round(hit / total * 100, 1) if total else 0.0), hits[:8]
 
 
-_CHAPTER_RE = re.compile(r"^#{1,3}\s*第[一二三四五六七八九十百]+章\s*[　:：]?\s*(.{2,40})$", re.M)
-
-
-def _chapter_titles(source: str) -> list[str]:
-    """源文章节标题（「## 第五章　侦察：…」→「侦察：…」）。非分章文档返回空。"""
-    titles: list[str] = []
-    for m in _CHAPTER_RE.finditer(source or ""):
-        t = (m.group(1) or "").strip()
-        if len(t) >= 2:
-            titles.append(t[:40])
-    return list(dict.fromkeys(titles))
-
-
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -263,33 +250,29 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         # ── 合并审校（2026-11-19 收拢：hard=事实/归属/整章缺失，soft=语言/表述建议）──
         from ..articles.review import review_adapt, revise_once
 
-        chapters = _chapter_titles(source)
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         mech = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
-        ctx.set_progress(80, "合并审校（事实/归属/章节/语言/口吻）")
-        hard, soft, missing_ch = await review_adapt(md_text, source, chapters)
+        ctx.set_progress(80, "合并审校（事实/归属/体裁/语言/口吻）")
+        hard, soft = await review_adapt(md_text, source)
         if mech:
             soft = [f"机检：{v}" for v in mech[:6]] + soft
-        if hard or soft or missing_ch:
-            ctx.set_progress(82, f"审校命中 hard {len(hard)}/soft {len(soft)}/缺 {len(missing_ch)} 章，定向修订")
+        if hard or soft:
+            ctx.set_progress(82, f"审校命中 hard {len(hard)}/soft {len(soft)}，定向修订")
             fix_list = list(hard) + list(soft)
-            if missing_ch:
-                fix_list.append("缺章：成文没有实质覆盖以下章节——" + "、".join(missing_ch)
-                                + "。补写这些阶段（每章至少一段，讲核心判断与关键动作），其余原样保留。")
             revised = await revise_once(md_text, fix_list)
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
-            hard, soft, missing_ch = await review_adapt(md_text, source, chapters)
+            hard, soft = await review_adapt(md_text, source)
             mech2 = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
             if mech2:
                 soft = [f"机检：{v}" for v in mech2[:6]] + soft
         soft_left = soft
-        if hard or missing_ch:
+        if hard:
             with Session(engine) as s:
                 it0 = s.get(Material, item_id)
                 fails = (it0.note or "").count("审校未过") if it0 is not None else 0
             tag = f"审校未过×{fails + 1}"
-            brief = "；".join(hard[:2]) or ("缺章：" + "、".join(missing_ch))
+            brief = "；".join(hard[:2])
             _release(f"审校二次未过（{brief}），清单项 #{item_id} 落 low 不再自动重试"
                      if fails >= 1 else f"审校未过（{brief}），退回清单 #{item_id}",
                      item_status="low" if fails >= 1 else "pending", tag=tag)
@@ -306,8 +289,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                     s.add(art)
                     s.commit()
             ctx.set_progress(100, f"审校未过（hard {len(hard)} 项），本篇不进待发")
-            return {"adapted": False, "issues": len(hard),
-                    "missing_chapters": missing_ch, "message": "审校未过"}
+            return {"adapted": False, "issues": len(hard), "message": "审校未过"}
 
         # ── 收尾长度兜底（修订可能加长；超线再压一次，压完不再审，只删不增）──
         if len(md_text) > _MAX_CHARS:

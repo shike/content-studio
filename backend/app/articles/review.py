@@ -12,9 +12,8 @@ from ..prompts import render
 from .quality import strip_fence as _strip_fence
 
 
-async def review_adapt(md: str, source: str, chapters: list[str]
-                       ) -> tuple[list[str], list[str], list[str]]:
-    """合并审校：返回 (hard 问题, soft 建议, 未实质覆盖的章名)。
+async def review_adapt(md: str, source: str) -> tuple[list[str], list[str]]:
+    """合并审校：返回 (hard 问题, soft 建议)。
 
     hard=必须改，二次仍不过退回清单；soft=语言/表述建议，残余只落 note 不拦发布。
     源文必须给全（2026-11-19 事故：只喂前 9000 字，分章手册后半本的案例被当成编造——
@@ -23,18 +22,15 @@ async def review_adapt(md: str, source: str, chapters: list[str]
     try:
         v = await gateway.complete_json(
             [{"role": "user", "content": render(
-                "article_adapt_review",
-                CHAPTERS="\n".join(f"- {c}" for c in chapters) or "（非分章文档）",
-                DRAFT=md[:9000], SOURCE=source[:40000])}],
+                "article_adapt_review", DRAFT=md[:9000], SOURCE=source[:40000])}],
             max_tokens=2048, thinking="disabled")
         def _pick(key: str, cap: int, limit: int = 200) -> list[str]:
             return [str(x).strip()[:limit] for x in (v or {}).get(key) or []
                     if str(x).strip()][:cap]
-        return (_pick("hard", 6), _pick("soft", 8),
-                _pick("missing_chapters", 6, 40))
+        return _pick("hard", 6), _pick("soft", 8)
     except Exception as e:  # noqa: BLE001
         print(f"[review] 合并审校失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
-        return [], [], []
+        return [], []
 
 
 async def revise_once(md: str, issues: list[str]) -> str | None:
