@@ -36,7 +36,11 @@ def _now() -> datetime:
 def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
     """拆解时抓高赞评论原文（R1.4 进料：评论区=观点的矿脉）。拦 comment/list XHR
     免登录，首屏即热序；采深轮滚动评论容器翻页（40 条/12s 静默窗/60s 截止）；
-    去重按赞排序取前 cap 条 [{t,d}]。失败抛 RuntimeError（调用方不挡拆解）。"""
+    去重按赞排序取前 cap 条 [{t,d}]。
+
+    零评论 ≠ 抓取失败（2026-11-19）：接口正常回 total=0 返回 []，由调用方落空档案
+    （否则空评论区视频被计 3 次失败永久停采——实测昨晚 13 条全「失败」全因 0 评论）。
+    只有接口完全没回（网络/风控）才抛 RuntimeError。"""
     from playwright.sync_api import sync_playwright
 
     from ..browser import launch, ua
@@ -47,6 +51,7 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
     rid = m.group(1)
     comments: list[dict] = []
     seen: set[str] = set()
+    api_total = -1  # 接口回包里的 total；-1=接口没回
     with sync_playwright() as p:
         browser = launch(p)
         try:
@@ -55,9 +60,12 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             page = ctx.new_page()
 
             def on_response(resp):
+                nonlocal api_total
                 try:
                     if "aweme/v1/web/comment/list/" in resp.url and len(comments) < 80:
                         d = resp.json()
+                        if d.get("status_code") == 0:
+                            api_total = int(d.get("total") or 0)
                         for c in (d.get("comments") or []):
                             t = (c.get("text") or "").strip()
                             if t and t not in seen:
@@ -73,6 +81,8 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             last_n, quiet = 0, 0
             while time.monotonic() < deadline:
                 page.wait_for_timeout(3000)
+                if api_total == 0:
+                    break  # 接口已明确 0 条，不用再滚动等
                 if not comments:
                     try:
                         page.mouse.wheel(0, 600)
@@ -100,6 +110,8 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
         finally:
             browser.close()
     if not comments:
+        if api_total == 0:
+            return []  # 评论区正常但 0 条：空档也算采到（调用方落空档案，不再计失败）
         raise RuntimeError("未拦到评论（评论区可能已关闭或接口未触发）")
     comments.sort(key=lambda c: c["d"], reverse=True)
     return comments[:cap]
@@ -232,10 +244,13 @@ async def run_analyze(ctx: JobContext, material_id: int) -> dict:
                                {"items": top_comments}, model="xhr")
                 q = dict(m.quality or {})
                 q["comment_kind"], q["leadgen_share"] = kind, share
+                q["comment_empty"] = not top_comments
                 m.quality = q
                 s.add(m)
                 s.commit()
-            if kind == "leadgen_ore":
+            if not top_comments:
+                ctx.set_progress(31, "评论区 0 条（空评论区落空档案，不算抓取失败）")
+            elif kind == "leadgen_ore":
                 ctx.set_progress(31, f"评论区判获客矿（求学密度 {share:.0%}）——素材归获客线，人设号不吃")
                 note = _rejudge_source_type(tenant_id, (m.source_id if m else None), author)
                 if note:

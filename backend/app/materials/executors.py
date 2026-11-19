@@ -251,6 +251,7 @@ async def comment_recapture(ctx: JobContext, payload: dict) -> dict:
                 q = dict(row.quality or {})
                 q["comment_fails"] = 0
                 q["comment_kind"], q["leadgen_share"] = kind, share
+                q["comment_empty"] = not comments
                 row.quality = q
                 s.add(row)
                 s.commit()
