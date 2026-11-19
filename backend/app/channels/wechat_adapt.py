@@ -260,35 +260,36 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 break
             md_text = t
 
-        # ── 合并审校（2026-11-19 收拢：事实/归属/章节/语言/口吻一次审，一份问题清单）──
+        # ── 合并审校（2026-11-19 收拢：hard=事实/归属/整章缺失，soft=语言/表述建议）──
         from ..articles.review import review_adapt, revise_once
 
         chapters = _chapter_titles(source)
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         mech = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
         ctx.set_progress(80, "合并审校（事实/归属/章节/语言/口吻）")
-        issues, missing_ch = await review_adapt(md_text, source, chapters)
+        hard, soft, missing_ch = await review_adapt(md_text, source, chapters)
         if mech:
-            issues = [f"机检：{v}" for v in mech[:6]] + issues
-        if issues or missing_ch:
-            ctx.set_progress(82, f"审校命中 {len(issues)} 项、缺 {len(missing_ch)} 章，定向修订")
-            fix_list = list(issues)
+            soft = [f"机检：{v}" for v in mech[:6]] + soft
+        if hard or soft or missing_ch:
+            ctx.set_progress(82, f"审校命中 hard {len(hard)}/soft {len(soft)}/缺 {len(missing_ch)} 章，定向修订")
+            fix_list = list(hard) + list(soft)
             if missing_ch:
                 fix_list.append("缺章：成文没有实质覆盖以下章节——" + "、".join(missing_ch)
                                 + "。补写这些阶段（每章至少一段，讲核心判断与关键动作），其余原样保留。")
             revised = await revise_once(md_text, fix_list)
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
-            issues, missing_ch = await review_adapt(md_text, source, chapters)
+            hard, soft, missing_ch = await review_adapt(md_text, source, chapters)
             mech2 = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
             if mech2:
-                issues = [f"机检：{v}" for v in mech2[:6]] + issues
-        if issues or missing_ch:
+                soft = [f"机检：{v}" for v in mech2[:6]] + soft
+        soft_left = soft
+        if hard or missing_ch:
             with Session(engine) as s:
                 it0 = s.get(Material, item_id)
                 fails = (it0.note or "").count("审校未过") if it0 is not None else 0
             tag = f"审校未过×{fails + 1}"
-            brief = "；".join(issues[:2]) or ("缺章：" + "、".join(missing_ch))
+            brief = "；".join(hard[:2]) or ("缺章：" + "、".join(missing_ch))
             _release(f"审校二次未过（{brief}），清单项 #{item_id} 落 low 不再自动重试"
                      if fails >= 1 else f"审校未过（{brief}），退回清单 #{item_id}",
                      item_status="low" if fails >= 1 else "pending", tag=tag)
@@ -304,8 +305,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                     art.payload = p
                     s.add(art)
                     s.commit()
-            ctx.set_progress(100, f"审校未过（{len(issues)} 项），本篇不进待发")
-            return {"adapted": False, "issues": len(issues),
+            ctx.set_progress(100, f"审校未过（hard {len(hard)} 项），本篇不进待发")
+            return {"adapted": False, "issues": len(hard),
                     "missing_chapters": missing_ch, "message": "审校未过"}
 
         # ── 收尾长度兜底（修订可能加长；超线再压一次，压完不再审，只删不增）──
@@ -343,12 +344,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             p = dict(art.payload or {})
             p["html"] = render_wechat_html(art.body)
             p["article_state"] = "rendered"
-            if lang_left:  # 语言审校修订后仍有残留：落 note 让用户终审时知道（不拦发布）
-                p["note"] = (p.get("note") or "") + "｜语言审校残留：" + "；".join(
-                    x[:44] for x in lang_left[:2])[:200]
-            if reader_points:  # 读者审校=编辑口味建议，落 note 给用户终审参考，不拦发布
-                p["note"] = (p.get("note") or "") + "｜读者审校建议：" + "；".join(
-                    x[:44] for x in reader_points[:2])[:200]
+            if soft_left:  # 语言/表述建议修订后仍有残留：落 note 给用户终审参考（不拦发布）
+                p["note"] = (p.get("note") or "") + "｜语言建议残留：" + "；".join(
+                    x[:44] for x in soft_left[:2])[:200]
             art.payload = p
             art.status = "ready"
             s.add(art)

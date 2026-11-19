@@ -12,9 +12,11 @@ from ..prompts import render
 from .quality import strip_fence as _strip_fence
 
 
-async def review_adapt(md: str, source: str, chapters: list[str]) -> tuple[list[str], list[str]]:
-    """合并审校：返回 (问题清单, 未实质覆盖的章名)。
+async def review_adapt(md: str, source: str, chapters: list[str]
+                       ) -> tuple[list[str], list[str], list[str]]:
+    """合并审校：返回 (hard 问题, soft 建议, 未实质覆盖的章名)。
 
+    hard=必须改，二次仍不过退回清单；soft=语言/表述建议，残余只落 note 不拦发布。
     源文必须给全（2026-11-19 事故：只喂前 9000 字，分章手册后半本的案例被当成编造——
     烘焙案例的 CFO/130 万/60 万全在源文 15000 字处，闸却判「源文没有」，整篇误杀）。
     """
@@ -25,14 +27,14 @@ async def review_adapt(md: str, source: str, chapters: list[str]) -> tuple[list[
                 CHAPTERS="\n".join(f"- {c}" for c in chapters) or "（非分章文档）",
                 DRAFT=md[:9000], SOURCE=source[:40000])}],
             max_tokens=2048, thinking="disabled")
-        issues = [str(x).strip()[:200] for x in (v or {}).get("issues") or []
-                  if str(x).strip()][:12]
-        missing = [str(x).strip()[:40] for x in (v or {}).get("missing_chapters") or []
-                   if str(x).strip()][:6]
-        return issues, missing
+        def _pick(key: str, cap: int, limit: int = 200) -> list[str]:
+            return [str(x).strip()[:limit] for x in (v or {}).get(key) or []
+                    if str(x).strip()][:cap]
+        return (_pick("hard", 6), _pick("soft", 8),
+                _pick("missing_chapters", 6, 40))
     except Exception as e:  # noqa: BLE001
         print(f"[review] 合并审校失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
-        return [], []
+        return [], [], []
 
 
 async def revise_once(md: str, issues: list[str]) -> str | None:
