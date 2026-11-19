@@ -57,6 +57,8 @@ def _hotcomment_style_check(body: str) -> list[str]:
             or "你们这种卖法" in body or "你们先别笑" in body:
         out.append("在对 AI 卖家/FDE 同行说话——你的观众是不懂代码的传统行业人；"
                    "骂卖家改用“他们/这些卖AI的”，观众是旁边听的人")
+    if "讲这话的人" in body or "素材博主" in body:
+        out.append("在攻击素材作者——素材是拿来用的，不是靶子")
     for p in ("我跟你讲的很直接一点", "这才是最可怕的事情", "这个才是最吓人的东西"):
         if p in body:
             out.append(f"照抄了样本原句「{p}」——换成你自己的话")
@@ -180,6 +182,17 @@ def _voice_block(rows: list) -> str:
     return "\n".join(lines)
 
 
+_APPROVED_SAMPLE = """县城的老板 把AI当成骗局
+荆门一个两百人酒店集团的二代说
+他爸觉得AI跟Web3一样
+不是他爸土
+是他连数字化都没做完
+大城市的客户 上AI一步就到
+县城企业要迈两步
+第一步没人帮他迈
+谁帮县城企业迈第一步 谁就拿下这个市场"""
+
+
 def _good_samples_block(rows: list) -> str:
     """号主自己的爆款全文 + 逐条标注（只学怎么说，不学说什么）。"""
     out = []
@@ -199,6 +212,15 @@ def _good_samples_block(rows: list) -> str:
             marks.append(f"最后：{sa['closing_style']}")
         if marks:
             out.append("标注：\n" + "\n".join(f"- {m}" for m in marks))
+    out.append(
+        "【样本3（用户 2026-11-19 认可：简单判断型，不是每条都要骂）】\n"
+        + _APPROVED_SAMPLE +
+        "\n标注：\n"
+        "- 第一句：一句判断，不是开火。\n"
+        "- 中间：一个故事（荆门二代）+ 一个对比（一步/两步）。\n"
+        "- 结尾：一句判断（谁帮第一步谁拿下）。\n"
+        "- 没有骂人，没有尾钩。"
+    )
     return "\n\n".join(out)
 
 
