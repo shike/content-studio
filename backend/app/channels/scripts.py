@@ -42,6 +42,25 @@ def _speech_form_check(body: str) -> dict:
             "long": sum(1 for l in lens if l > 20), "sentences": len(units)}
 
 
+def _hotcomment_style_check(body: str) -> list[str]:
+    """口播结构闸（v4.2 2026-11-19 用户定版）：五到九句、对普通观众说话、不照抄样本原句。
+    提示词里的规矩靠模型自觉不可靠——代码兜底，不过定向重写一次，仍不过不建稿。"""
+    import re
+
+    lines = [x.strip() for x in (body or "").split("\n") if x.strip()]
+    out: list[str] = []
+    if len(lines) > 9:
+        out.append(f"共 {len(lines)} 句，超过 9 句——砍到 9 句以内，只留一个故事")
+    if len(lines) < 5:
+        out.append(f"只有 {len(lines)} 句，太薄——补到 5 句以上，只补这个故事的事实")
+    if re.search(r"你们[^。\n]{0,8}(做AI交付|做交付|FDE|同行)", body):
+        out.append("在对 FDE 同行说话——你的观众是不懂代码的传统行业人，改成对他们说")
+    for p in ("我跟你讲的很直接一点", "这才是最可怕的事情", "这个才是最吓人的东西"):
+        if p in body:
+            out.append(f"照抄了样本原句「{p}」——换成你自己的话")
+    return out
+
+
 async def _kb_ammunition(comment: str) -> str:
     """热评 → 知识库弹药：按热评主题从入选清单挑 1~3 篇，抽资料包拼弹药块（无相关返回空串）。"""
     from sqlmodel import Session, select
@@ -303,13 +322,19 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
     turn = str(data.get("turn") or "")[:160]
 
     chk = _speech_form_check(body)
-    if not chk["pass"]:
-        ctx.set_progress(70, f"形态未过（均 {chk['avg']} 字/句·最长 {chk['max']}·书面标点 {chk['book']}），定向重写")
+    style_issues = _hotcomment_style_check(body)
+    if not chk["pass"] or style_issues:
+        reasons: list[str] = []
+        if not chk["pass"]:
+            reasons.append(
+                f"平均句长 {chk['avg']} 字/句（目标 ≤13）、最长句 {chk['max']} 字（目标 ≤20）、"
+                f"书面标点 {chk['book']} 处（目标 0）")
+        reasons.extend(style_issues)
+        ctx.set_progress(70, "结构未过，定向重写")
         again = await gateway.complete_json(
             [{"role": "user", "content": prompt +
-              f"\n\n【返工·形态读稿闸】上一稿形态不达标：平均句长 {chk['avg']} 字/句（目标 ≤13）、"
-              f"最长句 {chk['max']} 字（目标 ≤20）、书面标点 {chk['book']} 处（目标 0）。"
-              "只逐句拆短重写，意思和顺序不变；只输出 {\"body\": \"完整口播稿\"}。"}],
+              "\n\n【返工·结构闸】上一稿不达标：\n- " + "\n- ".join(reasons) +
+              "\n只改这些问题，不许加内容、不许换故事；只输出 {\"body\": \"完整口播稿\"}。"}],
             max_tokens=20000)
         body2 = str((again or {}).get("body") or "").strip()
         if not body2:
@@ -319,6 +344,13 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
         if body2:
             body = body2
             chk = _speech_form_check(body)
+            style_issues = _hotcomment_style_check(body)
+
+    if not chk["pass"] or style_issues:
+        reason = "；".join(style_issues) or (
+            f"形态未过（均 {chk['avg']}/最长 {chk['max']}/标点 {chk['book']}）")
+        ctx.set_progress(100, f"结构仍未过，不建稿：{reason[:70]}")
+        return {"skipped": True, "reason": reason[:160], "material_id": material_id}
 
     with Session(_engine) as s:
         script = new_script_content(
