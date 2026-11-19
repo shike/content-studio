@@ -343,6 +343,47 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         except Exception as e:  # noqa: BLE001 润色失败不影响成文
             print(f"[article] 编辑守卫失败，保留原稿: {type(e).__name__}: {str(e)[:100]}")
 
+    # ── 模板腔机检（2026-11-20 用户裁决：两篇公众号都栽在模板/造词）──
+    templ: list[str] = []
+    if re.search(r"(?m)^#{1,3}\s*[一二三四五六七八九十]+、", md_text):
+        templ.append("小节标题使用「一、二、三」式编号，改成内容短语")
+    if re.search(r"本文(用|将|会|试图|通过)", md_text):
+        templ.append("正文出现「本文…」元评论")
+    if "看完你就知道" in md_text or "下面我们" in md_text or "接下来看" in md_text:
+        templ.append("出现讲稿式过渡/预告（「看完你就知道」「下面我们」）")
+    if re.search(r"我叫它|我称之为", md_text):
+        templ.append("出现自造概念命名（「我叫它…」）——删掉命名，直接讲机制")
+    if templ and md_text.strip():
+        try:
+            polished = await gateway.complete(
+                [{"role": "user", "content": render("article_kb_polish",
+                                                    VIOLATIONS="\n".join(f"- {v}" for v in templ),
+                                                    DRAFT=md_text)}],
+                max_tokens=8192, thinking="disabled")
+            polished = re.sub(r"^```[a-z]*\n|\n```$", "", (polished or "").strip())
+            if polished and _content_signature(polished) == _content_signature(md_text):
+                md_text = polished
+        except Exception as e:  # noqa: BLE001 机检润色失败不挡成文
+            print(f"[article] 模板腔润色失败，保留原稿: {type(e).__name__}: {str(e)[:100]}")
+
+    # ── 长度闸（2026-11-20）：超 2500 字两轮硬压缩，压到 2000 上下 ──
+    for _round in range(2):
+        if len(md_text) <= 2500:
+            break
+        ctx.set_progress(88, f"正文 {len(md_text)} 字超上限 2500，压缩第 {_round + 1} 轮")
+        out = await gateway.complete(
+            [{"role": "user", "content":
+              f"这篇公众号长文 {len(md_text)} 字，公众号正文上限 2500 字。请做硬压缩：\n"
+              "保留：各小节的核心判断与 1~2 个关键论据、所有数字与原话引用、小节结构；\n"
+              "删除：例子展开、重复解释、修饰句、类比、背景铺垫、讲稿式过渡句；\n"
+              "只删不增，不许新增内容或改写事实。目标 2000 字上下，不得超过 2500。\n"
+              "输出完整修订后全文（保留小节标题）：\n" + md_text}],
+            max_tokens=8192, thinking="disabled")
+        out = re.sub(r"^```[a-z]*\n|\n```$", "", (out or "").strip())
+        if not out or len(out) >= len(md_text) or len(out) < 1500:
+            break
+        md_text = out
+
     # 数据图表（专职步骤）：提取数据对比点 → matplotlib 渲染 → 按节插入。
     md_text = await _attach_charts(md_text, tenant_id, "[article]")
 
