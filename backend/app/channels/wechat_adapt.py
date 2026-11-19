@@ -23,9 +23,7 @@ from .wechat import (
     _attach_cover,
     _content_signature,
     _finalize_article,
-    _gen_titles,
     _kb_style_violations,
-    length_specs,
 )
 from ..articles.quality import (
     _structure_violations,
@@ -182,107 +180,21 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             s.refresh(art)
             article_id = art.id
 
-        # 标题组 + 改编成文
+        # ── 改编成文（单次写入；标题随稿出，2026-11-19 收拢流水线）──
         persona_text = brand_of(1)["persona"]
-        title_from_call, title_alts = await _gen_titles(
-            persona_text, length_specs("deep"),
-            "\n\n选题素材：\n" + source[:6000])
-        from ..articles.prod_kit import ensure_prod_kit, kit_block
-
-        ctx.set_progress(28, "抽取生产资料包（因果链/操作/边界/数字账）")
-        kit = await ensure_prod_kit(item_id, text=source)
-        kit_text = kit_block(kit)
-        ctx.set_progress(30, "改编成文（保骨架保原话换口径，含深度四件套）")
+        ctx.set_progress(30, "改编成文（保骨架保原话换口径）")
         quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
                                                 PERSONA=persona_text,
                                                 SOURCE=source, ANGLE=angle,
-                                                QUOTES=quotes_block, KIT=kit_text)}],
-            max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理（40000 预算仍空正文），关掉后 83s 正常出稿
+                                                QUOTES=quotes_block)}],
+            max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理，关掉后 83s 出稿
         body = _strip_fence(body)
         lines = body.split("\n")
         if not lines or not lines[0].lstrip().startswith("# "):
             raise TransientError("改编输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
-
-        # ── 深度覆盖核检（2026-11-18 车道一）：对照资料包逐条核对，缺环节定向补写一次 ──
-        if kit_text:
-            import json as _json
-
-            ctx.set_progress(40, "深度覆盖核检（对照资料包）")
-            chk = await gateway.complete_json(
-                [{"role": "user", "content":
-                  "对照生产资料包逐条核检这篇长文的覆盖：chain/actions/boundaries 每条判定是否被讲到"
-                  "（numbers 不查；讲到一半也算 covered）。\n资料包：\n" + _json.dumps(kit, ensure_ascii=False)
-                  + "\n\n成文：\n" + body[:6000] +
-                  '\n输出 JSON：{"missing": ["没讲到的资料包条目原文，最多 3 条"]}，全覆盖给空数组'}],
-                max_tokens=1024, thinking="disabled")
-            missing = [str(x)[:120] for x in (chk or {}).get("missing") or []][:3]
-            if missing:
-                ctx.set_progress(45, f"深度缺 {len(missing)} 项，定向补写")
-                body = _strip_fence(await gateway.complete(
-                    [{"role": "user", "content":
-                      "下面这篇公众号长文漏掉了资料包里的关键环节，定向补写：只补缺失环节的讲透"
-                      "（因果链一步步、操作落到步骤），其余内容原样保留，不新增编造。\n"
-                      "缺失环节：\n- " + "\n- ".join(missing) +
-                      "\n\n资料包对照：\n" + kit_text +
-                      "\n\n成文全文（在此基础修订，输出完整修订后全文，# 标题开头）：\n" + body}],
-                    max_tokens=20000, thinking="disabled"))  # 2026-11-19：4 万字源文开思考链会无限推理（40000 预算仍空正文），关掉后 83s 正常出稿
-                lines = body.split("\n")
-                if not lines or not lines[0].lstrip().startswith("# "):
-                    raise TransientError("深度补写输出缺「# 标题」首行，稍后自动重试")
-
-        # ── 章节覆盖核检（2026-11-19）：分章源文整章不许无声消失（五阶段稿丢「回灌」事故）──
-        chapters = _chapter_titles(source)
-        if len(chapters) >= 3:
-            async def _missing_by_llm(draft: str) -> list[str]:
-                chk = await gateway.complete_json(
-                    [{"role": "user", "content":
-                      "这是一篇改编长文与源文的章节清单。逐章判断成文是否有**实质性对应内容**"
-                      "（讲到了该章的核心判断或关键动作；只出现一个词、一句话带过都不算）。\n"
-                      "章节清单：\n- " + "\n- ".join(chapters) +
-                      "\n\n成文：\n" + draft[:8000] +
-                      '\n输出 JSON：{"missing": ["未实质覆盖的章名，最多 6 条"]}，全部覆盖给空数组'}],
-                    max_tokens=1024, thinking="disabled")
-                return [str(x)[:40] for x in (chk or {}).get("missing") or []][:6]
-
-            missing_ch = await _missing_by_llm(body)
-            if missing_ch:
-                ctx.set_progress(50, f"源文分章缺 {len(missing_ch)} 章（{'、'.join(missing_ch)}），定向补写")
-                body = _strip_fence(await gateway.complete(
-                    [{"role": "user", "content":
-                      "下面这篇公众号长文改编自一篇分章源文，但整章内容缺失——读者会以为这本书只有这些内容。"
-                      "请补写缺失的章节：每章至少一段，讲清这一章的核心判断与关键动作，放到正确的顺序位置；"
-                      "其余内容原样保留，不许新增源文没有的事实与数字。\n"
-                      "缺失章节：\n- " + "\n- ".join(missing_ch) +
-                      "\n\n源文全文：\n" + source +
-                      "\n\n成文全文（在此基础修订，输出完整修订后全文，# 标题开头）：\n" + body}],
-                    max_tokens=20000, thinking="disabled"))  # 2026-11-19：4 万字源文开思考链会无限推理（40000 预算仍空正文），关掉后 83s 正常出稿
-                lines = body.split("\n")
-                if not lines or not lines[0].lstrip().startswith("# "):
-                    raise TransientError("章节补写输出缺「# 标题」首行，稍后自动重试")
-                missing_ch = await _missing_by_llm(body)
-        else:
-            missing_ch = []
-        if missing_ch:
-            # 补写一次仍缺章：整章丢失的稿子不进待发（确定性质量问题）
-            with Session(engine) as s:
-                art = s.get(Content, article_id)
-                if art is not None:
-                    art.status = "failed"
-                    art.title = (lines[0].lstrip()[2:].strip() if lines else "")
-                    art.body = "\n".join(lines[1:]).strip() if lines else ""
-                    p = dict(art.payload or {})
-                    p["article_state"] = "failed"
-                    p["note"] = ((p.get("note") or "")
-                                 + f"｜章节覆盖未过（缺 {'、'.join(missing_ch)}），不进待发")
-                    art.payload = p
-                    s.add(art)
-                    s.commit()
-            _release(f"章节覆盖未过（缺 {'、'.join(missing_ch)}），退回清单 #{item_id}", tag="缺章")
-            ctx.set_progress(100, f"章节覆盖未过（缺 {'、'.join(missing_ch)}），本篇不进待发")
-            return {"adapted": False, "missing_chapters": missing_ch, "message": "章节覆盖未过"}
-        title = lines[0].lstrip()[2:].strip() or title_from_call or src_title[:30]
+        title = lines[0].lstrip()[2:].strip() or src_title[:30]
         md_text = "\n".join(lines[1:]).strip()
         min_chars_or_raise(md_text, "改编稿")
 
@@ -321,72 +233,64 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             ctx.set_progress(100, f"原创度未过（{ratio}%），本项退回清单")
             return {"adapted": False, "ratio": ratio, "message": "原创度未过"}
 
-        # ── 违禁词 + 结构机检 → 定向重写（签名守卫）──
-        anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
-        violations = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
-        if violations:
-            ctx.set_progress(78, f"机检命中 {len(violations)} 项，定向重写")
-            polished = await gateway.complete(
-                [{"role": "user", "content": render("article_kb_polish",
-                                                    VIOLATIONS="\n".join(f"- {v}" for v in violations),
-                                                    DRAFT=md_text)}],
-                max_tokens=8192, thinking="disabled")
-            polished = _strip_fence(polished)
-            if polished and _content_signature(polished) == _content_signature(md_text):
-                md_text = polished
-
-        # ── 语言审校（2026-11-19 用户裁决：AI味/翻译腔/硬造词/口水/口语口号腔 → 最多两轮定向修订）──
-        from ..articles.review import review_facts, review_language, review_reader, revise_once, score_titles
-        ctx.set_progress(80, "语言审校（AI味/翻译腔/造词/口语口号腔）")
-        lang_issues = await review_language(md_text)
-        lang_left = lang_issues
-        for _round in range(2):
-            if not lang_left:
-                break
-            revised = await revise_once(md_text, lang_left)
-            if revised and _content_signature(revised) == _content_signature(md_text):
-                md_text = revised
-            lang_left = await review_language(md_text)
-
-        # ── 长度闸（2026-11-19 用户定版：公众号正文 1500~2500 字）──
-        # 压缩按删减处理：允许删掉带数字的句子（数字签名守卫不适用），删后紧接着跑事实闸兜底。
-        for _round in range(2):
-            if len(md_text) <= _MAX_CHARS:
-                break
-            ctx.set_progress(81, f"正文 {len(md_text)} 字超上限 {_MAX_CHARS}，压缩第 {_round + 1} 轮")
-            trimmed = _strip_fence(await gateway.complete(
+        # ── 长度闸（先压到位再送审，避免审完再压把审校白做）──
+        async def _trim_once(text: str, round_no: int) -> str:
+            ctx.set_progress(81, f"正文 {len(text)} 字超上限 {_MAX_CHARS}，压缩第 {round_no} 轮")
+            out = _strip_fence(await gateway.complete(
                 [{"role": "user", "content":
-                 f"这篇公众号长文 {len(md_text)} 字，公众号正文上限 {_MAX_CHARS} 字。请做硬压缩：\n"
-                 "保留：五阶段各一节（每节 300~400 字，只留该阶段最核心的判断与 1~2 个关键动作）、"
+                 f"这篇公众号长文 {len(text)} 字，公众号正文上限 {_MAX_CHARS} 字。请做硬压缩：\n"
+                 "保留：各阶段各一节（每节 300~400 字，只留该阶段最核心的判断与 1~2 个关键动作）、"
                  "开头的可检验主张、结尾的判断；正文里的原话引用原样保留。\n"
                  "删除：例子里的展开细节、重复解释、修饰句、背景铺垫、过渡句、枝节。\n"
                  "只删不增，不许新增内容或改写事实。目标 2000 字上下，不得超过 2500。\n"
-                 "输出完整修订后全文（# 标题开头）：\n" + md_text}],
+                 "输出完整修订后全文（# 标题开头）：\n" + text}],
                 max_tokens=8192, thinking="disabled"))
-            t_lines = trimmed.split("\n")
+            t_lines = out.split("\n")
             t_md = ("\n".join(t_lines[1:]).strip()
                     if t_lines and t_lines[0].lstrip().startswith("# ") else "")
-            if not t_md or len(t_md) >= len(md_text) or len(t_md) < _MIN_CHARS:
-                break  # 没压下来（或压穿了下限）就别继续折腾，交给人看
-            md_text = t_md
+            if not t_md or len(t_md) >= len(text) or len(t_md) < _MIN_CHARS:
+                return ""  # 没压下来（或压穿了下限）就别继续折腾
+            return t_md
 
-        # ── 审校组（问题清单制）：事实对源=硬闸（拦编造），读者弃读点=建议（落 note 不拦）──
-        ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
-        issues = await review_facts(md_text, source)
-        reader_points = await review_reader(md_text, persona_text)
-        if issues:
-            revised = await revise_once(md_text, issues)
+        for _round in range(2):
+            if len(md_text) <= _MAX_CHARS:
+                break
+            t = await _trim_once(md_text, _round + 1)
+            if not t:
+                break
+            md_text = t
+
+        # ── 合并审校（2026-11-19 收拢：事实/归属/章节/语言/口吻一次审，一份问题清单）──
+        from ..articles.review import review_adapt, revise_once
+
+        chapters = _chapter_titles(source)
+        anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
+        mech = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
+        ctx.set_progress(80, "合并审校（事实/归属/章节/语言/口吻）")
+        issues, missing_ch = await review_adapt(md_text, source, chapters)
+        if mech:
+            issues = [f"机检：{v}" for v in mech[:6]] + issues
+        if issues or missing_ch:
+            ctx.set_progress(82, f"审校命中 {len(issues)} 项、缺 {len(missing_ch)} 章，定向修订")
+            fix_list = list(issues)
+            if missing_ch:
+                fix_list.append("缺章：成文没有实质覆盖以下章节——" + "、".join(missing_ch)
+                                + "。补写这些阶段（每章至少一段，讲核心判断与关键动作），其余原样保留。")
+            revised = await revise_once(md_text, fix_list)
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
-                issues = await review_facts(md_text, source)
-        if issues:
+            issues, missing_ch = await review_adapt(md_text, source, chapters)
+            mech2 = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
+            if mech2:
+                issues = [f"机检：{v}" for v in mech2[:6]] + issues
+        if issues or missing_ch:
             with Session(engine) as s:
                 it0 = s.get(Material, item_id)
                 fails = (it0.note or "").count("审校未过") if it0 is not None else 0
             tag = f"审校未过×{fails + 1}"
-            _release(f"事实审校二次未过（{'；'.join(issues[:2])}），清单项 #{item_id} 落 low 不再自动重试"
-                     if fails >= 1 else
-                     f"事实审校未过（{'；'.join(issues[:2])}），退回清单 #{item_id}",
+            brief = "；".join(issues[:2]) or ("缺章：" + "、".join(missing_ch))
+            _release(f"审校二次未过（{brief}），清单项 #{item_id} 落 low 不再自动重试"
+                     if fails >= 1 else f"审校未过（{brief}），退回清单 #{item_id}",
                      item_status="low" if fails >= 1 else "pending", tag=tag)
             with Session(engine) as s:
                 art = s.get(Content, article_id)
@@ -396,21 +300,19 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                     art.body = md_text
                     p = dict(art.payload or {})
                     p["article_state"] = "failed"
-                    p["note"] = (p.get("note") or "") + f"｜事实审校未过（{issues[0][:40]}），不进待发"
+                    p["note"] = (p.get("note") or "") + f"｜审校未过（{brief[:60]}），不进待发"
                     art.payload = p
                     s.add(art)
                     s.commit()
-            ctx.set_progress(100, f"事实审校未过（{len(issues)} 项），本篇不进待发")
-            return {"adapted": False, "issues": len(issues), "message": "事实审校未过"}
+            ctx.set_progress(100, f"审校未过（{len(issues)} 项），本篇不进待发")
+            return {"adapted": False, "issues": len(issues),
+                    "missing_chapters": missing_ch, "message": "审校未过"}
 
-        # ── 标题评分（五维，自动选主标题；正题/来源题/备选全进候选池）──
-        ctx.set_progress(88, "标题评分")
-        cands = [title] + [t for t in (title_alts or []) if t]
-        if title_from_call and title_from_call not in cands:
-            cands.append(title_from_call)
-        ranked = await score_titles(cands, persona_text)
-        if ranked and ranked[0][1] > 0:
-            title = ranked[0][0]
+        # ── 收尾长度兜底（修订可能加长；超线再压一次，压完不再审，只删不增）──
+        if len(md_text) > _MAX_CHARS:
+            t = await _trim_once(md_text, 1)
+            if t:
+                md_text = t
 
         # ── 结构兜底：完全重复的长段确定性去重（#56 实测：检验清单同时出现在开头与结尾）──
         deduped = dedupe_paragraphs(md_text)
