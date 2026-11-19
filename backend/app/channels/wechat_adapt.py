@@ -36,7 +36,8 @@ from ..articles.quality import (
 
 _SRC_CAP = 100000     # 源文全文上限（2026-11-18：3 万字腰斩，长手册改编只读到半篇）
 _DUP_LINE = 30.0      # 原创度线：与源文重复率百分比上限
-_MIN_CHARS = 1500     # 正文下限（规格 1900~2200）
+_MIN_CHARS = 1500     # 正文下限（规格 1500~2500，2026-11-19 用户定版）
+_MAX_CHARS = 2500     # 正文上限（超线定向压缩一次；公众号正文长度限制）
 
 _PUNCT = re.compile(r"[\s，。！？；：、“”‘’「」『』（）()【】\[\]—…·.,;:!?\"'<>《》]")
 
@@ -345,6 +346,23 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             lang_left = await review_language(md_text) if lang_issues else []
         else:
             lang_left = []
+
+        # ── 长度闸（2026-11-19 用户定版：公众号正文 1500~2500 字）──
+        if len(md_text) > _MAX_CHARS:
+            ctx.set_progress(81, f"正文 {len(md_text)} 字超上限 {_MAX_CHARS}，定向压缩")
+            trimmed = _strip_fence(await gateway.complete(
+                [{"role": "user", "content":
+                 f"这篇公众号长文 {len(md_text)} 字，超过公众号正文长度上限 {_MAX_CHARS} 字。"
+                 "把它压缩到 1500~2500 字：只删不增——删掉重复解释、修饰、与主线无关的枝节，"
+                 "保留全部事实、数字、引用的原话、分章结构与各节判断；不许改写事实、不许新增内容。"
+                 "\n\n输出完整修订后全文（# 标题开头）：\n" + md_text}],
+                max_tokens=8192, thinking="disabled"))
+            t_lines = trimmed.split("\n")
+            if t_lines and t_lines[0].lstrip().startswith("# "):
+                t_md = "\n".join(t_lines[1:]).strip()
+                if (t_md and _MIN_CHARS <= len(t_md) <= _MAX_CHARS
+                        and _content_signature(t_md) == _content_signature(md_text)):
+                    md_text = t_md
 
         # ── 审校组（问题清单制）：事实对源=硬闸（拦编造），读者弃读点=建议（落 note 不拦）──
         ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
