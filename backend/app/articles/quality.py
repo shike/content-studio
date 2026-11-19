@@ -104,6 +104,8 @@ _TRANS_PATTERNS = (
     (r"一个由[^。，\n]{4,30}(构成|组成)", "长定语套嵌（「一个由…构成的…」）"),
 )
 _COLLOQ_MARKS = ("说白了", "其实", "不得不说", "老实说", "讲真", "你有没有发现", "简直")
+# 源文比喻性造词（2026-11-19 用户裁决：去造词）——直接搬用即命中，换中性术语
+_KB_METAPHOR_TERMS = ("承重动作", "判死刑", "死法", "赘生物")
 
 
 def _language_style_violations(md: str) -> list[str]:
@@ -123,6 +125,10 @@ def _language_style_violations(md: str) -> list[str]:
     coll = [w for w in _COLLOQ_MARKS if w in md]
     if len(coll) >= 2 or any(md.count(w) >= 3 for w in coll):
         out.append(f"口水词检出：{'、'.join(coll[:4])}——删掉，改写成有信息量的陈述")
+    metaphors = [w for w in _KB_METAPHOR_TERMS if w in md]
+    if metaphors:
+        out.append(f"源文比喻词直接搬用：{'、'.join(metaphors)}——换成中性术语"
+                   "（关键动作/验收判据/失败原因/冗余流程）")
     return out
 
 
