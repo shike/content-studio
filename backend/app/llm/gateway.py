@@ -48,8 +48,11 @@ def _llm_sem() -> asyncio.Semaphore:
 
 async def complete(messages: list[dict], *,
                    temperature: float = 0.7, max_tokens: int = 4096,
-                   thinking: Optional[str] = None) -> str:
-    """thinking="disabled" 时关闭思考链（长文场景：预算全给正文，防推理耗尽空正文）。"""
+                   thinking: Optional[str] = None, timeout: float = 600) -> str:
+    """thinking="disabled" 时关闭思考链（长文场景：预算全给正文，防推理耗尽空正文）。
+
+    timeout：单次 HTTP 超时秒数。默认 600s；adapt_write 这类 40000 预算的思考型长调用
+    可传 1200（2026-11-19 实测 20000 推理耗光预算，预算放大后耗时也翻倍）。"""
     cfg = active()
     if not cfg["key"]:
         raise LLMError("LLM 未配置密钥（在 .env 设置 ZHIPU_API_KEY）")
@@ -62,10 +65,11 @@ async def complete(messages: list[dict], *,
     if thinking == "disabled":
         body["thinking"] = {"type": "disabled"}
     async with _llm_sem():
-        return await _complete_locked(messages, body=body, cfg=cfg)
+        return await _complete_locked(messages, body=body, cfg=cfg, timeout=timeout)
 
 
-async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict) -> str:
+async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict,
+                           timeout: float = 600) -> str:
     ok = False
     last_err: Optional[Exception] = None
     content: Optional[str] = None
@@ -73,7 +77,7 @@ async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict) -> st
         try:
             # 600s：脚本一版精品直出（20000 tokens+思考链）在 glm-5.3-flash 上实测超 300s
             # （2026-10-29 P1 服务器侧复现 ReadTimeout；生产 10-12 后未跑过脚本生成=潜伏）
-            async with httpx.AsyncClient(timeout=600) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(
                     f"{cfg['base_url']}/chat/completions",
                     json=body,
