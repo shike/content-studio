@@ -348,21 +348,26 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             lang_left = []
 
         # ── 长度闸（2026-11-19 用户定版：公众号正文 1500~2500 字）──
-        if len(md_text) > _MAX_CHARS:
-            ctx.set_progress(81, f"正文 {len(md_text)} 字超上限 {_MAX_CHARS}，定向压缩")
+        # 压缩按删减处理：允许删掉带数字的句子（数字签名守卫不适用），删后紧接着跑事实闸兜底。
+        for _round in range(2):
+            if len(md_text) <= _MAX_CHARS:
+                break
+            ctx.set_progress(81, f"正文 {len(md_text)} 字超上限 {_MAX_CHARS}，压缩第 {_round + 1} 轮")
             trimmed = _strip_fence(await gateway.complete(
                 [{"role": "user", "content":
-                 f"这篇公众号长文 {len(md_text)} 字，超过公众号正文长度上限 {_MAX_CHARS} 字。"
-                 "把它压缩到 1500~2500 字：只删不增——删掉重复解释、修饰、与主线无关的枝节，"
-                 "保留全部事实、数字、引用的原话、分章结构与各节判断；不许改写事实、不许新增内容。"
-                 "\n\n输出完整修订后全文（# 标题开头）：\n" + md_text}],
+                 f"这篇公众号长文 {len(md_text)} 字，公众号正文上限 {_MAX_CHARS} 字。请做硬压缩：\n"
+                 "保留：五阶段各一节（每节 300~400 字，只留该阶段最核心的判断与 1~2 个关键动作）、"
+                 "开头的可检验主张、结尾的判断；正文里的原话引用原样保留。\n"
+                 "删除：例子里的展开细节、重复解释、修饰句、背景铺垫、过渡句、枝节。\n"
+                 "只删不增，不许新增内容或改写事实。目标 2000 字上下，不得超过 2500。\n"
+                 "输出完整修订后全文（# 标题开头）：\n" + md_text}],
                 max_tokens=8192, thinking="disabled"))
             t_lines = trimmed.split("\n")
-            if t_lines and t_lines[0].lstrip().startswith("# "):
-                t_md = "\n".join(t_lines[1:]).strip()
-                if (t_md and _MIN_CHARS <= len(t_md) <= _MAX_CHARS
-                        and _content_signature(t_md) == _content_signature(md_text)):
-                    md_text = t_md
+            t_md = ("\n".join(t_lines[1:]).strip()
+                    if t_lines and t_lines[0].lstrip().startswith("# ") else "")
+            if not t_md or len(t_md) >= len(md_text) or len(t_md) < _MIN_CHARS:
+                break  # 没压下来（或压穿了下限）就别继续折腾，交给人看
+            md_text = t_md
 
         # ── 审校组（问题清单制）：事实对源=硬闸（拦编造），读者弃读点=建议（落 note 不拦）──
         ctx.set_progress(82, "审校组：事实对源（硬闸）+ 读者弃读点（建议）")
