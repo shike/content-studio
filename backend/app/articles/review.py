@@ -12,11 +12,14 @@ from .quality import strip_fence as _strip_fence
 
 
 async def review_facts(md: str, source: str) -> list[str]:
-    """事实对源：关键断言与源文核对，返回问题清单（空=过）。审失败返回空（不阻塞）。"""
+    """事实对源：关键断言与源文核对，返回问题清单（空=过）。审失败返回空（不阻塞）。
+
+    源文必须给全（2026-11-19 事故：只喂前 9000 字，分章手册后半本的案例被当成编造——
+    烘焙案例的 CFO/130 万/60 万全在源文 15000 字处，闸却判「源文没有」，整篇误杀）。"""
     try:
         v = await gateway.complete_json(
             [{"role": "user", "content": render("article_review_facts",
-                                                DRAFT=md[:9000], SOURCE=source[:9000])}],
+                                                DRAFT=md[:9000], SOURCE=source[:40000])}],
             max_tokens=1024, thinking="disabled")
         return [str(x).strip()[:160] for x in (v or {}).get("issues") or [] if str(x).strip()][:8]
     except Exception as e:  # noqa: BLE001
