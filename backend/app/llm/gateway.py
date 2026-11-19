@@ -33,6 +33,17 @@ def is_configured() -> bool:
     return bool(active()["key"])
 
 
+# 「始终思考」模型兼容（2026-11-19 临时换号实测）：GLM-5.3 部分账号部署不支持
+# thinking=disabled，回 400 code 1210「该模型始终思考…请使用 low/high/max」。
+# 命中一次后进程内记住，后续 disabled 调用直接改 enabled+low（低推理强度）。
+_DISABLED_UNSUPPORTED = False
+
+
+def _thinking_compat(body: dict) -> None:
+    body["thinking"] = {"type": "enabled"}
+    body["reasoning_effort"] = "low"
+
+
 # 全局 LLM 并发闸：直调端点（ping）不入任务队列，
 # 也没有任何并发限制——信号量统一收编全部 LLM 调用（队列任务同样过闸，heavy 本就串行无感）
 _LLM_SEM: Optional[asyncio.Semaphore] = None
@@ -63,17 +74,21 @@ async def complete(messages: list[dict], *,
     body = {"model": cfg["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
     if thinking == "disabled":
-        body["thinking"] = {"type": "disabled"}
+        if _DISABLED_UNSUPPORTED:
+            _thinking_compat(body)
+        else:
+            body["thinking"] = {"type": "disabled"}
     async with _llm_sem():
         return await _complete_locked(messages, body=body, cfg=cfg, timeout=timeout)
 
 
 async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict,
                            timeout: float = 600) -> str:
+    global _DISABLED_UNSUPPORTED
     ok = False
     last_err: Optional[Exception] = None
     content: Optional[str] = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             # 600s：脚本一版精品直出（20000 tokens+思考链）在 glm-5.3-flash 上实测超 300s
             # （2026-10-29 P1 服务器侧复现 ReadTimeout；生产 10-12 后未跑过脚本生成=潜伏）
@@ -84,6 +99,12 @@ async def _complete_locked(messages: list[dict], *, body: dict, cfg: dict,
                     headers={"Authorization": f"Bearer {cfg['key']}"},
                 )
                 if resp.status_code >= 400:
+                    # 「始终思考」模型不接受 disabled：改 enabled+low 立即重试（不占一次失败）
+                    if (resp.status_code == 400 and "1210" in resp.text[:300]
+                            and body.get("thinking", {}).get("type") == "disabled"):
+                        _DISABLED_UNSUPPORTED = True
+                        _thinking_compat(body)
+                        continue
                     # 带上端点返回的具体错误，只看状态码会误诊
                     raise LLMError(f"HTTP {resp.status_code}: {resp.text[:200]}")
                 data = resp.json()
