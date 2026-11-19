@@ -335,17 +335,18 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             if polished and _content_signature(polished) == _content_signature(md_text):
                 md_text = polished
 
-        # ── 语言审校（2026-11-18 用户裁决：专业严谨优先）：AI味/翻译腔/硬造词/口水 → 定向修订一次 ──
+        # ── 语言审校（2026-11-19 用户裁决：AI味/翻译腔/硬造词/口水/口语口号腔 → 最多两轮定向修订）──
         from ..articles.review import review_facts, review_language, review_reader, revise_once, score_titles
-        ctx.set_progress(80, "语言审校（AI味/翻译腔/硬造词/口水）")
+        ctx.set_progress(80, "语言审校（AI味/翻译腔/造词/口语口号腔）")
         lang_issues = await review_language(md_text)
-        if lang_issues:
-            revised = await revise_once(md_text, lang_issues)
+        lang_left = lang_issues
+        for _round in range(2):
+            if not lang_left:
+                break
+            revised = await revise_once(md_text, lang_left)
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
-            lang_left = await review_language(md_text) if lang_issues else []
-        else:
-            lang_left = []
+            lang_left = await review_language(md_text)
 
         # ── 长度闸（2026-11-19 用户定版：公众号正文 1500~2500 字）──
         # 压缩按删减处理：允许删掉带数字的句子（数字签名守卫不适用），删后紧接着跑事实闸兜底。
