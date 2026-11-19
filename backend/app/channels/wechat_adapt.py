@@ -256,8 +256,10 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         hard, soft = await review_adapt(md_text, source)
         if mech:
             soft = [f"机检：{v}" for v in mech[:6]] + soft
-        if hard or soft:
-            ctx.set_progress(82, f"审校命中 hard {len(hard)}/soft {len(soft)}，定向修订")
+        for _round in range(2):  # 最多两轮修订：修订本身可能引入新问题，复审兜底
+            if not hard and not soft:
+                break
+            ctx.set_progress(82, f"审校命中 hard {len(hard)}/soft {len(soft)}，定向修订第 {_round + 1} 轮")
             fix_list = list(hard) + list(soft)
             revised = await revise_once(md_text, fix_list)
             if revised and _content_signature(revised) == _content_signature(md_text):
