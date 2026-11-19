@@ -61,6 +61,19 @@ def _dup_ratio(adapted: str, source: str) -> tuple[float, list[str]]:
     return (round(hit / total * 100, 1) if total else 0.0), hits[:8]
 
 
+_CHAPTER_RE = re.compile(r"^#{1,3}\s*第[一二三四五六七八九十百]+章\s*[　:：]?\s*(.{2,40})$", re.M)
+
+
+def _chapter_titles(source: str) -> list[str]:
+    """源文章节标题（「## 第五章　侦察：…」→「侦察：…」）。非分章文档返回空。"""
+    titles: list[str] = []
+    for m in _CHAPTER_RE.finditer(source or ""):
+        t = (m.group(1) or "").strip()
+        if len(t) >= 2:
+            titles.append(t[:40])
+    return list(dict.fromkeys(titles))
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -176,7 +189,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         from ..articles.prod_kit import ensure_prod_kit, kit_block
 
         ctx.set_progress(28, "抽取生产资料包（因果链/操作/边界/数字账）")
-        kit = await ensure_prod_kit(item_id, text=source[:8000])
+        kit = await ensure_prod_kit(item_id, text=source)
         kit_text = kit_block(kit)
         ctx.set_progress(30, "改编成文（保骨架保原话换口径，含深度四件套）")
         quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
@@ -217,6 +230,57 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 lines = body.split("\n")
                 if not lines or not lines[0].lstrip().startswith("# "):
                     raise TransientError("深度补写输出缺「# 标题」首行，稍后自动重试")
+
+        # ── 章节覆盖核检（2026-11-19）：分章源文整章不许无声消失（五阶段稿丢「回灌」事故）──
+        chapters = _chapter_titles(source)
+        if len(chapters) >= 3:
+            async def _missing_by_llm(draft: str) -> list[str]:
+                chk = await gateway.complete_json(
+                    [{"role": "user", "content":
+                      "这是一篇改编长文与源文的章节清单。逐章判断成文是否有**实质性对应内容**"
+                      "（讲到了该章的核心判断或关键动作；只出现一个词、一句话带过都不算）。\n"
+                      "章节清单：\n- " + "\n- ".join(chapters) +
+                      "\n\n成文：\n" + draft[:8000] +
+                      '\n输出 JSON：{"missing": ["未实质覆盖的章名，最多 6 条"]}，全部覆盖给空数组'}],
+                    max_tokens=1024, thinking="disabled")
+                return [str(x)[:40] for x in (chk or {}).get("missing") or []][:6]
+
+            missing_ch = await _missing_by_llm(body)
+            if missing_ch:
+                ctx.set_progress(50, f"源文分章缺 {len(missing_ch)} 章（{'、'.join(missing_ch)}），定向补写")
+                body = _strip_fence(await gateway.complete(
+                    [{"role": "user", "content":
+                      "下面这篇公众号长文改编自一篇分章源文，但整章内容缺失——读者会以为这本书只有这些内容。"
+                      "请补写缺失的章节：每章至少一段，讲清这一章的核心判断与关键动作，放到正确的顺序位置；"
+                      "其余内容原样保留，不许新增源文没有的事实与数字。\n"
+                      "缺失章节：\n- " + "\n- ".join(missing_ch) +
+                      "\n\n源文全文：\n" + source +
+                      "\n\n成文全文（在此基础修订，输出完整修订后全文，# 标题开头）：\n" + body}],
+                    max_tokens=20000, thinking="enabled"))
+                lines = body.split("\n")
+                if not lines or not lines[0].lstrip().startswith("# "):
+                    raise TransientError("章节补写输出缺「# 标题」首行，稍后自动重试")
+                missing_ch = await _missing_by_llm(body)
+        else:
+            missing_ch = []
+        if missing_ch:
+            # 补写一次仍缺章：整章丢失的稿子不进待发（确定性质量问题）
+            with Session(engine) as s:
+                art = s.get(Content, article_id)
+                if art is not None:
+                    art.status = "failed"
+                    art.title = (lines[0].lstrip()[2:].strip() if lines else "")
+                    art.body = "\n".join(lines[1:]).strip() if lines else ""
+                    p = dict(art.payload or {})
+                    p["article_state"] = "failed"
+                    p["note"] = ((p.get("note") or "")
+                                 + f"｜章节覆盖未过（缺 {'、'.join(missing_ch)}），不进待发")
+                    art.payload = p
+                    s.add(art)
+                    s.commit()
+            _release(f"章节覆盖未过（缺 {'、'.join(missing_ch)}），退回清单 #{item_id}", tag="缺章")
+            ctx.set_progress(100, f"章节覆盖未过（缺 {'、'.join(missing_ch)}），本篇不进待发")
+            return {"adapted": False, "missing_chapters": missing_ch, "message": "章节覆盖未过"}
         title = lines[0].lstrip()[2:].strip() or title_from_call or src_title[:30]
         md_text = "\n".join(lines[1:]).strip()
         min_chars_or_raise(md_text, "改编稿")

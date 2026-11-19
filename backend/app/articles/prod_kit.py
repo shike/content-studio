@@ -10,6 +10,8 @@ from ..llm import gateway
 from ..models import Material
 
 _EMPTY = {"chain": [], "actions": [], "boundaries": [], "numbers": []}
+_KIT_VER = 2          # 2=2026-11-19：全文抽取（旧版只看前 8000 字，后半本手册整章漏光）
+_INPUT_CAP = 40000    # 抽取输入上限：分章手册要读到最后一章，不能只喂开头
 
 
 async def ensure_prod_kit(material_id: int, text: str | None = None) -> dict:
@@ -21,7 +23,7 @@ async def ensure_prod_kit(material_id: int, text: str | None = None) -> dict:
         if m is None:
             return dict(_EMPTY)
         cached = (m.quality or {}).get("prod_kit")
-        if cached:
+        if cached and cached.get("ver") == _KIT_VER:
             return cached
         title, text = m.title, text if text is not None else (m.body or "")
     if not text.strip():
@@ -34,9 +36,12 @@ async def ensure_prod_kit(material_id: int, text: str | None = None) -> dict:
           ' "actions": ["操作清单：读者能照做的具体动作，2~6 条"],'
           ' "boundaries": ["边界条件：何时失效/代价是什么，1~4 条"],'
           ' "numbers": [{"n": "数字", "role": "它在论证什么"}]（数字账 2~6 条）}\n'
-          f"\n【标题】{title or ''}\n【正文】{text[:8000]}"}],
+          "分章/分阶段的长文档：每一章、每个阶段至少落一条 chain 或 action，"
+          "不许只提取开头几章（漏章=成文整章消失）。\n"
+          f"\n【标题】{title or ''}\n【正文】{text[:_INPUT_CAP]}"}],
         max_tokens=2048, thinking="disabled")
     kit = {
+        "ver": _KIT_VER,
         "chain": [str(x)[:200] for x in (data or {}).get("chain") or []][:5],
         "actions": [str(x)[:200] for x in (data or {}).get("actions") or []][:6],
         "boundaries": [str(x)[:200] for x in (data or {}).get("boundaries") or []][:4],
@@ -44,7 +49,7 @@ async def ensure_prod_kit(material_id: int, text: str | None = None) -> dict:
                     for x in (data or {}).get("numbers") or []
                     if isinstance(x, dict) and x.get("n")][:6],
     }
-    if not any(kit.values()):
+    if not any(kit[k] for k in ("chain", "actions", "boundaries", "numbers")):
         return dict(_EMPTY)
     with Session(engine) as s:
         m = s.get(Material, material_id)
