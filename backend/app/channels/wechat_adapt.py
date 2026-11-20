@@ -150,6 +150,38 @@ def _enumeration_gaps(md: str, terms: list[str]) -> list[str]:
     return []
 
 
+_KHAZIX_BAN = ("说白了", "本质上", "换句话说", "这意味着", "意味着什么",
+               "不可否认", "综上所述", "值得注意的是", "不难发现")
+
+
+def _khazix_violations(md: str) -> list[str]:
+    """卡兹克文风机检（2026-11-20 用户确认方向）：小标题/列表/加粗/冒号/破折号/双引号/顾问口吻。"""
+    out: list[str] = []
+    t = re.sub(r"「[^」]*」", "", md or "")
+    t = re.sub(r"https?://\S+", "", t)
+    t = re.sub(r"\d+\s*[:：]\s*\d+", "", t)
+    if "：" in t or ":" in t:
+        out.append("冒号，改逗号（只有引原话时可以留）")
+    if "——" in md:
+        out.append("破折号，改逗号或句号")
+    if "“" in md or "”" in md:
+        out.append("双引号，改「」")
+    if re.search(r"(?m)^#{2,3}\s", md):
+        out.append("小标题，去掉，用口语转场")
+    if re.search(r"(?m)^\s*[-*]\s+", md) or re.search(r"(?m)^\s*\d+[.、]\s+", md):
+        out.append("列表，改成一段话")
+    if "**" in md:
+        out.append("加粗，去掉")
+    for w in _KHAZIX_BAN:
+        if w in md:
+            out.append(f"禁用词「{w}」，换口语说法")
+    if re.search(r"首先[^。！？\n]{0,40}其次", md):
+        out.append("「首先…其次」，用自然转场")
+    if "我的判断是" in md:
+        out.append("「我的判断是」是顾问口吻，改「我一直觉得/我自己的感受是」")
+    return out
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -310,20 +342,21 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 title = pt
         md_text = _strip_struct_heads("\n".join(lines[1:]).strip())
         min_chars_or_raise(md_text, "改编稿")
-        if len(title) > 32 or any(w in title for w in _KB_METAPHOR_TERMS):
-            ctx.set_progress(32, f"标题超长/含造词（{len(title)} 字），重拟")
+        if (len(title) > 24 or "：" in title or "——" in title or "“" in title or "”" in title
+                or any(w in title for w in _KB_METAPHOR_TERMS)):
+            ctx.set_progress(32, f"标题不合规（{len(title)} 字），重拟")
             td = await gateway.complete_json(
                 [{"role": "user", "content":
-                  "为这篇公众号长文重拟一个判断句标题：≤28 字，直接说判断或结论，克制具体；"
-                  "禁用比喻造词（承重动作/死法/死在/判死刑/没活/赘生物）与 AI 套话；"
-                  "不要用「不是X，是Y」对仗；标题里的数量必须在正文有对应展开。\n"
+                  "为这篇公众号长文重拟一个标题，≤24 字，用这件事里的一个动作或一句原话，具体、可点名；"
+                  "不用冒号、破折号、双引号、问句；不用比喻造词（承重动作/死法/死在/判死刑/没活/赘生物）"
+                  "与 AI 套话；标题里的数量必须在正文有对应。\n"
                   + md_text[:3000] + '\n输出 JSON：{"title": "..."}'}],
                 max_tokens=512, thinking="disabled")
             nt = str((td or {}).get("title") or "").strip()[:40]
             if nt:
-                if len(nt) > 32:  # 重拟仍超长：在标点处截断，保证是完整判断
-                    cut = max(nt.rfind("，", 0, 33), nt.rfind("：", 0, 33), nt.rfind("——", 0, 33))
-                    nt = nt[:cut] if cut >= 12 else nt[:32]
+                if len(nt) > 24:  # 重拟仍超长：在标点处截断，保证是完整标题
+                    cut = max(nt.rfind("，", 0, 25), nt.rfind("：", 0, 25), nt.rfind("——", 0, 25))
+                    nt = nt[:cut] if cut >= 10 else nt[:24]
                 title = nt
 
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
@@ -394,7 +427,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         def _mech(text: str) -> list[str]:
             out = (_kb_style_violations(text, anchor_texts) + _structure_violations(text)
-                   + fingerprint_violations(text, hist) + _quantity_gaps(text))
+                   + fingerprint_violations(text, hist) + _quantity_gaps(text)
+                   + _khazix_violations(text))
             if _STRUCT_HEAD_RE.search(text):
                 out.append("小标题使用功能词（开头/结尾/引言/正文/结语/总结/检验动作），改成内容短语或删掉")
             if own and re.search(r"手册作者|源文", text):
