@@ -43,6 +43,10 @@ MANAGED: dict[str, str] = {
     "pool_peer_window_hours": "int",  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
     "comment_leadgen_route_min": "int",  # 评论区分型：求学占比≥此%判获客矿归获客线（默认 60）
     "backfill_window_days": "int",   # 存量回填追溯窗（天，默认 30）：话题/账号两条回填线共用日期闸
+    # 热门评论（2026-11-20 用户裁决 1+2+3）
+    "hot_comment_topics": "str",     # 热评来源话题白名单（逗号分隔，空=只出监控号）
+    "comment_capture_cap": "int",    # 每视频评论存档条数（按赞排序取前 N）
+    "comment_refresh_days": "int",   # 评论存档滚动刷新窗（天）
 }
 
 

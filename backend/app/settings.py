@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     pool_peer_window_hours: int = 72   # 池子线视频新鲜窗（小时）：2026-11-18 用户裁决 30→72——让存量真矿（老视频高评论）进线
     comment_leadgen_route_min: int = 60  # 评论区分型路由：求学词根占比 ≥此百分比(%) 判获客矿→归获客线，人设号不吃（元角度口子另限每批1张）
     backfill_window_days: int = 30     # 存量回填追溯窗（天）：话题/账号两条回填线的日期闸（2026-11-15 用户定版追溯 90 天）
+    # 热门评论（2026-11-20 用户裁决 1+2+3）：来源=监控号+白名单话题；每视频存档条数；
+    # 存档滚动刷新窗。热评雷达与评论补采共用同一口径。
+    hot_comment_topics: str = "fde,企业ai落地,企业知识库"  # 白名单话题（逗号分隔，空=只出监控号）
+    comment_capture_cap: int = 40      # 每视频评论存档条数（按赞排序取前 N）
+    comment_refresh_days: int = 7      # 评论存档滚动刷新窗（天）：超窗重抓，补新热评/更新赞数
 
 
 settings = Settings()

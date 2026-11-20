@@ -6,9 +6,10 @@ import MaterialDossier from './MaterialDossier'
 
 /**
  * 热门评论（2026-11-18 用户定版：今天页三 tab 之一，独立于知识库）：
- * 只出监控清单作者的高赞评论（赞 ≥ hot_comment_bar，默认 50）——受众用赞投票的共鸣点，
+ * 出监控清单作者 + 白名单话题（fde/企业ai落地/企业知识库）的高赞评论
+ * （赞 ≥ hot_comment_bar，默认 50）——受众用赞投票的共鸣点，
  * 点「生成口播稿」走弹药匹配 + 形态读稿闸，成稿进「人设号 · 视频稿」。
- * 口径收窄后供给靠评论补采任务持续补齐（素材库 · 监控清单的监控号）。
+ * 供给靠评论补采任务持续补齐与 7 天滚动刷新。
  */
 
 interface HotComment {
@@ -94,7 +95,7 @@ export default function HotComments() {
       {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
       {!loaded ? null : items.length === 0 ? (
         <EmptyState icon={MessageSquare} title="还没有达标的热评"
-          desc={`监控作者的评论存档里暂无赞 ≥ ${bar} 的评论。评论补采在后面逐条重抓，新热评会自动出现在这里；若监控名单太薄，去「素材库 · 监控清单」加号。`} />
+          desc={`监控号和话题的评论存档里暂无赞 ≥ ${bar} 的评论。评论补采/刷新在后面逐条重抓，新热评会自动出现在这里；若监控名单太薄，去「素材库 · 监控清单」加号。`} />
       ) : (
         <div className="space-y-2">
           {shown.map((h) => {

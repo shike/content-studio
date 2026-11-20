@@ -33,18 +33,24 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
-    """拆解时抓高赞评论原文（R1.4 进料：评论区=观点的矿脉）。拦 comment/list XHR
-    免登录，首屏即热序；采深轮滚动评论容器翻页（40 条/12s 静默窗/60s 截止）；
-    去重按赞排序取前 cap 条 [{t,d}]。
+def _fetch_top_comments(video_url: str, cap: int = 0) -> tuple[list[dict], int]:
+    """拆解/补采时抓高赞评论原文（R1.4 进料：评论区=观点的矿脉）。拦 comment/list XHR
+    免登录，首屏即热序；采深轮滚动评论容器翻页（抓取池=cap×2，12s 静默窗，75s 截止）；
+    去重按赞排序取前 cap 条 [{t,d}]，返回 (评论, 接口 total)；total=-1=接口没回。
 
-    零评论 ≠ 抓取失败（2026-11-19）：接口正常回 total=0 返回 []，由调用方落空档案
+    cap=0 走 settings.comment_capture_cap（默认 40，2026-11-20 用户裁决从 20 上调）：
+    先收满 80 条再排序截取，存的才是真前 40，而不是「前 40 条里再排」。
+
+    零评论 ≠ 抓取失败（2026-11-19）：接口正常回 total=0 返回 ([], 0)，由调用方落空档案
     （否则空评论区视频被计 3 次失败永久停采——实测昨晚 13 条全「失败」全因 0 评论）。
     只有接口完全没回（网络/风控）才抛 RuntimeError。"""
     from playwright.sync_api import sync_playwright
 
     from ..browser import launch, ua
 
+    cap = max(1, int(cap or settings.comment_capture_cap or 40))
+    pool = cap * 2
+    hard_cap = cap * 3
     m = re.search(r"video/(\d+)", video_url)
     if not m:
         raise RuntimeError("无法从链接解析视频 id")
@@ -62,7 +68,7 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             def on_response(resp):
                 nonlocal api_total
                 try:
-                    if "aweme/v1/web/comment/list/" in resp.url and len(comments) < 80:
+                    if "aweme/v1/web/comment/list/" in resp.url and len(comments) < hard_cap:
                         d = resp.json()
                         if d.get("status_code") == 0:
                             api_total = int(d.get("total") or 0)
@@ -77,7 +83,7 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             page.on("response", on_response)
             page.goto(f"https://www.douyin.com/video/{rid}",
                       timeout=45000, wait_until="domcontentloaded")
-            deadline = time.monotonic() + 60
+            deadline = time.monotonic() + 75
             last_n, quiet = 0, 0
             while time.monotonic() < deadline:
                 page.wait_for_timeout(3000)
@@ -91,7 +97,7 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
                     except Exception:  # noqa: BLE001
                         break
                     continue
-                if len(comments) >= 40:
+                if len(comments) >= pool:
                     break
                 try:
                     page.evaluate("""() => {
@@ -111,10 +117,34 @@ def _fetch_top_comments(video_url: str, cap: int = 20) -> list[dict]:
             browser.close()
     if not comments:
         if api_total == 0:
-            return []  # 评论区正常但 0 条：空档也算采到（调用方落空档案，不再计失败）
+            return [], 0  # 评论区正常但 0 条：空档也算采到（调用方落空档案，不再计失败）
         raise RuntimeError("未拦到评论（评论区可能已关闭或接口未触发）")
     comments.sort(key=lambda c: c["d"], reverse=True)
-    return comments[:cap]
+    return comments[:cap], api_total
+
+
+def _merge_comment_items(old: list, new: list, deleted: list | None = None,
+                         cap: int = 0) -> list[dict]:
+    """新旧评论存档合并（刷新只增不减）：按文本去重，赞数取两者高值——
+    页面每次只吐一部分热评（实测同视频两次抓取各 10~13 条），直接覆盖会丢旧热评。
+    deleted=用户手动删过的文本（墓碑），刷新不再回填。"""
+    cap = max(1, int(cap or settings.comment_capture_cap or 40))
+    dead = {str(x) for x in (deleted or [])}
+    by_t: dict[str, int] = {}
+    for it in list(old or []) + list(new or []):
+        if not isinstance(it, dict):
+            continue
+        t = str(it.get("t") or "").strip()
+        if not t or t in dead:
+            continue
+        try:
+            d = int(it.get("d") or 0)
+        except (TypeError, ValueError):
+            d = 0
+        by_t[t] = max(by_t.get(t, 0), d)
+    items = [{"t": t[:60], "d": d} for t, d in by_t.items()]
+    items.sort(key=lambda x: x["d"], reverse=True)
+    return items[:cap]
 
 
 # ── 评论区分型路由（R1.4）：求学打卡型=获客需求信号 → 获客线；观点型=人设矿脉 ──
@@ -234,21 +264,29 @@ async def run_analyze(ctx: JobContext, material_id: int) -> dict:
     if origin_type == "douyin_video" and url:
         try:
             ctx.set_progress(30, "抓高赞评论原文（评论区=观点的矿脉）")
-            top_comments = await asyncio.to_thread(_fetch_top_comments, url)
-            kind, share = classify_comments(top_comments)
+            top_comments, api_total = await asyncio.to_thread(_fetch_top_comments, url)
             author = ""
             with Session(engine) as s:
                 m = s.get(Material, material_id)
                 author = m.author or ""
+                prev = s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+                    MaterialAnalysis.material_id == material_id,  # type: ignore[attr-defined]
+                    MaterialAnalysis.kind == "comments")  # type: ignore[attr-defined]
+                    .order_by(MaterialAnalysis.version.desc())).first()  # type: ignore[attr-defined]
+                prev_payload = (prev.payload or {}) if prev is not None else {}
+                deleted = list(prev_payload.get("deleted") or [])
+                merged = _merge_comment_items(prev_payload.get("items"), top_comments, deleted)
+                kind, share = classify_comments(merged)
                 _save_analysis(s, material_id, tenant_id, "comments",
-                               {"items": top_comments}, model="xhr")
+                               {"items": merged, "total": api_total, "deleted": deleted,
+                                "captured_at": _now().isoformat()}, model="xhr")
                 q = dict(m.quality or {})
                 q["comment_kind"], q["leadgen_share"] = kind, share
-                q["comment_empty"] = not top_comments
+                q["comment_empty"] = not merged
                 m.quality = q
                 s.add(m)
                 s.commit()
-            if not top_comments:
+            if not merged:
                 ctx.set_progress(31, "评论区 0 条（空评论区落空档案，不算抓取失败）")
             elif kind == "leadgen_ore":
                 ctx.set_progress(31, f"评论区判获客矿（求学密度 {share:.0%}）——素材归获客线，人设号不吃")

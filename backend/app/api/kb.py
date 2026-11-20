@@ -237,10 +237,12 @@ async def hotspot_suggest(doc_id: int, user: User = Depends(require_user)) -> di
 def hot_comments(user: User = Depends(require_user)) -> dict:
     """热评雷达（2026-11-18 车道二·用户定版「别人视频的热门评论适合做口播」）：
     高赞评论=受众用赞投票的共鸣点，口播选题源。准入线赞数 AppSetting.hot_comment_bar（默认 50）。
-    口径收窄（2026-11-18 用户裁决）：**只出监控清单作者**（active peer_account，扫描入库
-    按 source_id、存量按作者名双匹配）——监控号自己的评论存档太薄（273 个视频待补采），
-    扩量靠评论补采任务+存量回填。评论存档多版本时只取最新版（否则同条评论重复出现）。"""
-    from ..models import MaterialAnalysis, Source
+    来源（2026-11-20 用户裁决）：**监控清单作者 + 白名单话题**（settings.hot_comment_topics，
+    默认 fde/企业ai落地/企业知识库）——监控号按 source_id、存量按作者名双匹配；话题素材按
+    source_id 或旧档 note 里的「话题回填#话题名」认领。泛话题（ai/workbuddy）噪声太大不并入。
+    评论存档多版本时只取最新版（否则同条评论重复出现）。"""
+    from ..materials.hot_comments import hot_scope, in_hot_scope
+    from ..models import MaterialAnalysis
 
     with Session(engine) as s:
         row = s.get(AppSetting, "hot_comment_bar")
@@ -248,12 +250,7 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
             bar = int(row.value) if row is not None and row.value else 50
         except (TypeError, ValueError):
             bar = 50
-        mon = s.exec(select(Source).where(  # type: ignore[attr-defined]
-            Source.kind == "peer_account",  # type: ignore[attr-defined]
-            Source.status == "active",  # type: ignore[attr-defined]
-            Source.platform == "douyin")).all()  # type: ignore[attr-defined]
-        mon_ids = {x.id for x in mon if x.id is not None}
-        mon_names = {x.name for x in mon}
+        scope = hot_scope(s)
         latest: dict[int, MaterialAnalysis] = {}
         for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
                 MaterialAnalysis.kind == "comments")).all():  # type: ignore[attr-defined]
@@ -263,9 +260,8 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
         items: list[dict] = []
         for a in latest.values():
             m = s.get(Material, a.material_id)
-            if m is None or ((m.source_id or 0) not in mon_ids
-                             and (m.author or "") not in mon_names):
-                continue  # 只出监控清单作者（雷达口径收窄，2026-11-18）
+            if m is None or not in_hot_scope(m, scope):
+                continue  # 只出监控清单作者 + 白名单话题
             for i, it in enumerate((a.payload or {}).get("items") or []):
                 if not isinstance(it, dict):
                     continue
@@ -279,7 +275,8 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
                                   "likes": d, "author": m.author or "",
                                   "source": m.title or ""})
     items.sort(key=lambda x: -x["likes"])
-    return {"items": items[:50], "bar": bar, "total": len(items)}
+    # 上限 100（原 50）：并入话题线后条数变多，50 会把监控线的低赞热评挤出列表
+    return {"items": items[:100], "bar": bar, "total": len(items)}
 
 
 @router.delete("/hot_comments/{material_id}/{idx}")
@@ -302,10 +299,15 @@ def delete_hot_comment(material_id: int, idx: int,
             raise HTTPException(status_code=404, detail="这条评论已不存在（列表可能已刷新）")
         removed = items.pop(idx)
         payload["items"] = items
+        # 墓碑：刷新是「新旧合并」，不记一笔删过的话，下次重抓又会回填这条
+        text = str((removed or {}).get("t") or "")[:60]
+        deleted = list(payload.get("deleted") or [])
+        if text and text not in deleted:
+            deleted.append(text)
+        payload["deleted"] = deleted[-300:]
         a.payload = payload
         s.add(a)
         s.commit()
-    text = str((removed or {}).get("t") or "")[:200]
     return {"ok": True, "removed": text, "remaining": len(items)}
 
 

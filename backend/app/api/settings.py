@@ -45,6 +45,9 @@ def _status() -> dict:
         "pool_peer_window_hours": settings.pool_peer_window_hours,
         "comment_leadgen_route_min": settings.comment_leadgen_route_min,
         "backfill_window_days": settings.backfill_window_days,
+        "hot_comment_topics": settings.hot_comment_topics,
+        "comment_capture_cap": settings.comment_capture_cap,
+        "comment_refresh_days": settings.comment_refresh_days,
         "managed_keys": sorted(MANAGED),  # 可在本页修改的键（前端按需展示）
     }
     st.update(stored_secret_state())  # *_set 状态（密钥明文绝不回传）
@@ -80,6 +83,10 @@ class UpdateIn(BaseModel):
     pool_peer_window_hours: int | None = None  # 池子线视频新鲜窗（小时，默认 30=只吃新视频）
     comment_leadgen_route_min: int | None = None  # 评论区分型：求学占比≥此%判获客矿（默认 60）
     backfill_window_days: int | None = None    # 存量回填追溯窗（天，默认 30）
+    # 热门评论（2026-11-20 用户裁决 1+2+3）
+    hot_comment_topics: str | None = None      # 热评来源话题白名单（逗号分隔，空=只出监控号）
+    comment_capture_cap: int | None = None     # 每视频评论存档条数（按赞排序取前 N）
+    comment_refresh_days: int | None = None    # 评论存档滚动刷新窗（天）
     # 密钥项（只写不读）
     zhipu_api_key: str | None = None
 
@@ -141,6 +148,16 @@ def update_settings(body: UpdateIn) -> dict:
         if v is not None:
             if not 1 <= v <= 100000:
                 raise HTTPException(400, detail=f"{key} 必须是 1~100000 的整数")
+            values[key] = v
+    if body.hot_comment_topics is not None:
+        values["hot_comment_topics"] = ",".join(
+            x.strip() for x in body.hot_comment_topics.split(",") if x.strip())
+    for key, lo, hi, label in (("comment_capture_cap", 5, 200, "每视频评论存档条数"),
+                               ("comment_refresh_days", 1, 90, "评论刷新窗（天）")):
+        v = getattr(body, key)
+        if v is not None:
+            if not lo <= v <= hi:
+                raise HTTPException(400, detail=f"{label}必须是 {lo}~{hi} 的整数")
             values[key] = v
     if body.coverage_min is not None:
         if body.coverage_min not in ("boss", "middle", "job_wide"):

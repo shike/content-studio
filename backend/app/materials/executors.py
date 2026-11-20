@@ -20,6 +20,7 @@ from ..jobs.errors import TransientError
 from ..jobs.runner import (JobContext, register_concurrent, register_executor,
                            register_owed)
 from ..models import Job, Material, MaterialAnalysis, Source
+from ..settings import settings
 from . import service
 from .collectors import douyin_list
 from .collectors.hl import material_hl_search  # noqa: F401  执行器注册随导入生效
@@ -169,43 +170,34 @@ async def material_watch_scan(ctx: JobContext, payload: dict) -> dict:
 
 
 # ── 评论补采（2026-11-18 用户裁决·扩量）：拆解时抓评论只此一次、成功率 ~5%，失败永不补——
-# 解耦成独立批量任务自愈重试。范围=监控清单作者（与热评雷达同口径）；连败 3 次停采
-# （评论区关闭/视频已死，防每轮空烧）。全程 Playwright 抓评论 XHR，无 LLM 开销；
-# light 分道同类合并（不堵 heavy 的生成任务），单轮 cap 防 RetryPolicy 硬超时。
+# 解耦成独立批量任务自愈重试。范围=监控清单作者 + 热评白名单话题（与热评雷达同口径）；
+# 连败 3 次停采（评论区关闭/视频已死，防每轮空烧）。全程 Playwright 抓评论 XHR，无 LLM
+# 开销；light 分道同类合并（不堵 heavy 的生成任务），单轮 cap 防 RetryPolicy 硬超时。
+# 2026-11-20 用户裁决 1+2+3：每视频存前 40 条、存档 7 天滚动刷新（每天最多一批防风控）。
 
 
-def _monitor_author_filter(s: Session) -> tuple[set[int], set[str]]:
-    """监控清单作者（active peer_account）：source_id 集合 + 作者名集合。"""
-    mon = s.exec(select(Source).where(  # type: ignore[attr-defined]
-        Source.kind == "peer_account",  # type: ignore[attr-defined]
-        Source.status == "active",  # type: ignore[attr-defined]
-        Source.platform == "douyin")).all()  # type: ignore[attr-defined]
-    return ({x.id for x in mon if x.id is not None}, {x.name for x in mon})
+def _recapture_plan() -> tuple[list[Material], list[Material]]:
+    """评论补采计划：(无存档, 超刷新窗)。监控号 + 热评白名单话题两条线；
+    无存档按热度降序优先，过期存档按最旧优先；连败 3 次停采。"""
+    from .hot_comments import hot_scope, in_hot_scope
 
-
-def _recapture_targets() -> list[Material]:
-    """补采目标（雷达扩量队列）：监控作者 + ready + 有链接 + 未在拆解 + 未连败停采 +
-    无评论存档；按互动降序（高热视频的评论区先补）。"""
     with Session(engine) as s:
-        mon_ids, mon_names = _monitor_author_filter(s)
+        scope = hot_scope(s)
         busy = {(j.payload or {}).get("material_id") for j in s.exec(select(Job).where(  # type: ignore[attr-defined]
             Job.type == "material_analyze",  # type: ignore[attr-defined]
             Job.status.in_(["queued", "running"]))).all()}  # type: ignore[attr-defined]
         rows = s.exec(select(Material).where(  # type: ignore[attr-defined]
             Material.origin_type == "douyin_video",  # type: ignore[attr-defined]
             Material.status == "ready")).all()  # type: ignore[attr-defined]
-    targets = [m for m in rows
-               if m.id not in busy
-               and m.origin_url
-               and ((m.source_id or 0) in mon_ids or (m.author or "") in mon_names)
-               and int((m.quality or {}).get("comment_fails") or 0) < 3]
-    if not targets:
-        return []
-    with Session(engine) as s:
-        have = {a.material_id for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
-            MaterialAnalysis.material_id.in_([t.id for t in targets]),  # type: ignore[arg-type]
-            MaterialAnalysis.kind == "comments")).all()}  # type: ignore[attr-defined]
-    targets = [t for t in targets if t.id not in have]
+        latest: dict[int, MaterialAnalysis] = {}
+        for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+                MaterialAnalysis.kind == "comments")).all():  # type: ignore[attr-defined]
+            cur = latest.get(a.material_id)
+            if cur is None or (a.version or 0) > (cur.version or 0):
+                latest[a.material_id] = a
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    days = max(1, int(settings.comment_refresh_days or 7))
+    stale_before = now - timedelta(days=days)
 
     def _hotness(m: Material) -> int:
         st = m.stats or {}
@@ -214,44 +206,75 @@ def _recapture_targets() -> list[Material]:
         except (TypeError, ValueError):
             return 0
 
-    targets.sort(key=_hotness, reverse=True)
-    return targets
+    missing: list[Material] = []
+    stale: list[tuple[datetime | None, Material]] = []
+    for m in rows:
+        if m.id in busy or not m.origin_url or not in_hot_scope(m, scope):
+            continue
+        q = m.quality or {}
+        a = latest.get(m.id)
+        if a is None:
+            if int(q.get("comment_fails") or 0) < 3:
+                missing.append(m)
+            continue
+        if int(q.get("comment_refresh_fails") or 0) >= 3:
+            continue
+        if a.created_at is not None and a.created_at >= stale_before:
+            continue
+        stale.append((a.created_at, m))
+    missing.sort(key=_hotness, reverse=True)
+    stale.sort(key=lambda x: x[0] or now)
+    return missing, [m for _, m in stale]
 
 
 @register_executor("comment_recapture")
 async def comment_recapture(ctx: JobContext, payload: dict) -> dict:
-    """评论补采批量（light）：对「有拆解、无评论存档」的监控作者视频逐条重抓评论。
-    抓到=与拆解链同口径落档（评论存档+分型+账号联动改判）；失败计 quality.comment_fails，
-    连败 3 次停采。余量由 owed 下轮续扫（每轮 cap 100）。"""
-    from .enrich import (_fetch_top_comments, classify_comments,
-                         _rejudge_source_type, _save_analysis)
+    """评论补采/刷新批量（light）：无存档的补首次，超刷新窗的重抓最新热序。
+    抓到=与拆解链同口径落档（评论存档+分型+账号联动改判）；失败计
+    quality.comment_fails（首次）/ comment_refresh_fails（刷新），连败 3 次停采。
+    余量由 owed 下轮续扫（每轮 cap 80）。"""
+    from .enrich import (_fetch_top_comments, _merge_comment_items,
+                         classify_comments, _rejudge_source_type, _save_analysis)
 
-    cap = 100   # 单轮上限：100×(60s 抓取窗+18s 静默) ≈ 2.6h < task_timeout 4h
+    cap = 80   # 单轮上限：80×(75s 抓取窗+18s 静默) ≈ 2h < task_timeout 4h
     pace_s = 18  # 视频间静默窗：评论接口连发易触发风控窗
-    targets = _recapture_targets()
+    missing, stale = _recapture_plan()
+    targets = missing + stale
     batch = targets[:cap]
     if not batch:
-        ctx.set_progress(100, "没有需要补采的视频（监控作者全部有评论存档或已停采）")
-        return {"queue": 0, "ok": 0, "fail": 0}
+        ctx.set_progress(100, "没有需要补采或刷新的视频")
+        return {"queue": 0, "missing": 0, "stale": 0, "ok": 0, "fail": 0}
 
+    missing_ids = {m.id for m in missing}
     ok = fail = 0
     notes: list[str] = []
     for i, m in enumerate(batch):
+        action = "补采" if m.id in missing_ids else "刷新"
         ctx.set_progress(5 + int(90 * i / len(batch)),
-                         f"补采评论 {i + 1}/{len(batch)}：{(m.title or m.author or '')[:36]}")
+                         f"{action}评论 {i + 1}/{len(batch)}：{(m.title or m.author or '')[:36]}")
         try:
-            comments = await asyncio.to_thread(_fetch_top_comments, m.origin_url)
-            kind, share = classify_comments(comments)
+            comments, api_total = await asyncio.to_thread(_fetch_top_comments, m.origin_url)
             with Session(engine) as s:
                 row = s.get(Material, m.id)
                 if row is None:
                     continue
+                prev = s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+                    MaterialAnalysis.material_id == m.id,  # type: ignore[attr-defined]
+                    MaterialAnalysis.kind == "comments")  # type: ignore[attr-defined]
+                    .order_by(MaterialAnalysis.version.desc())).first()  # type: ignore[attr-defined]
+                prev_payload = (prev.payload or {}) if prev is not None else {}
+                deleted = list(prev_payload.get("deleted") or [])
+                merged = _merge_comment_items(prev_payload.get("items"), comments, deleted)
+                kind, share = classify_comments(merged)
                 _save_analysis(s, m.id, row.tenant_id, "comments",
-                               {"items": comments}, model="xhr")
+                               {"items": merged, "total": api_total, "deleted": deleted,
+                                "captured_at": datetime.now(timezone.utc)
+                                .replace(tzinfo=None).isoformat()}, model="xhr")
                 q = dict(row.quality or {})
                 q["comment_fails"] = 0
+                q["comment_refresh_fails"] = 0
                 q["comment_kind"], q["leadgen_share"] = kind, share
-                q["comment_empty"] = not comments
+                q["comment_empty"] = not merged
                 row.quality = q
                 s.add(row)
                 s.commit()
@@ -266,22 +289,34 @@ async def comment_recapture(ctx: JobContext, payload: dict) -> dict:
                 row = s.get(Material, m.id)
                 if row is not None:
                     q = dict(row.quality or {})
-                    q["comment_fails"] = int(q.get("comment_fails") or 0) + 1
+                    key = "comment_fails" if m.id in missing_ids else "comment_refresh_fails"
+                    q[key] = int(q.get(key) or 0) + 1
                     row.quality = q
                     s.add(row)
                     s.commit()
             fail += 1
         await asyncio.sleep(pace_s)
     tail = f"；剩余 {max(0, len(targets) - len(batch))} 条 owed 下轮续扫" if len(targets) > len(batch) else ""
-    ctx.set_progress(100, f"评论补采完成：成功 {ok} / 失败 {fail}{tail}")
-    return {"queue": len(targets), "ok": ok, "fail": fail, "notes": notes[:12]}
+    ctx.set_progress(100, f"评论补采/刷新完成：成功 {ok} / 失败 {fail}{tail}")
+    return {"queue": len(targets), "missing": len(missing), "stale": len(stale),
+            "ok": ok, "fail": fail, "notes": notes[:12]}
 
 
 def owed_comment_recapture() -> list[tuple[dict, str]]:
-    """欠任务声明：监控作者还有「有拆解、无评论存档、未停采」的视频 → 补一个批量任务
-    （dedup 幂等，在跑时合并；reaper 每轮检查，批次跑完自动续扫）。"""
-    if not _recapture_targets():
+    """欠任务声明：①有新视频无评论存档 → 立即补；②存档超刷新窗 → 每天最多一批
+    （20h 冷却，防连续刮评论触发风控）。dedup 幂等，在跑时合并。"""
+    missing, stale = _recapture_plan()
+    if not missing and not stale:
         return []
+    if not missing:  # 只有刷新任务：一天一批
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=20)
+        with Session(engine) as s:
+            recent = s.exec(select(Job).where(  # type: ignore[attr-defined]
+                Job.type == "comment_recapture",  # type: ignore[attr-defined]
+                Job.created_at >= cutoff)  # type: ignore[attr-defined]
+                .order_by(Job.created_at.desc())).first()  # type: ignore[attr-defined]
+        if recent is not None:
+            return []
     return [({"auto": True}, "1:comment_recapture")]
 
 
