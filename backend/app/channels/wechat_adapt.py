@@ -352,6 +352,21 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             if pt:
                 title = pt
         md_text = _strip_struct_heads("\n".join(lines[1:]).strip())
+        # 短稿扩写（2026-11-20 kz 实测：卡兹克文体每个证据只写一两句，稳定落在 1300~1400，
+        # 贴着 1500 下限会反复触发瞬时失败）。只扩已有场景，不加事实；扩写后仍由审校兜底。
+        if len(md_text) < 1500:
+            ctx.set_progress(35, f"正文 {len(md_text)} 字偏短，扩写已有场景")
+            try:
+                expanded = _strip_fence(await gateway.complete(
+                    [{"role": "user", "content": render(
+                        "article_adapt_expand", SOURCE=write_source, DRAFT=md_text)}],
+                    max_tokens=8192, thinking="disabled")).strip()
+                if expanded.startswith("# "):
+                    expanded = "\n".join(expanded.split("\n")[1:]).strip()
+                if expanded and len(expanded) > len(md_text):
+                    md_text = expanded
+            except Exception as e:  # noqa: BLE001
+                print(f"[adapt] 扩写失败（保留原稿）: {type(e).__name__}: {str(e)[:80]}")
         min_chars_or_raise(md_text, "改编稿")
         if (len(title) > 24 or "：" in title or "——" in title or "“" in title or "”" in title
                 or any(w in title for w in _KB_METAPHOR_TERMS)):
