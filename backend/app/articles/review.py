@@ -27,7 +27,7 @@ async def review_adapt(md: str, source: str) -> tuple[list[str], list[str]]:
         def _pick(key: str, cap: int, limit: int = 200) -> list[str]:
             return [str(x).strip()[:limit] for x in (v or {}).get(key) or []
                     if str(x).strip()][:cap]
-        return _pick("hard", 6), _pick("soft", 8)
+        return _pick("hard", 10), _pick("soft", 8)
     except Exception as e:  # noqa: BLE001
         print(f"[review] 合并审校失败（不阻塞）: {type(e).__name__}: {str(e)[:80]}")
         return [], []
