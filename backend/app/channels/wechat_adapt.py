@@ -204,7 +204,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         angle = str(q0.get("adapt_angle") or "")
         quotes = [str(x) for x in (q0.get("best_quotes") or [])]
         score = float(q0.get("score") or 0)
-        own = bool(q0.get("own_source"))  # 源文是号主自己的稿子：第一人称归属反转
+        # 知识库文档默认是号主自有（2026-11-20 用户确认：全部都是我的）；单篇可显式置 false
+        own = bool(q0.get("own_source", True))
         # 两步改编（2026-11-20 A 方案）：payload 带人选定的判断时，判断与证据从这里来，
         # 写稿只喂证据包，不再喂全书——防读书笔记，也防判断永远是源文的那一个。
         pitch = payload.get("pitch") if isinstance(payload.get("pitch"), dict) else None
