@@ -152,6 +152,10 @@ def _language_style_violations(md: str) -> list[str]:
     for p in md.split("\n\n"):
         pct = re.findall(r"\d+(?:\.\d+)?%", p)
         if len(pct) >= 4:
+            vals = [float(x[:-1]) for x in pct]
+            # 付款比例（20%/25%/25%/20%/10% 合计 100）是合同条款，不是统计堆叠
+            if any(abs(sum(vals[i:i + 5]) - 100) <= 1.0 for i in range(max(0, len(vals) - 4))):
+                continue
             out.append(f"单段堆了 {len(pct)} 个百分比统计——统计数字最多三个，其余改成机制描述")
             break
     return out
