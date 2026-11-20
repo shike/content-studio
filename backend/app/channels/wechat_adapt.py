@@ -183,6 +183,11 @@ def _khazix_violations(md: str) -> list[str]:
         out.append("元评论（这篇文章/这个故事/本文），删掉，直接讲事")
     if re.search(r"(?m)^(先说|再说|另一方面|说到这里|接下来|回到那件事|回到这件事)", t):
         out.append("段落路标（先说/再说/接下来/回到那件事），用事情本身接上")
+    if re.search(r"这件事我想|这里只挑|这句话是关键|说的具体一点|问题看起来[^。！？\n]{0,12}不够|"
+                 r"真问题找到之后", t):
+        out.append("解释结构的元叙述，删掉，直接讲下一件事")
+    if re.search(r"我心里|我当时也没想到|让我印象|我心里有数|我心里一沉", t):
+        out.append("素材没写的心理活动，删掉")
     return out
 
 
@@ -474,10 +479,12 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         if mech:
             soft = [f"机检：{v}" for v in mech[:6]] + soft
         for _round in range(2):  # 最多两轮修订：修订本身可能引入新问题，复审兜底
-            if not hard and not soft:
+            if not hard:
                 break
             ctx.set_progress(82, f"审校命中 hard {len(hard)}/soft {len(soft)}，定向修订第 {_round + 1} 轮")
-            fix_list = list(hard) + list(soft)
+            # 只按 hard 改：soft 是风格建议，混进修订会让模型整段重写，
+            # kz3 实测第二轮为改 soft 补出「不铺系统」这种新事实，hard 反而 1→2。
+            fix_list = list(hard)
             revised = await revise_once(md_text, fix_list, source, own)
             # 审校修订不再做数字签名守卫：事实类问题（编造数字/口径）本来就要动数字，
             # 签名一致才收等于禁止修正；改完由复审兜底。
