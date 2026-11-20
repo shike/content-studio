@@ -287,13 +287,14 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             quotes_block = "\n".join(f"- {x}" for x in q) or "（无，本次不引用原话）"
         else:
             quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
+        title_hint = (str(pitch.get("title") or "").strip() if pitch else "") or "（无，自行拟）"
         hist = recent_fingerprints(3, exclude_id=article_id)
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
                                                 PERSONA=persona_text,
                                                 IDENTITY=identity,
                                                 SOURCE=write_source, ANGLE=angle,
-                                                QUOTES=quotes_block,
+                                                QUOTES=quotes_block, TITLE_HINT=title_hint,
                                                 FINGERPRINT=fingerprint_brief(hist))}],
             max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理，关掉后 83s 出稿
         body = _strip_fence(body)
