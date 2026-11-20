@@ -321,7 +321,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
         ctx.set_progress(55, "原创度检测（与源文比对）")
         ratio, hits = _dup_ratio(md_text, source)
-        if ratio > _DUP_LINE:
+        if not own and ratio > _DUP_LINE:  # 自有稿：重复自己的句子不是抄袭，禁止降重改写自己的话
             ctx.set_progress(62, f"重复率 {ratio}% 超线，定向降重写")
             polished = await gateway.complete(
                 [{"role": "user", "content": render("article_adapt_reduce",
@@ -336,7 +336,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 if polished_md and _content_signature(polished_md) == _content_signature(md_text):
                     md_text = polished_md
                     ratio, hits = _dup_ratio(md_text, source)
-        if ratio > _DUP_LINE:
+        if not own and ratio > _DUP_LINE:
             _release(f"改编稿重复率 {ratio}% 超 {_DUP_LINE}% 线（重写一次仍超），退回清单 #{item_id}")
             with Session(engine) as s:
                 art = s.get(Content, article_id)
