@@ -40,6 +40,15 @@ _MAX_CHARS = 2500     # 正文上限（超线定向压缩一次；公众号正�
 
 _PUNCT = re.compile(r"[\s，。！？；：、“”‘’「」『』（）()【】\[\]—…·.,;:!?\"'<>《》]")
 
+# 功能型小标题（「## 开头」「## 检验动作」）：模型爱照写，审校常改不动——确定性删除。
+_STRUCT_HEAD_RE = re.compile(
+    r"(?m)^#{1,3}[ \t]*(开头|结尾|引言|正文|结语|总结|小结|结论|尾声|后记|前言|写在最后|检验动作)[ \t]*$")
+
+
+def _strip_struct_heads(md: str) -> str:
+    out = _STRUCT_HEAD_RE.sub("", md or "")
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
 
 def _norm(t: str) -> str:
     return _PUNCT.sub("", t or "")
@@ -210,7 +219,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         if not lines or not lines[0].lstrip().startswith("# "):
             raise TransientError("改编输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
         title = lines[0].lstrip()[2:].strip() or src_title[:30]
-        md_text = "\n".join(lines[1:]).strip()
+        md_text = _strip_struct_heads("\n".join(lines[1:]).strip())
         min_chars_or_raise(md_text, "改编稿")
         if any(w in title for w in _KB_METAPHOR_TERMS):
             ctx.set_progress(32, "标题含比喻造词，重拟")
@@ -265,7 +274,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             out = _strip_fence(await gateway.complete(
                 [{"role": "user", "content":
                  f"这篇公众号长文 {len(text)} 字，公众号正文上限 {_MAX_CHARS} 字。请做硬压缩：\n"
-                 "保留：各阶段各一节（每节 300~400 字，只留该阶段最核心的判断与 1~2 个关键动作）、"
+                 "保留：论证主线的每一块（每块只留最核心的判断与 1~2 个关键证据）、"
                  "开头的可检验主张、结尾的判断；正文里的原话引用原样保留。\n"
                  "删除：例子里的展开细节、重复解释、修饰句、背景铺垫、过渡句、枝节。\n"
                  "只删不增，不许新增内容或改写事实。目标 2000 字上下，不得超过 2500。\n"
@@ -290,9 +299,19 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         from ..articles.review import review_adapt, revise_once
 
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
-        mech = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
-        if re.search(r"(?m)^#{1,3}\s*(开头|结尾|引言|正文|结语)\s*$", md_text):
-            mech.append("小标题使用结构词（开头/结尾/引言/正文/结语），改成内容短语或删掉")
+        def _mech(text: str) -> list[str]:
+            out = _kb_style_violations(text, anchor_texts) + _structure_violations(text)
+            if _STRUCT_HEAD_RE.search(text):
+                out.append("小标题使用功能词（开头/结尾/引言/正文/结语/总结/检验动作），改成内容短语或删掉")
+            judge_n = len(re.findall("我的判断是", text))
+            if judge_n >= 2:
+                out.append(f"判断句模板化：「我的判断是」出现 {judge_n} 次，只留一处，其余直接陈述")
+            attr_n = len(re.findall("源文|手册作者", text))
+            if attr_n >= 4:
+                out.append(f"转述腔：对源文的归属声明 {attr_n} 处，转述事实直接陈述，只保留引用原话的说话人")
+            return out
+
+        mech = _mech(md_text)
         chapter_terms = _chapter_terms(source)
 
         def _with_enum_gaps(hard_list: list[str], text: str) -> list[str]:
@@ -317,9 +336,10 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                 md_text = revised
             hard, soft = await review_adapt(md_text, source)
             hard = _with_enum_gaps(hard, md_text)
-            mech2 = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
+            mech2 = _mech(md_text)
             if mech2:
                 soft = [f"机检：{v}" for v in mech2[:6]] + soft
+        md_text = _strip_struct_heads(md_text)  # 修订可能把功能型小标题写回来，确定性兜底
         soft_left = soft
         if hard:
             with Session(engine) as s:
