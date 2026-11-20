@@ -317,7 +317,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                 thinking="disabled")
         # 节级长度守卫（2026-11-20）：分节模型普遍无视节长预算（实测每节 ~690 vs 上限 500），
         # 超上限 150 字即压缩该节一次，避免全文压不动。
-        if per_hi and len(part) > per_hi + 150:
+        if per_hi and len(part) > per_hi + 50:
             part = await gateway.complete(
                 [{"role": "system", "content": sec_prompt
                   + f"\n\n注意：你上一稿写了 {len(part)} 字，超过本节上限 {per_hi} 字。"
@@ -387,8 +387,8 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
               f"这篇公众号长文 {len(md_text)} 字，公众号正文上限 2500 字。请做硬压缩：\n"
               "保留：各小节的核心判断与 1~2 个关键论据、所有数字与原话引用、小节结构；\n"
               "删除：例子展开、重复解释、修饰句、类比、背景铺垫、讲稿式过渡句；\n"
-              f"只删不增，不许新增内容或改写事实。当前 {len(md_text)} 字，"
-              f"至少再删 {max(0, len(md_text) - 2200)} 字，最终不得超过 2500 字。\n"
+              f"只删不增，不许新增内容或改写事实。当前 {len(md_text)} 字，目标 {max(1500, min(1900, len(md_text) - 800))} 字，"
+              f"至少再删 {max(0, len(md_text) - 2000)} 字，最终不得超过 2500 字。\n"
               "输出完整修订后全文（保留小节标题）：\n" + md_text}],
             max_tokens=8192, thinking="disabled")
         out = re.sub(r"^```[a-z]*\n|\n```$", "", (out or "").strip())
