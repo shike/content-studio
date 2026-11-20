@@ -204,6 +204,14 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         angle = str(q0.get("adapt_angle") or "")
         quotes = [str(x) for x in (q0.get("best_quotes") or [])]
         score = float(q0.get("score") or 0)
+        # 两步改编（2026-11-20 A 方案）：payload 带人选定的判断时，判断与证据从这里来，
+        # 写稿只喂证据包，不再喂全书——防读书笔记，也防判断永远是源文的那一个。
+        pitch = payload.get("pitch") if isinstance(payload.get("pitch"), dict) else None
+        if pitch:
+            angle = str(pitch.get("thesis") or "").strip() or angle
+            ev0 = [str(x).strip() for x in (pitch.get("evidence") or []) if str(x).strip()]
+            if ev0:
+                quotes = ev0
     client_id, api_key = cfg["client_id"], cfg["api_key"]
 
     def _release(reason: str, item_status: str = "pending", tag: str = "") -> None:
@@ -260,12 +268,22 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         # ── 改编成文（单次写入；标题随稿出，2026-11-19 收拢流水线）──
         persona_text = brand_of(1)["persona"]
         ctx.set_progress(30, "改编成文（保骨架保原话换口径）")
-        quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
+        write_source = source
+        if pitch:
+            ev = [str(x).strip() for x in (pitch.get("evidence") or []) if str(x).strip()]
+            if ev:
+                write_source = "\n\n".join(f"〔证据 {i}〕{x}" for i, x in enumerate(ev, 1))
+                ctx.set_progress(30, f"改编成文（按选定判断，证据 {len(ev)} 段）")
+        if pitch:
+            q = [x for x in quotes if "「" in x][:3]
+            quotes_block = "\n".join(f"- {x}" for x in q) or "（无，本次不引用原话）"
+        else:
+            quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
         hist = recent_fingerprints(3, exclude_id=article_id)
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
                                                 PERSONA=persona_text,
-                                                SOURCE=source, ANGLE=angle,
+                                                SOURCE=write_source, ANGLE=angle,
                                                 QUOTES=quotes_block,
                                                 FINGERPRINT=fingerprint_brief(hist))}],
             max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理，关掉后 83s 出稿
