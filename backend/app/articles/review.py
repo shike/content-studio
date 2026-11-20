@@ -42,13 +42,26 @@ async def review_adapt(md: str, source: str, own: bool = False) -> tuple[list[st
         return [], []
 
 
-async def revise_once(md: str, issues: list[str]) -> str | None:
-    """按问题清单定向修订一次。失败返回 None（调用方保留原稿）。"""
+async def revise_once(md: str, issues: list[str], source: str = "",
+                      own: bool = False) -> str | None:
+    """按问题清单定向修订一次。失败返回 None（调用方保留原稿）。
+
+    2026-11-20 修：修订必须看到源文。此前只喂问题清单，改「凭空事实」时模型
+    无法核对，只能换一种说法保留编造内容，两轮修订原地打转（kz2 实测 hard 6→5）。
+    """
+    identity = (
+        "这是号主自己的稿子：源文里的「我」就是号主。正文用第一人称；"
+        "出现「手册作者」「源文里写」「作者记录」这类把自己的话转述成别人的写法，要改回「我」。"
+        if own else
+        "源文作者的第一人称不是号主的经历：正文若用第一人称讲源文作者的亲历，要改成"
+        "第三人称或标明说话人。"
+    )
     try:
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_revise",
                                                 ISSUES="\n".join(f"- {x}" for x in issues),
-                                                DRAFT=md)}],
+                                                DRAFT=md, SOURCE=source[:40000],
+                                                IDENTITY=identity)}],
             max_tokens=8192, thinking="disabled")
         body = _strip_fence(body)
         lines = body.split("\n")
