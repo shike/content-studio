@@ -157,7 +157,9 @@ _KHAZIX_BAN = ("说白了", "本质上", "换句话说", "这意味着", "意味
 def _khazix_violations(md: str) -> list[str]:
     """卡兹克文风机检（2026-11-20 用户确认方向）：小标题/列表/加粗/冒号/破折号/双引号/顾问口吻。"""
     out: list[str] = []
-    t = re.sub(r"「[^」]*」", "", md or "")
+    # 引出原话的冒号合规（写作规则里明确允许：「他说：『……』」），先抹掉再查
+    t = re.sub(r"[：:]\s*「", "「", md or "")
+    t = re.sub(r"「[^」]*」", "", t)
     t = re.sub(r"https?://\S+", "", t)
     t = re.sub(r"\d+\s*[:：]\s*\d+", "", t)
     if "：" in t or ":" in t:
