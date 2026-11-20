@@ -281,8 +281,10 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         per_lo, per_hi = 0, 0
         if length == "deep":
             per_lo, per_hi = max(300, 1500 // n), max(350, 2500 // n)
+            ask_lo, ask_hi = max(250, int(per_lo * 0.8)), max(300, int(per_hi * 0.8))
             replaced = sec_spec.replace("篇幅 400~600 字",
-                                        f"篇幅 {per_lo}~{per_hi} 字（全文共 {n} 节、总预算 1500~2500 字）", 1)
+                                        f"篇幅 {ask_lo}~{ask_hi} 字（全文共 {n} 节、总预算 1500~2500 字；"
+                                        f"硬上限 {per_hi} 字，超过即返工）", 1)
             assert replaced != sec_spec, "deep 档 section 规格缺「篇幅 400~600 字」锚点，替换静默失效"
             sec_spec = replaced
         sec_prompt = (render("article_section", PERSONA=persona_text,
@@ -317,7 +319,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                 thinking="disabled")
         # 节级长度守卫（2026-11-20）：分节模型普遍无视节长预算（实测每节 ~690 vs 上限 500），
         # 超上限 150 字即压缩该节一次，避免全文压不动。
-        if per_hi and len(part) > per_hi + 50:
+        if per_hi and len(part) > per_hi:
             part = await gateway.complete(
                 [{"role": "system", "content": sec_prompt
                   + f"\n\n注意：你上一稿写了 {len(part)} 字，超过本节上限 {per_hi} 字。"
@@ -378,7 +380,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
             print(f"[article] 模板腔润色失败，保留原稿: {type(e).__name__}: {str(e)[:100]}")
 
     # ── 长度闸（2026-11-20）：超 2500 字两轮硬压缩，压到 2000 上下 ──
-    for _round in range(2):
+    for _round in range(3):
         if len(md_text) <= 2500:
             break
         ctx.set_progress(88, f"正文 {len(md_text)} 字超上限 2500，压缩第 {_round + 1} 轮")
@@ -388,7 +390,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
               "保留：各小节的核心判断与 1~2 个关键论据、所有数字与原话引用、小节结构；\n"
               "删除：例子展开、重复解释、修饰句、类比、背景铺垫、讲稿式过渡句；\n"
               f"只删不增，不许新增内容或改写事实。当前 {len(md_text)} 字，目标 {max(1500, min(1900, len(md_text) - 800))} 字，"
-              f"至少再删 {max(0, len(md_text) - 2000)} 字，最终不得超过 2500 字。\n"
+              f"至少再删 {max(0, len(md_text) - 1800)} 字，最终不得超过 2500 字。\n"
               "输出完整修订后全文（保留小节标题）：\n" + md_text}],
             max_tokens=8192, thinking="disabled")
         out = re.sub(r"^```[a-z]*\n|\n```$", "", (out or "").strip())
