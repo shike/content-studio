@@ -204,6 +204,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         angle = str(q0.get("adapt_angle") or "")
         quotes = [str(x) for x in (q0.get("best_quotes") or [])]
         score = float(q0.get("score") or 0)
+        own = bool(q0.get("own_source"))  # 源文是号主自己的稿子：第一人称归属反转
         # 两步改编（2026-11-20 A 方案）：payload 带人选定的判断时，判断与证据从这里来，
         # 写稿只喂证据包，不再喂全书——防读书笔记，也防判断永远是源文的那一个。
         pitch = payload.get("pitch") if isinstance(payload.get("pitch"), dict) else None
@@ -267,6 +268,12 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
 
         # ── 改编成文（单次写入；标题随稿出，2026-11-19 收拢流水线）──
         persona_text = brand_of(1)["persona"]
+        identity = (
+            "这是号主自己的稿子：源文里的「我」就是号主。用第一人称写，直接写「我第二天到了现场」；"
+            "不写「手册作者」「源文里写」「作者记录」——那是把自己的话转述成别人的。"
+            if own else
+            "源文作者的第一人称不是号主的经历：他的「我」写成第三人称；引用原话要写明「手册作者记录」。"
+        )
         ctx.set_progress(30, "改编成文（保骨架保原话换口径）")
         write_source = source
         if pitch:
@@ -283,6 +290,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
                                                 PERSONA=persona_text,
+                                                IDENTITY=identity,
                                                 SOURCE=write_source, ANGLE=angle,
                                                 QUOTES=quotes_block,
                                                 FINGERPRINT=fingerprint_brief(hist))}],
@@ -381,7 +389,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                    + fingerprint_violations(text, hist) + _quantity_gaps(text))
             if _STRUCT_HEAD_RE.search(text):
                 out.append("小标题使用功能词（开头/结尾/引言/正文/结语/总结/检验动作），改成内容短语或删掉")
-            if re.search(r"(?:手册作者|源文|作者)的?(?:判断|观点|结论)是", text):
+            if own and re.search(r"手册作者|源文", text):
+                out.append("自己的稿子被写成了别人的（出现「手册作者/源文」）——直接用第一人称，删掉转述")
+            elif re.search(r"(?:手册作者|源文|作者)的?(?:判断|观点|结论)是", text):
                 out.append("判断归到了源文作者（「手册作者的判断是」）——用「我的判断是」给一次，其余直接陈述")
             judge_n = len(re.findall("我的判断是", text))
             if judge_n >= 2:
@@ -402,7 +412,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             return hard_list
 
         ctx.set_progress(80, "合并审校（事实/归属/体裁/语言/口吻）")
-        hard, soft = await review_adapt(md_text, source)
+        hard, soft = await review_adapt(md_text, source, own)
         hard = _with_enum_gaps(hard, md_text)
         if mech:
             soft = [f"机检：{v}" for v in mech[:6]] + soft
@@ -414,7 +424,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             revised = await revise_once(md_text, fix_list)
             if revised and _content_signature(revised) == _content_signature(md_text):
                 md_text = revised
-            hard, soft = await review_adapt(md_text, source)
+            hard, soft = await review_adapt(md_text, source, own)
             hard = _with_enum_gaps(hard, md_text)
             mech2 = _mech(md_text)
             if mech2:

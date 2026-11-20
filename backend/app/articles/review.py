@@ -12,17 +12,26 @@ from ..prompts import render
 from .quality import strip_fence as _strip_fence
 
 
-async def review_adapt(md: str, source: str) -> tuple[list[str], list[str]]:
+async def review_adapt(md: str, source: str, own: bool = False) -> tuple[list[str], list[str]]:
     """合并审校：返回 (hard 问题, soft 建议)。
 
     hard=必须改，二次仍不过退回清单；soft=语言/表述建议，残余只落 note 不拦发布。
     源文必须给全（2026-11-19 事故：只喂前 9000 字，分章手册后半本的案例被当成编造——
     烘焙案例的 CFO/130 万/60 万全在源文 15000 字处，闸却判「源文没有」，整篇误杀）。
+    own=True：源文是号主自己的稿子，第一人称与「我」的归属规则反转（2026-11-20 用户确认）。
     """
+    identity = (
+        "这是号主自己的稿子：源文里的「我」就是号主。正文用第一人称；出现「手册作者」"
+        "「源文里写」「作者记录」这类把自己的话转述成别人的写法，按身份错误报。"
+        if own else
+        "源文作者的第一人称不是号主的经历：正文若用第一人称讲源文作者的亲历，按身份错误报；"
+        "引用原话必须标明说话人。"
+    )
     try:
         v = await gateway.complete_json(
             [{"role": "user", "content": render(
-                "article_adapt_review", DRAFT=md[:9000], SOURCE=source[:40000])}],
+                "article_adapt_review", DRAFT=md[:9000], SOURCE=source[:40000],
+                IDENTITY=identity)}],
             max_tokens=2048, thinking="disabled")
         def _pick(key: str, cap: int, limit: int = 200) -> list[str]:
             return [str(x).strip()[:limit] for x in (v or {}).get(key) or []
