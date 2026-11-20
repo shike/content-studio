@@ -105,7 +105,7 @@ _TRANS_PATTERNS = (
 )
 _COLLOQ_MARKS = ("说白了", "其实", "不得不说", "老实说", "讲真", "你有没有发现", "简直")
 # 源文比喻性造词（2026-11-19 用户裁决：去造词）——直接搬用即命中，换中性术语
-_KB_METAPHOR_TERMS = ("承重动作", "判死刑", "死法", "赘生物")
+_KB_METAPHOR_TERMS = ("承重动作", "判死刑", "死法", "死在", "赘生物")
 
 
 def _language_style_violations(md: str) -> list[str]:
@@ -147,6 +147,13 @@ def _language_style_violations(md: str) -> list[str]:
     agency = re.findall(r"(?:数据|指标|报表)[^。，\n]{0,6}(?:会说谎|说谎|会思考|自己决定|替你做决定)", md)
     if agency:
         out.append("把数据/指标写成会说话会决定的行动者——改回「人用它做了什么」")
+    if "中小厂" in md:
+        out.append("行业口语缩写「中小厂」——改「中小企业」")
+    for p in md.split("\n\n"):
+        pct = re.findall(r"\d+(?:\.\d+)?%", p)
+        if len(pct) >= 4:
+            out.append(f"单段堆了 {len(pct)} 个百分比统计——统计数字最多三个，其余改成机制描述")
+            break
     return out
 
 

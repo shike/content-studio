@@ -107,19 +107,34 @@ def _cn_num(s: str) -> int:
     return _CN_NUM.get(s, 0)
 
 
+def _listed_in_sentence(md: str, n: int) -> bool:
+    """一句带冒号的并列清单是否列满 n 项（「七问清单按固定顺序：A、B、C…」）。"""
+    for sent in re.split(r"[。！？\n]", md):
+        if "：" not in sent and ":" not in sent:
+            continue
+        parts = [p for p in re.split(r"[、，,]", sent) if len(p.strip()) >= 2]
+        if len(parts) >= n and all(len(p.strip()) <= 40 for p in parts):
+            return True
+    return False
+
+
 def _quantity_gaps(md: str) -> list[str]:
-    """声称的数量与正文实际展开数不符（「七个问题」只写四问）——提示词约束不住，代码兜底。"""
+    """声称的数量与正文实际展开数不符（「七个问题」只写四问）——提示词约束不住，代码兜底。
+    两种算展开：编号（第一问…）或一句带冒号的并列清单（≥N 项）。"""
     claims = {_cn_num(m.group(1)) for m in
               re.finditer(r"([一二三四五六七八九十]{1,2}|\d{1,2})\s*(?:个)?问题", md)}
     claims = {n for n in claims if 3 <= n <= 20}
+    if not claims:
+        return []
     nums = {m.group(1) for m in re.finditer(r"第([一二三四五六七八九十]{1,2})问", md)}
-    if not claims or not nums:
-        return []
-    if len(nums) >= max(claims):
-        return []
-    shown = "、".join(f"第{x}问" for x in sorted(nums, key=_cn_num))
-    return [f"声称 {max(claims)} 个问题，正文只展开 {len(nums)} 个（{shown}）"
-            f"——补齐其余问题，或把数量改成实际展开数"]
+    out: list[str] = []
+    for n in sorted(claims):
+        if len(nums) >= n or _listed_in_sentence(md, n):
+            continue
+        shown = "、".join(f"第{x}问" for x in sorted(nums, key=_cn_num)) or "无编号"
+        out.append(f"声称 {n} 个问题，正文只展开 {len(nums)} 个（{shown}）"
+                   f"——补齐其余问题，或把数量改成实际展开数")
+    return out
 
 
 def _enumeration_gaps(md: str, terms: list[str]) -> list[str]:
@@ -261,16 +276,20 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         title = lines[0].lstrip()[2:].strip() or src_title[:30]
         md_text = _strip_struct_heads("\n".join(lines[1:]).strip())
         min_chars_or_raise(md_text, "改编稿")
-        if any(w in title for w in _KB_METAPHOR_TERMS):
-            ctx.set_progress(32, "标题含比喻造词，重拟")
+        if len(title) > 32 or any(w in title for w in _KB_METAPHOR_TERMS):
+            ctx.set_progress(32, f"标题超长/含造词（{len(title)} 字），重拟")
             td = await gateway.complete_json(
                 [{"role": "user", "content":
-                  "为这篇公众号长文重拟一个判断句标题：≤32 字，直接说判断或结论，克制具体；"
-                  "禁用比喻造词（承重动作/死法/判死刑/没活/赘生物）与 AI 套话。\n正文：\n"
+                  "为这篇公众号长文重拟一个判断句标题：≤28 字，直接说判断或结论，克制具体；"
+                  "禁用比喻造词（承重动作/死法/死在/判死刑/没活/赘生物）与 AI 套话；"
+                  "不要用「不是X，是Y」对仗；标题里的数量必须在正文有对应展开。\n"
                   + md_text[:3000] + '\n输出 JSON：{"title": "..."}'}],
                 max_tokens=512, thinking="disabled")
             nt = str((td or {}).get("title") or "").strip()[:40]
             if nt:
+                if len(nt) > 32:  # 重拟仍超长：在标点处截断，保证是完整判断
+                    cut = max(nt.rfind("，", 0, 33), nt.rfind("：", 0, 33), nt.rfind("——", 0, 33))
+                    nt = nt[:cut] if cut >= 12 else nt[:32]
                 title = nt
 
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
@@ -344,6 +363,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                    + fingerprint_violations(text, hist) + _quantity_gaps(text))
             if _STRUCT_HEAD_RE.search(text):
                 out.append("小标题使用功能词（开头/结尾/引言/正文/结语/总结/检验动作），改成内容短语或删掉")
+            if re.search(r"(?:手册作者|源文|作者)的?(?:判断|观点|结论)是", text):
+                out.append("判断归到了源文作者（「手册作者的判断是」）——用「我的判断是」给一次，其余直接陈述")
             judge_n = len(re.findall("我的判断是", text))
             if judge_n >= 2:
                 out.append(f"判断句模板化：「我的判断是」出现 {judge_n} 次，只留一处，其余直接陈述")
