@@ -278,6 +278,7 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
         # 全文预算折算进每节（2026-11-07 修超长）：节数×节长算术必须落在总预算内。
         # 2026-11-19 总预算改 1500~2500（用户定版），按实际节数折算成本节篇幅。
         sec_spec = length_spec["section"]
+        per_lo, per_hi = 0, 0
         if length == "deep":
             per_lo, per_hi = max(300, 1500 // n), max(350, 2500 // n)
             replaced = sec_spec.replace("篇幅 400~600 字",
@@ -314,6 +315,16 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
                     f"「下一步」只写读者业务上的动作，篇幅 {length_spec['words']} 字，以完整句子收尾。"}],
                 max_tokens=12000,
                 thinking="disabled")
+        # 节级长度守卫（2026-11-20）：分节模型普遍无视节长预算（实测每节 ~690 vs 上限 500），
+        # 超上限 150 字即压缩该节一次，避免全文压不动。
+        if per_hi and len(part) > per_hi + 150:
+            part = await gateway.complete(
+                [{"role": "system", "content": sec_prompt
+                  + f"\n\n注意：你上一稿写了 {len(part)} 字，超过本节上限 {per_hi} 字。"
+                    f"请压缩到 {per_lo}~{per_hi} 字：只删不增，删掉重复解释、修饰句与例子展开，"
+                    "保留全部数字、论据与判断；输出完整本节正文（不要标题行）。"}],
+                max_tokens=8192, thinking="disabled")
+            part = "\n".join(l for l in part.splitlines() if not l.lstrip().startswith("## "))
         # 标题行防线：分节模型偶尔无视「不要写标题行」把「## 标题」写进正文开头（2026-10-08
         # deep 档实测一篇重复 2 处）——组装前剥掉正文里的 2 级标题行（只有组装处该出 ##；### 子标题保留）
         part = "\n".join(l for l in part.splitlines() if not l.lstrip().startswith("## "))
@@ -376,7 +387,8 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
               f"这篇公众号长文 {len(md_text)} 字，公众号正文上限 2500 字。请做硬压缩：\n"
               "保留：各小节的核心判断与 1~2 个关键论据、所有数字与原话引用、小节结构；\n"
               "删除：例子展开、重复解释、修饰句、类比、背景铺垫、讲稿式过渡句；\n"
-              "只删不增，不许新增内容或改写事实。目标 2000 字上下，不得超过 2500。\n"
+              f"只删不增，不许新增内容或改写事实。当前 {len(md_text)} 字，"
+              f"至少再删 {max(0, len(md_text) - 2200)} 字，最终不得超过 2500 字。\n"
               "输出完整修订后全文（保留小节标题）：\n" + md_text}],
             max_tokens=8192, thinking="disabled")
         out = re.sub(r"^```[a-z]*\n|\n```$", "", (out or "").strip())
