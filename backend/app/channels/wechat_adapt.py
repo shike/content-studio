@@ -193,6 +193,28 @@ def _khazix_violations(md: str) -> list[str]:
     return out
 
 
+# 标题禁区（2026-11-20 用户定版）：公众号标题不是内部纪要。
+# 读者一遍要懂：人 + 老办法 + AI 拿已有的东西 + 结果；行业词/判断词进标题就会硬。
+_TITLE_JARGON = ("AI落地", "需求预测", "配送量", "口径", "交付", "闭环", "赋能",
+                 "抓手", "底层逻辑", "真问题", "最值钱", "最难的", "核心是", "本质是")
+
+
+def _title_bad(title: str) -> str:
+    """标题不合规原因（空串=合规）。写稿与重拟共用同一把尺。"""
+    t = (title or "").strip()
+    if len(t) > 24:
+        return f"{len(t)} 字超 24"
+    if "：" in t or "——" in t or "“" in t or "”" in t:
+        return "冒号/破折号/双引号"
+    if any(w in t for w in _KB_METAPHOR_TERMS):
+        return "源文比喻词"
+    if any(w in t for w in _TITLE_JARGON):
+        return "行业词/判断词"
+    if not re.search(r"AI|FDE", t, re.I):
+        return "缺 AI/FDE"
+    return ""
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -368,22 +390,30 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             except Exception as e:  # noqa: BLE001
                 print(f"[adapt] 扩写失败（保留原稿）: {type(e).__name__}: {str(e)[:80]}")
         min_chars_or_raise(md_text, "改编稿")
-        if (len(title) > 24 or "：" in title or "——" in title or "“" in title or "”" in title
-                or any(w in title for w in _KB_METAPHOR_TERMS)):
-            ctx.set_progress(32, f"标题不合规（{len(title)} 字），重拟")
+        bad = _title_bad(title)
+        for _try in range(2):
+            if not bad:
+                break
+            ctx.set_progress(32, f"标题不合规（{bad}），重拟第 {_try + 1} 次")
             td = await gateway.complete_json(
                 [{"role": "user", "content":
-                  "为这篇公众号长文重拟一个标题，≤24 字，用这件事里的一个动作或一句原话，具体、可点名；"
-                  "不用冒号、破折号、双引号、问句；不用比喻造词（承重动作/死法/死在/判死刑/没活/赘生物）"
-                  "与 AI 套话；标题里的数量必须在正文有对应。\n"
+                  "为这篇公众号长文重拟一个标题，≤24 字。像一个公众号标题，不是一个内部判断："
+                  "前半句写一个人+一个具体动作或困境，后半句写 AI（或 FDE）+一个具体动作+一个结果或转折，"
+                  "中间用逗号。例：店长靠经验订了十年货，AI用旧监控把浪费砍了一半"
+                  "（例子只示范结构，不要照抄内容）。"
+                  "必须出现 AI 或 FDE，但不许当口号前缀；标题里不放 AI落地/需求预测/配送量/口径/"
+                  "交付/闭环/赋能/抓手/底层逻辑/真问题/最值钱/最难的；"
+                  "不用冒号、破折号、双引号、问句、比喻造词；标题里的数量必须在正文有对应。\n"
                   + md_text[:3000] + '\n输出 JSON：{"title": "..."}'}],
                 max_tokens=512, thinking="disabled")
             nt = str((td or {}).get("title") or "").strip()[:40]
-            if nt:
-                if len(nt) > 24:  # 重拟仍超长：在标点处截断，保证是完整标题
-                    cut = max(nt.rfind("，", 0, 25), nt.rfind("：", 0, 25), nt.rfind("——", 0, 25))
-                    nt = nt[:cut] if cut >= 10 else nt[:24]
-                title = nt
+            if not nt:
+                continue
+            if len(nt) > 24:  # 重拟仍超长：在标点处截断，保证是完整标题
+                cut = max(nt.rfind("，", 0, 25), nt.rfind("：", 0, 25), nt.rfind("——", 0, 25))
+                nt = nt[:cut] if cut >= 10 else nt[:24]
+            title = nt
+            bad = _title_bad(title)
 
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
         ctx.set_progress(55, "原创度检测（与源文比对）")
