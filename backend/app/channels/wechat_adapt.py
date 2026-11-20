@@ -89,6 +89,39 @@ def _chapter_terms(source: str) -> list[str]:
     return list(dict.fromkeys(terms))
 
 
+_CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+           "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _cn_num(s: str) -> int:
+    s = (s or "").strip()
+    if s.isdigit():
+        return int(s)
+    if s == "十":
+        return 10
+    if s.startswith("十"):
+        return 10 + _CN_NUM.get(s[1:], 0)
+    if "十" in s:
+        a, _, b = s.partition("十")
+        return _CN_NUM.get(a, 1) * 10 + (_CN_NUM.get(b, 0) if b else 0)
+    return _CN_NUM.get(s, 0)
+
+
+def _quantity_gaps(md: str) -> list[str]:
+    """声称的数量与正文实际展开数不符（「七个问题」只写四问）——提示词约束不住，代码兜底。"""
+    claims = {_cn_num(m.group(1)) for m in
+              re.finditer(r"([一二三四五六七八九十]{1,2}|\d{1,2})\s*(?:个)?问题", md)}
+    claims = {n for n in claims if 3 <= n <= 20}
+    nums = {m.group(1) for m in re.finditer(r"第([一二三四五六七八九十]{1,2})问", md)}
+    if not claims or not nums:
+        return []
+    if len(nums) >= max(claims):
+        return []
+    shown = "、".join(f"第{x}问" for x in sorted(nums, key=_cn_num))
+    return [f"声称 {max(claims)} 个问题，正文只展开 {len(nums)} 个（{shown}）"
+            f"——补齐其余问题，或把数量改成实际展开数"]
+
+
 def _enumeration_gaps(md: str, terms: list[str]) -> list[str]:
     """行内同时出现 ≥3 个章名 = 文章在列举阶段；列举过的章必须在正文再次出现（≥2 次）。
     返回只出现在列举行、没有后续内容的章名（2026-11-19「五阶段只写三段」事故）。"""
@@ -308,7 +341,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         def _mech(text: str) -> list[str]:
             out = (_kb_style_violations(text, anchor_texts) + _structure_violations(text)
-                   + fingerprint_violations(text, hist))
+                   + fingerprint_violations(text, hist) + _quantity_gaps(text))
             if _STRUCT_HEAD_RE.search(text):
                 out.append("小标题使用功能词（开头/结尾/引言/正文/结语/总结/检验动作），改成内容短语或删掉")
             judge_n = len(re.findall("我的判断是", text))
