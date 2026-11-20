@@ -291,6 +291,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
 
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         mech = _kb_style_violations(md_text, anchor_texts) + _structure_violations(md_text)
+        if re.search(r"(?m)^#{1,3}\s*(开头|结尾|引言|正文|结语)\s*$", md_text):
+            mech.append("小标题使用结构词（开头/结尾/引言/正文/结语），改成内容短语或删掉")
         chapter_terms = _chapter_terms(source)
 
         def _with_enum_gaps(hard_list: list[str], text: str) -> list[str]:
