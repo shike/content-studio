@@ -302,6 +302,10 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         if not lines or not lines[0].lstrip().startswith("# "):
             raise TransientError("改编输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
         title = lines[0].lstrip()[2:].strip() or src_title[:30]
+        if pitch:  # 人选定的标题优先（2026-11-20 用户裁决：场景标题比论文式论点好）
+            pt = str(pitch.get("title") or "").strip()
+            if pt:
+                title = pt
         md_text = _strip_struct_heads("\n".join(lines[1:]).strip())
         min_chars_or_raise(md_text, "改编稿")
         if len(title) > 32 or any(w in title for w in _KB_METAPHOR_TERMS):
@@ -401,6 +405,14 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             attr_n = len(re.findall("源文|手册作者", text))
             if attr_n >= 4:
                 out.append(f"转述腔：对源文的归属声明 {attr_n} 处，转述事实直接陈述，只保留引用原话的说话人")
+            paras = [p.strip() for p in text.split("\n\n")
+                     if p.strip() and not p.startswith(("!", "#"))]
+            if len(paras) >= 3:
+                dup = set(re.findall(r"\d+(?:\.\d+)?", paras[-1])) & set(
+                    re.findall(r"\d+(?:\.\d+)?", "\n\n".join(paras[:-1])))
+                if len(dup) >= 2:
+                    out.append(f"结尾复述前文数字（{'、'.join(sorted(dup)[:3])}）"
+                               f"——结尾给动作或新判断，不复述")
             return out
 
         mech = _mech(md_text)
