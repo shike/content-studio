@@ -360,8 +360,10 @@ async def article_generate(ctx: JobContext, payload: dict) -> dict:
     templ: list[str] = []
     if re.search(r"(?m)^#{1,3}\s*[一二三四五六七八九十]+、", md_text):
         templ.append("小节标题使用「一、二、三」式编号，改成内容短语")
-    if re.search(r"本文(用|将|会|试图|通过)", md_text):
-        templ.append("正文出现「本文…」元评论")
+    if "本文" in md_text:
+        templ.append("正文出现「本文…」元评论，改成直接陈述")
+    if re.search(r"(?m)^#{1,3}\s*(现象层|拆解层|方法框架|原创框架|推演与|边界与)", md_text):
+        templ.append("小节标题露出大纲模板标签（现象层/拆解层/方法框架/原创框架），改成内容短语")
     if "看完你就知道" in md_text or "下面我们" in md_text or "接下来看" in md_text:
         templ.append("出现讲稿式过渡/预告（「看完你就知道」「下面我们」）")
     if re.search(r"我叫它|我称之为", md_text):
