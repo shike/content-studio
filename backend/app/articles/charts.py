@@ -167,20 +167,27 @@ def render_cover(title: str, account: str = "", primary: str = _BRAND, slogan: s
     clean = " ".join(str(title).split())
     f_title = _font(56)
     max_w = W - 190
-    # 断行单元：连续拉丁字母/数字为一个 token（英文词不拆），中文逐字
-    tokens = re.findall(r"[A-Za-z0-9%-]+|.", clean)
+    # 断行优先按中文标点（标题的语义停顿），每个分句整行；分句过宽才退回逐字断行。
+    # 2026-11-20 修：逐字断行会把「一年」拆成「一 / 年」，头图读起来像断句错误。
+    clauses = [x.strip() for x in re.split(r"(?<=[，。；、])", clean) if x.strip()]
     lines: list[str] = []
-    cur = ""
-    for tk in tokens:
-        if d.textlength(cur + tk, font=f_title) > max_w and cur:
+    if 1 < len(clauses) <= 3 and all(
+            d.textlength(x, font=f_title) <= max_w for x in clauses):
+        lines = clauses
+    else:
+        # 断行单元：连续拉丁字母/数字为一个 token（英文词不拆），中文逐字
+        tokens = re.findall(r"[A-Za-z0-9%-]+|.", clean)
+        cur = ""
+        for tk in tokens:
+            if d.textlength(cur + tk, font=f_title) > max_w and cur:
+                lines.append(cur.strip())
+                cur = tk.lstrip()
+                if len(lines) == 2:
+                    break
+            else:
+                cur += tk
+        if cur.strip():
             lines.append(cur.strip())
-            cur = tk.lstrip()
-            if len(lines) == 2:
-                break
-        else:
-            cur += tk
-    if cur.strip():
-        lines.append(cur.strip())
 
     y = 150 if len(lines) >= 2 else 170
     d.rectangle([64, y - 14, 72, y + len(lines) * 78 - 30], fill=(255, 255, 255))
