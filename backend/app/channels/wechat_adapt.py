@@ -25,6 +25,11 @@ from .wechat import (
     _finalize_article,
     _kb_style_violations,
 )
+from ..articles.fingerprint import (
+    fingerprint_brief,
+    fingerprint_violations,
+    recent_fingerprints,
+)
 from ..articles.quality import (
     _KB_METAPHOR_TERMS,
     _structure_violations,
@@ -208,11 +213,13 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         persona_text = brand_of(1)["persona"]
         ctx.set_progress(30, "改编成文（保骨架保原话换口径）")
         quotes_block = "\n".join(f"- {q}" for q in quotes) or "（无，本次不引用原话）"
+        hist = recent_fingerprints(3, exclude_id=article_id)
         body = await gateway.complete(
             [{"role": "user", "content": render("article_adapt_write",
                                                 PERSONA=persona_text,
                                                 SOURCE=source, ANGLE=angle,
-                                                QUOTES=quotes_block)}],
+                                                QUOTES=quotes_block,
+                                                FINGERPRINT=fingerprint_brief(hist))}],
             max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理，关掉后 83s 出稿
         body = _strip_fence(body)
         lines = body.split("\n")
@@ -300,7 +307,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
 
         anchor_texts = [x for x in load("article_kb_anchors").split("## 范本")[1:] if len(x) > 200]
         def _mech(text: str) -> list[str]:
-            out = _kb_style_violations(text, anchor_texts) + _structure_violations(text)
+            out = (_kb_style_violations(text, anchor_texts) + _structure_violations(text)
+                   + fingerprint_violations(text, hist))
             if _STRUCT_HEAD_RE.search(text):
                 out.append("小标题使用功能词（开头/结尾/引言/正文/结语/总结/检验动作），改成内容短语或删掉")
             judge_n = len(re.findall("我的判断是", text))

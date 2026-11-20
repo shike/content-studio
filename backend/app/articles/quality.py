@@ -129,6 +129,24 @@ def _language_style_violations(md: str) -> list[str]:
     if metaphors:
         out.append(f"源文比喻词直接搬用：{'、'.join(metaphors)}——换成中性术语"
                    "（关键动作/验收判据/失败原因/冗余流程）")
+    # 负向模式机检（2026-11-20 引入 jiji262 清单里可正则判定的部分；语义类交给审校）
+    cr = re.findall(r"(?:答案|原因|结论|关键|问题|秘密)(?:很)?(?:简单|只有一个|就一个)[：:]", md)
+    if cr:
+        out.append("「答案很简单：」式冒号揭底——直接给结论，不铺悬念")
+    sal = re.findall(r"最(?:关键|重要|值钱|核心)的(?:是|动作|一点)|真正(?:重要|关键)的(?:是|一点)", md)
+    if len(sal) >= 2:
+        out.append(f"「最关键/真正重要的是」式宣告出现 {len(sal)} 次——删掉宣告，直接说事")
+    staged = re.findall(r"(?m)^(?:下面|接下来|我们先|先看|来看|说说)[^。\n]{0,10}", md)
+    if len(staged) >= 2:
+        out.append(f"预告下文/主持人式过场 {len(staged)} 处——删掉，直接进内容")
+    for sent in re.split(r"[。！？\n]", md):
+        hedges = len(re.findall(r"可能|或许|也许|大概|某种程度上|在某种意义上|一定程度上", sent))
+        if hedges >= 3:
+            out.append(f"同句叠限定 {hedges} 层（「{sent.strip()[:18]}…」）——删到一层或直接下判断")
+            break
+    agency = re.findall(r"(?:数据|指标|报表)[^。，\n]{0,6}(?:会说谎|说谎|会思考|自己决定|替你做决定)", md)
+    if agency:
+        out.append("把数据/指标写成会说话会决定的行动者——改回「人用它做了什么」")
     return out
 
 
