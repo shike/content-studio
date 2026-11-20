@@ -19,6 +19,7 @@ def _clean(v: dict | None) -> list[dict]:
         if not thesis or len(ev) < 2:
             continue
         out.append({
+            "scene": str(p.get("scene") or "").strip()[:300],
             "thesis": thesis[:120],
             "opponent": str(p.get("opponent") or "").strip()[:80],
             "cost": str(p.get("cost") or "").strip()[:120],

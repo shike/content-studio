@@ -210,7 +210,9 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         # 写稿只喂证据包，不再喂全书——防读书笔记，也防判断永远是源文的那一个。
         pitch = payload.get("pitch") if isinstance(payload.get("pitch"), dict) else None
         if pitch:
-            angle = str(pitch.get("thesis") or "").strip() or angle
+            thesis = str(pitch.get("thesis") or "").strip() or angle
+            scene = str(pitch.get("scene") or "").strip()
+            angle = f"现场：{scene}\n判断：{thesis}" if scene else thesis
             ev0 = [str(x).strip() for x in (pitch.get("evidence") or []) if str(x).strip()]
             if ev0:
                 quotes = ev0
