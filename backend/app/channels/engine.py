@@ -170,6 +170,7 @@ def note_out(c: Content) -> dict:
         "id": c.id, "channel_id": c.channel_id, "idea_id": c.idea_id,
         "title": c.title, "body": c.body or "",
         "tags": p.get("tags") or [], "cover": p.get("cover", ""),
+        "issues": p.get("issues") or [],  # 轻质量闸红提示（2026-11-21 阶段 3，不拦发布）
         "status": p.get("note_state", _content_status_to_note(c.status)),
         "status_canonical": c.status,
         "material_ids": p.get("material_ids") or [],

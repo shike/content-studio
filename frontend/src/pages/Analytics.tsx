@@ -175,8 +175,53 @@ function WeeklyReportCard() {
           </div>
         </div>
       )}
+      {(() => {
+        const jd = rep?.judgement as { items: { platform: string; title: string; verdict: string; value: number; detail: string }[]; summary: Record<string, number> } | undefined
+        if (!jd || !jd.items?.length) return null
+        return (
+          <div className="mt-3 border-t border-zinc-100 pt-3">
+            <div className="text-xs font-medium text-zinc-500">三平台判卷（本周发布登记的作品；线是假设值，按自家数据重定）</div>
+            <div className="mt-1.5 space-y-1.5">
+              {jd.items.map((x, i) => (
+                <div key={i} className="flex items-center gap-2 text-[12.5px]">
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${VERDICT_CLS[x.verdict] || VERDICT_CLS.nodata}`}>{VERDICT_LABEL_CN[x.verdict] || x.verdict}</span>
+                  <span className="min-w-0 flex-1 truncate text-zinc-700">{x.title}</span>
+                  <span className="shrink-0 text-[11px] text-slate-400">{x.platform}</span>
+                  <span className="num-serif shrink-0 text-slate-500">{x.detail}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
       {Boolean(rep?.summary) && <SummaryText text={String(rep?.summary ?? "")} />}
     </div>
+  )
+}
+
+/** 三平台判卷徽章（2026-11-21 阶段 4）：爆款紫/过线绿/待改进黄/未回流灰——线=judgement.py 假设值。 */
+const VERDICT_CLS: Record<string, string> = {
+  viral: 'bg-violet-100 text-violet-700',
+  pass: 'bg-emerald-100 text-emerald-700',
+  warn: 'bg-amber-100 text-amber-800',
+  nodata: 'bg-slate-100 text-slate-400',
+}
+const VERDICT_LABEL_CN: Record<string, string> = {
+  viral: '爆款', pass: '过线', warn: '待改进', nodata: '未回流',
+}
+const VERDICT_UNIT: Record<string, string> = {
+  douyin: '播放', xiaohongshu: '互动率', wechat: '完读率',
+}
+
+function JudgeBadge({ verdict, value, platform, detail }: {
+  verdict: string; value: number; platform: string; detail?: string
+}) {
+  const isRate = platform !== 'douyin'
+  const vtxt = verdict === 'nodata' ? '—' : `${isRate ? value + '%' : num(value)}`
+  return (
+    <span title={detail || ''} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium num-serif ${VERDICT_CLS[verdict] || VERDICT_CLS.nodata}`}>
+      {VERDICT_LABEL_CN[verdict] || verdict}{verdict !== 'nodata' ? `·${VERDICT_UNIT[platform] || ''}${isRate ? '' : ' '}${vtxt}` : ''}
+    </span>
   )
 }
 
@@ -386,34 +431,101 @@ function AccountsTab({ days }: { days: number }) {
  *  长文侧键来自 _PUB_KEYS，自账号视频侧键来自 stats；未知键回落原文，保证新指标可见。 */
 const METRIC_LABEL: Record<string, string> = {
   reads: '阅读', welook: '在看', follows: '关注', leads: '线索', exposure: '曝光',
-  likes: '赞', comments: '评论', shares: '转发', collects: '收藏',
+  likes: '赞', comments: '评论', shares: '转发', collects: '收藏', read_done: '读完',
   play: '播放', digg: '点赞', comment: '评论', share: '转发', collect: '收藏',
 }
 
 function PublicationsTab({ days }: { days: number }) {
-  const [rows, setRows] = useState<PubRow[]>([])
+  const [rows, setRows] = useState<(PubRow & { verdict?: string; value?: number; detail?: string })[]>([])
+  const [summary, setSummary] = useState<Record<string, number>>({})
   const [error, setError] = useState('')
-  useEffect(() => {
-    api<{ items: PubRow[] }>(`/analytics/publications?limit=50`)
-      .then((d) => setRows(d.items || []))
+  const [bf, setBf] = useState<number | null>(null)   // 展开补录的 content_id
+  const [bfVals, setBfVals] = useState<Record<string, string>>({})
+  const [bfMsg, setBfMsg] = useState('')
+  const load = useCallback(() => {
+    api<{ items: (PubRow & { verdict?: string; value?: number; detail?: string })[]; summary: Record<string, number> }>('/analytics/judgement?days=30')
+      .then((d) => { setRows(d.items || []); setSummary(d.summary || {}) })
       .catch((e) => setError(apiErrText(e)))
   }, [days])
+  useEffect(load, [load])
   const KIND: Record<string, string> = { long_article: '长文', video_script: '视频稿', note: '笔记', douyin_video: '抖音作品' }
+  // 补录字段（平台口径，键=补录端点白名单）
+  const BF_FIELDS: Record<string, { k: string; label: string }[]> = {
+    xiaohongshu: [
+      { k: 'exposure', label: '曝光' }, { k: 'likes', label: '赞' }, { k: 'collects', label: '收藏' },
+      { k: 'comments', label: '评论' }, { k: 'shares', label: '转发' },
+    ],
+    wechat: [
+      { k: 'reads', label: '阅读' }, { k: 'read_done', label: '读完' }, { k: 'welook', label: '在看' },
+      { k: 'shares', label: '转发' }, { k: 'follows', label: '关注' },
+    ],
+    douyin: [
+      { k: 'exposure', label: '曝光' }, { k: 'play', label: '播放' }, { k: 'likes', label: '赞' },
+      { k: 'comments', label: '评论' }, { k: 'shares', label: '转发' }, { k: 'collects', label: '收藏' },
+    ],
+  }
+  const submitBf = (r: PubRow & { verdict?: string }) => {
+    if (!r.content_id) return
+    const vals: Record<string, number> = {}
+    for (const { k } of BF_FIELDS[r.platform] || []) {
+      const v = (bfVals[k] || '').trim()
+      if (v) vals[k] = Number(v)
+    }
+    if (!Object.keys(vals).length) { setBfMsg('没有填任何数字'); return }
+    setBfMsg('')
+    api(`/analytics/publications/${r.content_id}/metrics`, { method: 'POST', body: JSON.stringify({ metrics: vals }) })
+      .then(() => { setBfMsg('已补录，判卷已更新'); setBf(null); setBfVals({}); load() })
+      .catch((e) => setBfMsg(apiErrText(e)))
+  }
+  const sSummary = (['viral', 'pass', 'warn', 'nodata'] as const).filter((v) => summary[v])
   return (
     <div>
       <ErrorLine text={error} />
+      {sSummary.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px] text-slate-500">
+          <span className="text-slate-400">判卷汇总：</span>
+          {sSummary.map((v) => (
+            <span key={v} className={`rounded-full px-2.5 py-1 text-[12px] font-medium ${VERDICT_CLS[v]}`}>{VERDICT_LABEL_CN[v]} {summary[v]}</span>
+          ))}
+        </div>
+      )}
       <WeeklyReportCard />
       {rows.length === 0 ? <EmptyState icon={BarChart3} title="还没有发布记录" desc="各渠道发布后登记链接，或等自有账号数据回流" /> : (
         <div className="space-y-2">
           {rows.map((r, ix) => (
-            <div key={ix} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
-              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{KIND[r.kind] || r.kind}</span>
-              <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{r.title || '（无标题）'}</span>
-              {Object.entries(r.metrics).map(([k, v]) => (
-                <span key={k} className="shrink-0 text-[11.5px] text-slate-500">{METRIC_LABEL[k] || k} <b className="num-serif text-slate-800">{num(v)}</b></span>
-              ))}
-              {Object.keys(r.metrics).length === 0 && <span className="shrink-0 text-[11.5px] text-slate-400">指标未回流</span>}
-              <span className="shrink-0 text-[11px] text-slate-400">{(r.published_at || '').slice(0, 10)}</span>
+            <div key={ix} className="rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{KIND[r.kind] || r.kind}</span>
+                <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{r.title || '（无标题）'}</span>
+                {r.verdict && <JudgeBadge verdict={r.verdict} value={r.value || 0} platform={r.platform} detail={r.detail} />}
+                {Object.entries(r.metrics).map(([k, v]) => (
+                  <span key={k} className="shrink-0 text-[11.5px] text-slate-500">{METRIC_LABEL[k] || k} <b className="num-serif text-slate-800">{num(v)}</b></span>
+                ))}
+                {Object.keys(r.metrics).length === 0 && <span className="shrink-0 text-[11.5px] text-slate-400">指标未回流</span>}
+                {r.content_id && r.verdict !== 'viral' && (
+                  <button onClick={() => { setBf(bf === r.content_id ? null : r.content_id); setBfVals({}); setBfMsg('') }}
+                    className="shrink-0 rounded-full border border-slate-200 px-2.5 py-1 text-[11.5px] text-slate-500 transition hover:bg-slate-50">
+                    补录数据
+                  </button>
+                )}
+                <span className="shrink-0 text-[11px] text-slate-400">{(r.published_at || '').slice(0, 10)}</span>
+              </div>
+              {bf === r.content_id && (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(BF_FIELDS[r.platform] || []).map(({ k, label }) => (
+                      <label key={k} className="flex items-center gap-1 text-[11.5px] text-slate-500">
+                        {label}
+                        <input value={bfVals[k] || ''} inputMode="numeric" onChange={(e) => setBfVals({ ...bfVals, [k]: e.target.value })}
+                          className="num-serif w-20 rounded-lg border border-[#E8ECF0] px-2 py-1 text-[12px] outline-none focus:border-emerald-400" />
+                      </label>
+                    ))}
+                    <button onClick={() => submitBf(r)} className="rounded-full bg-emerald-600 px-3 py-1 text-[12px] font-medium text-white transition hover:bg-emerald-700">保存并判卷</button>
+                    {bfMsg && <span className="text-[11.5px] text-slate-500">{bfMsg}</span>}
+                  </div>
+                  {r.platform === 'wechat' && <div className="mt-1.5 text-[11px] text-slate-400">完读率=读完÷阅读；后台只给百分比时，读完≈阅读×读完率。数据来自公众号后台手工回填。</div>}
+                </div>
+              )}
             </div>
           ))}
         </div>

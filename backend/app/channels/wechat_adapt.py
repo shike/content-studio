@@ -215,6 +215,27 @@ def _title_bad(title: str) -> str:
     return ""
 
 
+def _title_trim(t: str) -> str:
+    """超 24 字的标题截成合规短句（选题会标题/重拟产物共用）。
+    标点分句后优先保留含 AI/FDE 的分句（标题公式后半句才是 AI+动作+结果），
+    整体放下才拼回去；都不行再按标点截断。"""
+    t = (t or "").strip()
+    if len(t) <= 24:
+        return t
+    clauses = [x.strip() for x in re.split(r"(?<=[，；])", t) if x.strip("，；")]
+    ai_clauses = [c for c in clauses if re.search(r"AI|FDE", c, re.I) and len(c) <= 24]
+    if ai_clauses:
+        keep = ai_clauses[-1]
+        rest = [c for c in clauses if c != keep]
+        for r in rest:  # 尽量把另一分句拼回去
+            cand = f"{r}，{keep}" if clauses.index(r) < clauses.index(keep) else f"{keep}，{r}"
+            if len(cand) <= 24:
+                return cand
+        return keep
+    cut = max(t.rfind("，", 0, 25), t.rfind("；", 0, 25))
+    return t[:cut] if cut >= 10 else t[:24]
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -370,7 +391,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             raise TransientError("改编输出缺「# 标题」首行（疑似空正文或截断），稍后自动重试")
         title = lines[0].lstrip()[2:].strip() or src_title[:30]
         if pitch:  # 人选定的标题优先（2026-11-20 用户裁决：场景标题比论文式论点好）
-            pt = str(pitch.get("title") or "").strip()
+            pt = _title_trim(str(pitch.get("title") or "").strip())
             if pt:
                 title = pt
         md_text = _strip_struct_heads("\n".join(lines[1:]).strip())
@@ -390,10 +411,13 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             except Exception as e:  # noqa: BLE001
                 print(f"[adapt] 扩写失败（保留原稿）: {type(e).__name__}: {str(e)[:80]}")
         min_chars_or_raise(md_text, "改编稿")
-        bad = _title_bad(title)
-        for _try in range(2):
-            if not bad:
+        # 标题闸：3 次重拟，每次把上一稿的具体毛病喂回去；候选里挑合规的优先。
+        # 2026-11-21 修：旧循环跑满次数后最后一次不合规也照样采用（#83 实测收了缺 AI/FDE 的标题）。
+        title_candidates: list[tuple[str, str]] = [(title, _title_bad(title))]
+        for _try in range(3):
+            if title_candidates[-1][1] == "":
                 break
+            bad = title_candidates[-1][1]
             ctx.set_progress(32, f"标题不合规（{bad}），重拟第 {_try + 1} 次")
             td = await gateway.complete_json(
                 [{"role": "user", "content":
@@ -403,17 +427,18 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                   "（例子只示范结构，不要照抄内容）。"
                   "必须出现 AI 或 FDE，但不许当口号前缀；标题里不放 AI落地/需求预测/配送量/口径/"
                   "交付/闭环/赋能/抓手/底层逻辑/真问题/最值钱/最难的；"
-                  "不用冒号、破折号、双引号、问句、比喻造词；标题里的数量必须在正文有对应。\n"
+                  "不用冒号、破折号、双引号、问句、比喻造词；标题里的数量必须在正文有对应。"
+                  + (f"\n上一稿标题「{title_candidates[-1][0]}」的毛病是「{bad}」，必须改掉这个毛病。"
+                     if title_candidates[-1][0] else "") + "\n"
                   + md_text[:3000] + '\n输出 JSON：{"title": "..."}'}],
                 max_tokens=512, thinking="disabled")
-            nt = str((td or {}).get("title") or "").strip()[:40]
+            nt = _title_trim(str((td or {}).get("title") or "").strip()[:40])
             if not nt:
                 continue
-            if len(nt) > 24:  # 重拟仍超长：在标点处截断，保证是完整标题
-                cut = max(nt.rfind("，", 0, 25), nt.rfind("：", 0, 25), nt.rfind("——", 0, 25))
-                nt = nt[:cut] if cut >= 10 else nt[:24]
-            title = nt
-            bad = _title_bad(title)
+            title_candidates.append((nt, _title_bad(nt)))
+        title, bad = next(((t, b) for t, b in reversed(title_candidates) if b == ""),
+                          title_candidates[-1])
+        title_warning = bad  # 非空=三次重拟后仍不合规，终审要人工改标题
 
         # ── 原创度闸：与源文重复率 ≤30%，超线定向重写一次，仍超=当日空过退回清单 ──
         ctx.set_progress(55, "原创度检测（与源文比对）")
@@ -607,6 +632,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             p = dict(art.payload or {})
             p["html"] = render_wechat_html(art.body)
             p["article_state"] = "rendered"
+            if title_warning:  # 三次重拟仍不合规的标题：落 note 给终审（人工改标题）
+                p["note"] = (p.get("note") or "") + f"｜标题待人工改（机检：{title_warning}）"
             if soft_left:  # 语言/表述建议修订后仍有残留：落 note 给用户终审参考（不拦发布）
                 p["note"] = (p.get("note") or "") + "｜语言建议残留：" + "；".join(
                     x[:44] for x in soft_left[:2])[:200]
@@ -629,6 +656,8 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
         s.add(PipelineLedger(day=_today(), pipeline="wechat_adapt", ok=True,
                           produced=f"清单项 #{item_id} → 文章 #{article_id}《{title[:24]}》（重复率 {ratio}%）"))
         s.commit()
-    ctx.set_progress(100, f"完成：《{title[:24]}》已排版待发（改编自《{src_title[:20]}》，重复率 {ratio}%）")
+    ctx.set_progress(100, f"完成：《{title[:24]}》已排版待发（改编自《{src_title[:20]}》，重复率 {ratio}%）"
+                     + (f"｜标题待人工改（{title_warning}）" if title_warning else ""))
     return {"adapted": True, "article_id": article_id, "item_id": item_id,
-            "title": title, "ratio": ratio, "source": src_title}
+            "title": title, "ratio": ratio, "source": src_title,
+            "title_warning": title_warning}

@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
 from ..auth import require_user
@@ -20,7 +21,121 @@ router = APIRouter(prefix="/api/analytics")
 
 _ACCOUNT_KEYS = ("fans", "new_fans", "profile_views", "play", "leads")
 _PUB_KEYS = ("reads", "welook", "follows", "leads", "exposure", "likes",
-             "comments", "shares", "collects")
+             "comments", "shares", "collects", "read_done")
+
+# 判卷指标白名单（2026-11-21 阶段 4 通用补录：键必须落在对应平台的口径内）
+_PUB_METRIC_KEYS = {
+    "douyin": ("exposure", "play", "likes", "comments", "shares", "collects", "follows", "leads"),
+    "xiaohongshu": ("exposure", "likes", "comments", "shares", "collects", "follows", "leads"),
+    "wechat": ("reads", "read_done", "welook", "shares", "follows", "leads"),
+}
+
+
+@router.get("/judgement")
+def judgement(days: int = 30, user: User = Depends(require_user)) -> dict:
+    """三平台判卷（2026-11-21 阶段 4）：已发布作品逐一判爆款/过线/待改进（线=judgement.py 假设值）。
+
+    数据源优先级：MetricsSnapshot（publication 维度最新一行）→ payload.stats →
+    抖音自有 SelfVideo 快照（复用阶段 1 联表）。判卷权在数据，这里只折算。"""
+    from ..analytics.judgement import judge
+
+    import re as _re
+
+    with Session(engine) as s:
+        pubs = s.exec(select(Publication).where(  # type: ignore[attr-defined]
+            Publication.tenant_id == user.tenant_id)).all()  # type: ignore[attr-defined]
+        vids = {v.aweme_id: v for v in s.exec(select(SelfVideo)).all()  # type: ignore[attr-defined]
+                if v.aweme_id}
+        items: list[dict] = []
+        for p in sorted(pubs, key=lambda x: (x.published_at or ""), reverse=True):
+            c = s.get(Content, p.content_id)
+            if c is None:
+                continue
+            snap = s.exec(
+                select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+                    MetricsSnapshot.subject_type == "publication",  # type: ignore[attr-defined]
+                    MetricsSnapshot.subject_id == c.id)  # type: ignore[attr-defined]
+                .order_by(MetricsSnapshot.date.desc())).first()  # type: ignore[attr-defined]
+            m = dict((snap.metrics if snap else None) or (c.payload or {}).get("stats") or {})
+            if p.platform == "douyin" and not m.get("play"):
+                mm = _re.search(r"video/(\d+)", p.url or "")
+                v = vids.get(mm.group(1)) if mm else None
+                if v is not None:
+                    m = dict(v.stats or {})
+            verdict = judge(p.platform, m)
+            items.append({"content_id": c.id, "kind": c.kind, "platform": p.platform,
+                          "title": c.title, "url": p.url,
+                          "published_at": p.published_at,
+                          "metrics": {k: int(m.get(k) or 0) for k in _PUB_KEYS if m.get(k)},
+                          **verdict})
+        summary: dict[str, int] = {}
+        for it in items:
+            summary[it["verdict"]] = summary.get(it["verdict"], 0) + 1
+        return {"items": items, "summary": summary,
+                "lines": {"douyin_play_viral": 30000, "xhs_interact_viral": 3.0,
+                          "wechat_readdone_viral": 65.0}}
+
+
+class BackfillIn(BaseModel):
+    metrics: dict  # 键=平台口径（见 _PUB_METRIC_KEYS），值=非负整数
+
+
+@router.post("/publications/{content_id}/metrics")
+def backfill_publication_metrics(content_id: int, body: BackfillIn,
+                                 user: User = Depends(require_user)) -> dict:
+    """作品指标通用补录（2026-11-21 阶段 4）：按平台口径键白名单收，同主体同日按列合并。
+
+    口径：wechat 原有 /articles/{id}/reflow 保留不破坏；xhs/douyin 统一走本端点。"""
+    with Session(engine) as s:
+        pub = s.exec(select(Publication).where(  # type: ignore[attr-defined]
+            Publication.content_id == content_id)).first()  # type: ignore[attr-defined]
+        if pub is None:
+            raise HTTPException(status_code=404, detail="该内容没有发布登记")
+        platform = pub.platform
+        allowed = _PUB_METRIC_KEYS.get(platform)
+        if not allowed:
+            raise HTTPException(status_code=400, detail=f"平台 {platform} 不支持补录")
+        vals = {}
+        for k, v in (body.metrics or {}).items():
+            if k not in allowed:
+                raise HTTPException(status_code=400, detail=f"{platform} 不收指标「{k}」")
+            try:
+                vals[k] = max(0, int(v))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"指标「{k}」必须是整数") from None
+        if not vals:
+            raise HTTPException(status_code=400, detail="没有可补录的指标")
+        c = s.get(Content, content_id)
+        if c is None:
+            raise HTTPException(status_code=404, detail="内容不存在")
+        today = datetime.now().strftime("%Y-%m-%d")
+        # payload.stats 快照（作品表现页的兜底源）
+        p = dict(c.payload or {})
+        stats = dict(p.get("stats") or {})
+        stats.update(vals)
+        stats["filled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        p["stats"] = stats
+        c.payload = p
+        s.add(c)
+        # 事实表：同主体同日按列合并（R6.2 口径）
+        row = s.exec(select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+            MetricsSnapshot.tenant_id == user.tenant_id,  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_type == "publication",  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_id == content_id,  # type: ignore[attr-defined]
+            MetricsSnapshot.date == today)).first()  # type: ignore[attr-defined]
+        if row is None:
+            row = MetricsSnapshot(tenant_id=user.tenant_id, subject_type="publication",
+                                  subject_id=content_id, platform=platform, date=today,
+                                  metrics={}, source="manual")
+        merged = dict(row.metrics or {})
+        merged.update(vals)
+        row.metrics = merged
+        row.source = "manual"
+        s.add(row)
+        s.commit()
+    from ..analytics.judgement import judge
+
+    return {"ok": True, "metrics": vals, "verdict": judge(platform, vals)}
 
 
 def _days_param(days: int) -> str:

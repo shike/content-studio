@@ -58,6 +58,23 @@ const STAGE_META: Record<string, { label: string; cls: string }> = {
   dismissed: { label: '不做', cls: 'bg-slate-100 text-slate-400' },
 }
 
+/** 选题会现场（2026-11-21 阶段 2）：article_pitch 出的 5 个可单独成篇的现场 */
+interface ArticlePitch {
+  scene: string
+  thesis: string
+  title: string
+  evidence: string[]
+}
+
+/** 笔记角度三元组（2026-11-21 阶段 3）：note_pitch 出的 5 个角度 */
+interface NoteAngle {
+  audience: string
+  pain: string
+  keyword: string
+  title: string
+  hook: string
+}
+
 export default function KbTab({ onNavigate, mode = 'full' }: {
   onNavigate?: (k: string) => void; mode?: 'full' | 'today'
 }) {
@@ -80,6 +97,8 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
     dir: 'xhs' | 'article'
     xhsTitle: string
     xhsAngle: string
+    meeting: null | { loading: boolean; err: string; items: (ArticlePitch | NoteAngle)[] }
+    pickedIdx: number | null
   }>(null)
   const [gen, setGen] = useState<null | { phase: 'busy' | 'done'; label: string; text: string; noteId?: number; dir: 'xhs' }>(null)
   const [fb, setFb] = useState('')
@@ -101,7 +120,35 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
       xhsTitle: (d.title || '').slice(0, 40),
       xhsAngle: [d.adapt_angle, ...((d.best_quotes || []).slice(0, 2))]
         .filter(Boolean).join('；金句：').slice(0, 200),
+      meeting: null, pickedIdx: null,
     })
+  }
+
+  /** 开选题会（2026-11-21 阶段 2/3）：现场（长文）或角度三元组（笔记），人选定后喂对应证据。 */
+  const loadMeeting = (docId: number, kind: 'article' | 'note', restart = false) => {
+    setProd((p) => (p ? { ...p, meeting: { loading: true, err: '', items: restart ? [] : (p.meeting?.items || []) }, pickedIdx: null } : p))
+    void (async () => {
+      try {
+        const ep = kind === 'article' ? 'pitches' : 'note-angles'
+        const r = await api<{ job_id: number }>(`/articles/content-items/${docId}/${ep}`, { method: 'POST' })
+        const j = await waitJob(r.job_id, (jj) => setProd((p) => (p && p.meeting?.loading
+          ? { ...p, meeting: { ...p.meeting, err: `${jj.progress}% ${jj.message || ''}` } } : p)))
+        const res = (j as { result?: { pitches?: ArticlePitch[]; angles?: NoteAngle[] } })?.result
+        const items = (kind === 'article' ? res?.pitches : res?.angles) || []
+        setProd((p) => (p ? { ...p, meeting: { loading: false, err: items.length ? '' : '没出可写的条目', items } } : p))
+      } catch (e) {
+        setProd((p) => (p ? { ...p, meeting: { loading: false, err: apiErrText(e), items: [] } } : p))
+      }
+    })()
+  }
+
+  /** 选定笔记角度：三元组填进选题标题/切角（仍可手改）。 */
+  const pickAngle = (a: NoteAngle, idx: number) => {
+    setProd((p) => (p ? {
+      ...p, pickedIdx: idx,
+      xhsTitle: a.title,
+      xhsAngle: `写给：${a.audience}；痛点：${a.pain}；搜索词：${a.keyword}（标题与正文首行必须含它）${a.hook ? `；可用硬事实：${a.hook}` : ''}`,
+    } : p))
   }
 
   const mine = async () => {
@@ -194,11 +241,16 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
     }
   }
 
-  const toArticle = async (d: KbDoc) => {
+  const toArticle = async (d: KbDoc, pitch?: ArticlePitch) => {
     setError('')
     try {
-      const r = await api<{ job_id: number }>(`/articles/content-items/${d.id}/generate`, { method: 'POST' })
-      setMsg(`长文改编中（任务 #${r.job_id}）——保骨架保原话成文约需几分钟`)
+      const r = await api<{ job_id: number }>(`/articles/content-items/${d.id}/generate`, {
+        method: 'POST',
+        body: JSON.stringify(pitch ? { pitch } : {}),
+      })
+      setMsg(pitch
+        ? `按现场《${(pitch.title || '').slice(0, 20)}》改编中（任务 #${r.job_id}）——只喂证据包成文约需几分钟`
+        : `长文改编中（任务 #${r.job_id}）——保骨架保原话成文约需几分钟`)
       await waitJob(r.job_id, (j) => setMsg(`改编：${j.progress}% ${j.message || ''}`))
       setMsg('长文已生成 → 「公众号 · 清单」排版待发')
       load()
@@ -420,10 +472,22 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
             <div className="mt-3 text-[12px] font-medium tracking-wide text-slate-400">内容类型（知识库 → 公众号长文 + 小红书图文两出口，2026-11-18 定版）</div>
             <div className="mt-1.5 space-y-2">
               {([
-                { v: 'xhs', title: '小红书 · 图文笔记', desc: '生产资料包（因果链/操作/边界/数字账）喂入 → 收藏体清单化 + 标题点击力评分选主' },
-                { v: 'article', title: '公众号 · 改编长文', desc: '立即改编：资料包保深度成文 → 原创度闸 → 双审校 → 排版，完成后进「公众号 · 清单」' },
+                { v: 'xhs', title: '小红书 · 图文笔记', desc: '先开角度会：人群+痛点+搜索词三元组，你选定一个 → 对着三元组成文 + 轻质量体检' },
+                { v: 'article', title: '公众号 · 改编长文', desc: '先开选题会：源文抽 5 个现场，你选定一个 → 只喂证据包成文 → 原创度闸 → 双审校 → 排版' },
               ] as const).map((o) => (
-                <button key={o.v} onClick={() => setProd({ ...prod, dir: o.v })}
+                <button key={o.v} onClick={() => {
+                  if (o.v === 'article' && !prod.meeting) {
+                    setProd({ ...prod, dir: 'article' })
+                    loadMeeting(prod.doc.id, 'article')  // 默认先开选题会（2026-11-21 阶段 2 定版）
+                    return
+                  }
+                  if (o.v === 'xhs' && !prod.meeting) {
+                    setProd({ ...prod, dir: 'xhs' })
+                    loadMeeting(prod.doc.id, 'note')  // 默认先开角度会（2026-11-21 阶段 3 定版）
+                    return
+                  }
+                  setProd({ ...prod, dir: o.v })
+                }}
                   className={`block w-full rounded-xl border px-3.5 py-2.5 text-left transition ${prod.dir === o.v ? 'border-emerald-400 bg-emerald-50' : 'border-[#E8ECF0] hover:border-slate-300'}`}>
                   <div className="text-[13.5px] font-semibold text-slate-900">{o.title}</div>
                   <div className="mt-0.5 text-[12px] text-slate-500">{o.desc}</div>
@@ -433,6 +497,64 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
 
             {prod.dir === 'xhs' && (
               <div className="mt-4 space-y-3">
+                {(() => {
+                  const ps = prod.meeting
+                  if (ps === null) {
+                    return (
+                      <div className="rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
+                        两步生成：先开角度会——从源文抽 5 个角度（人群+痛点+搜索词），你选定一个，生成对着三元组写。
+                        <button onClick={() => loadMeeting(prod.doc.id, 'note')}
+                          className="mt-2 block rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700">
+                          开角度会
+                        </button>
+                      </div>
+                    )
+                  }
+                  if (ps.loading) {
+                    return (
+                      <div className="flex items-center gap-2 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] text-slate-500">
+                        <RefreshCw size={13} className="inline animate-spin text-emerald-600" />
+                        角度会进行中：{ps.err || '拉源文全文 → 抽角度…'}
+                      </div>
+                    )
+                  }
+                  if (ps.items.length > 0) {
+                    return (
+                      <>
+                        <div className="text-[12px] font-medium tracking-wide text-slate-400">
+                          选一个角度（三元组会填进下面的标题与切角，仍可手改）
+                        </div>
+                        <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                          {(ps.items as NoteAngle[]).map((a, i) => (
+                            <button key={i} onClick={() => pickAngle(a, i)}
+                              className={`block w-full rounded-xl border px-3.5 py-2.5 text-left transition ${prod.pickedIdx === i ? 'border-emerald-400 bg-emerald-50' : 'border-[#E8ECF0] hover:border-slate-300'}`}>
+                              <div className="text-[13.5px] font-semibold text-slate-900">{a.title}</div>
+                              <div className="mt-1 text-[12px] leading-relaxed text-slate-600">写给 {a.audience}：{a.pain}</div>
+                              <div className="mt-0.5 text-[11.5px] text-slate-400">搜索词：{a.keyword}{a.hook ? `｜硬事实：${a.hook.slice(0, 30)}` : ''}</div>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="text-[11.5px] text-slate-400">
+                          都不合意？<button onClick={() => loadMeeting(prod.doc.id, 'note', true)}
+                            className="underline decoration-slate-300 underline-offset-2 hover:text-slate-600">重开一次</button>
+                          ，或<button onClick={() => setProd({ ...prod, meeting: null, pickedIdx: null })}
+                            className="underline decoration-slate-300 underline-offset-2 hover:text-slate-600">跳过，手动填</button>
+                        </div>
+                      </>
+                    )
+                  }
+                  return (
+                    <div className="rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
+                      角度会没开成：{ps.err || '没出合格角度'}
+                      <div className="mt-2 flex gap-2">
+                        <button onClick={() => loadMeeting(prod.doc.id, 'note', true)}
+                          className="rounded-full border border-slate-200 px-3.5 py-1.5 text-[12px] text-slate-600 transition hover:bg-slate-50">重开一次</button>
+                        <button onClick={() => setProd({ ...prod, meeting: null, pickedIdx: null })}
+                          className="rounded-full border border-slate-200 px-3.5 py-1.5 text-[12px] text-slate-600 transition hover:bg-slate-50">跳过，手动填</button>
+                      </div>
+                    </div>
+                  )
+                })()}
                 <div>
                   <div className="text-[12px] font-medium tracking-wide text-slate-400">选题标题</div>
                   <input value={prod.xhsTitle} onChange={(e) => setProd({ ...prod, xhsTitle: e.target.value })}
@@ -447,9 +569,77 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
             )}
 
             {prod.dir === 'article' && (
-              <div className="mt-4 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
-                点「确认生成」立即开始改编（约几分钟）：按文档的改编角度保骨架、保原话，过原创度闸与双审校后排版，
-                完成进「公众号 · 清单」排版待发。
+              <div className="mt-4 space-y-3">
+                {(() => {
+                  const ps = prod.meeting
+                  if (ps === null) {
+                    return (
+                      <div className="rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
+                        两步改编：先开选题会——从源文抽 5 个可单独成篇的现场（时间地点人动作数字），
+                        你选定一个，写稿只喂那个现场的证据，不喂全书。
+                        <button onClick={() => loadMeeting(prod.doc.id, 'article')}
+                          className="mt-2 block rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700">
+                          开选题会
+                        </button>
+                      </div>
+                    )
+                  }
+                  if (ps.loading) {
+                    return (
+                      <div className="flex items-center gap-2 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] text-slate-500">
+                        <RefreshCw size={13} className="inline animate-spin text-emerald-600" />
+                        选题会进行中：{ps.err || '拉源文全文 → 抽现场…'}
+                      </div>
+                    )
+                  }
+                  if (ps.items.length > 0) {
+                    return (
+                      <>
+                        <div className="text-[12px] font-medium tracking-wide text-slate-400">
+                          选一个现场（写稿只喂它的证据包，标题优先用它）
+                        </div>
+                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                          {(ps.items as ArticlePitch[]).map((p, i) => (
+                            <button key={i} onClick={() => setProd({ ...prod, pickedIdx: i })}
+                              className={`block w-full rounded-xl border px-3.5 py-2.5 text-left transition ${prod.pickedIdx === i ? 'border-emerald-400 bg-emerald-50' : 'border-[#E8ECF0] hover:border-slate-300'}`}>
+                              <div className="text-[13.5px] font-semibold text-slate-900">{p.title || `现场 ${i + 1}`}</div>
+                              <div className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-slate-500">{p.scene}</div>
+                              <div className="mt-1 line-clamp-1 text-[12px] leading-relaxed text-slate-700">判断：{p.thesis}</div>
+                              <div className="mt-1 text-[11px] text-slate-400">证据 {p.evidence.length} 条源文原文</div>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <button onClick={() => loadMeeting(prod.doc.id, 'article', true)}
+                            className="text-[12px] text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-700">
+                            重新开一次（换一批现场）
+                          </button>
+                        </div>
+                        <div className="text-[11.5px] text-slate-400">
+                          都不合意？<button onClick={() => setProd({ ...prod, pickedIdx: null })}
+                            className="underline decoration-slate-300 underline-offset-2 hover:text-slate-600">跳过选题，按文档角度整篇改编</button>
+                        </div>
+                      </>
+                    )
+                  }
+                  return (
+                    <div className="rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
+                      选题会没开成：{ps.err || '没出可写的现场'}
+                      <div className="mt-2 flex gap-2">
+                        <button onClick={() => loadMeeting(prod.doc.id, 'article', true)}
+                          className="rounded-full border border-slate-200 px-3.5 py-1.5 text-[12px] text-slate-600 transition hover:bg-slate-50">重开一次</button>
+                        <span className="text-[11.5px] leading-6 text-slate-400">或直接走下面的整篇改编</span>
+                      </div>
+                    </div>
+                  )
+                })()}
+                {prod.meeting !== null && prod.meeting.loading === false && (
+                  <div className="rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-500">
+                    {prod.pickedIdx === null
+                      ? '未选现场：按文档的改编角度保骨架、保原话成文，过原创度闸与双审校后排版。'
+                      : `已选「${prod.meeting.items[prod.pickedIdx]?.title || `现场 ${prod.pickedIdx + 1}`}」：写稿只喂这个现场的证据包，判断从现场长出来。`}
+                  </div>
+                )}
               </div>
             )}
 
@@ -457,8 +647,13 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
               <button onClick={() => setProd(null)}
                 className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] text-slate-600 transition hover:bg-slate-50">取消</button>
               <button onClick={() => {
-                const { doc, dir, xhsTitle, xhsAngle } = prod
+                const { doc, dir, xhsTitle, xhsAngle, meeting, pickedIdx } = prod
                 if (dir === 'xhs' && !xhsTitle.trim()) { setError('小红书选题标题不能为空'); return }
+                if (meeting?.loading) { setError('选题会还在跑，等它出完或直接取消'); return }
+                const pitch = dir === 'article' && meeting && pickedIdx !== null
+                  ? (meeting.items[pickedIdx] as ArticlePitch) : undefined
+                const angle = dir === 'xhs' && meeting && pickedIdx !== null
+                  ? (meeting.items[pickedIdx] as NoteAngle) : undefined
                 setProd(null)
                 if (dir === 'xhs') {
                   // 实时工作台（2026-11-18 用户裁决：生成在框里跑、结果在框里看、不行在框里改）
@@ -466,7 +661,11 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
                   void (async () => {
                     try {
                       const idea = await api<{ id: number }>('/channels/xhs/ideas', {
-                        method: 'POST', body: JSON.stringify({ title: xhsTitle, angle: xhsAngle, material_ids: [doc.id] }),
+                        method: 'POST', body: JSON.stringify({
+                          title: xhsTitle, angle: xhsAngle, material_ids: [doc.id],
+                          audience: angle?.audience || '', pain: angle?.pain || '',
+                          keyword: angle?.keyword || '',
+                        }),
                       })
                       const c = await api<{ job_id: number; content_id: number }>(`/channels/xhs/ideas/${idea.id}/compose`, { method: 'POST' })
                       await waitJob(c.job_id, (j) => setGen((g) => (g ? { ...g, label: `笔记生成中（${j.progress}%）${j.message || ''}` } : g)))
@@ -475,10 +674,11 @@ export default function KbTab({ onNavigate, mode = 'full' }: {
                     } catch (e) { setGen(null); setError(`笔记生成失败：${apiErrText(e)}`) }
                   })()
                 } else {
-                  void toArticle(doc)
+                  void toArticle(doc, pitch)
                 }
               }}
-                className="rounded-full bg-emerald-600 px-4 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700">确认生成</button>
+                disabled={prod.meeting?.loading === true}
+                className="rounded-full bg-emerald-600 px-4 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">确认生成</button>
             </div>
           </div>
         </div>,

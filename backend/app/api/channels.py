@@ -66,6 +66,10 @@ class XhsIdeaIn(BaseModel):
     title: str
     angle: str = ""  # 切角/要求（可空）
     material_ids: list[int] = []  # 素材库引用（写作原料 + usages 追溯）
+    # 角度三元组（2026-11-21 阶段 3 选题会选定，可空=手填旧行为）
+    audience: str = ""  # 写给谁（具体人群）
+    pain: str = ""      # 卡在哪（一句话痛点）
+    keyword: str = ""   # 会搜什么（真实搜索词）
 
 
 @router.post("/xhs/ideas", status_code=201)
@@ -77,7 +81,11 @@ def create_xhs_idea(body: XhsIdeaIn, user: User = Depends(require_user)) -> dict
     with Session(engine) as s:
         idea = Idea(tenant_id=user.tenant_id, channel_id=channel_id_of(s, "xhs"),
                     source="manual", title_hint=title[:40], angle=body.angle.strip()[:120],
-                    payload={"material_ids": body.material_ids[:5]}, status="draft")
+                    payload={"material_ids": body.material_ids[:5],
+                             "audience": body.audience.strip()[:60],
+                             "pain": body.pain.strip()[:60],
+                             "keyword": body.keyword.strip()[:20]},
+                    status="draft")
         s.add(idea)
         s.commit()
         s.refresh(idea)
@@ -104,7 +112,10 @@ async def compose_xhs_idea(idea_id: int, user: User = Depends(require_user)) -> 
                     idea_id=idea.id, kind="note", title=idea.title_hint[:30],
                     body="", payload={"note_state": "drafting",
                                       "material_ids": (idea.payload or {}).get("material_ids") or [],
-                                      "angle": idea.angle or ""})
+                                      "angle": idea.angle or "",
+                                      "audience": (idea.payload or {}).get("audience") or "",
+                                      "pain": (idea.payload or {}).get("pain") or "",
+                                      "keyword": (idea.payload or {}).get("keyword") or ""})
         s.add(c)
         s.flush()
         idea.content_id = c.id
@@ -215,12 +226,13 @@ async def rerender_cover(content_id: int, body: dict | None = None,
         if c is None or c.kind != "note":
             raise HTTPException(status_code=404, detail="note not found")
         big = str((body or {}).get("cover_title") or c.title or "")[:10]
+        sub = str((c.payload or {}).get("cover_sub") or "")
         tenant_id = c.tenant_id or 1
     import asyncio
 
     try:
         path = await asyncio.to_thread(xhs_line.render_cover, big, tenant_id,
-                                       f"xhs_{content_id}.png")
+                                       f"xhs_{content_id}.png", sub=sub)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"封面渲染失败：{e}") from None
     with Session(engine) as s:

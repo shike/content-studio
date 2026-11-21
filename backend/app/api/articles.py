@@ -128,12 +128,33 @@ def set_content_item_status(item_id: int, body: ItemStatusIn,
         return _kb_item_out(it)
 
 
+class AdaptIn(BaseModel):
+    pitch: dict | None = None  # 选题会选定现场 {scene, thesis, title, evidence[]}
+
+
 @router.post("/content-items/{item_id}/generate", status_code=202)
-async def adapt_content_item(item_id: int, user: User = Depends(require_user)) -> dict:
+async def adapt_content_item(item_id: int, body: AdaptIn | None = None,
+                             user: User = Depends(require_user)) -> dict:
     """立即改编指定清单项（2026-11-18 用户裁决：手动生成直接执行，不等每日 05:00 队列）。
 
-    同一套改编器与闸（原创度/机检/双审校/标题评分）；跑完 stage=done 进「公众号 · 清单」。"""
+    同一套改编器与闸（原创度/机检/双审校/标题评分）；跑完 stage=done 进「公众号 · 清单」。
+    2026-11-21 阶段 2：body.pitch=选题会人选定的现场（scene/thesis/evidence/title）——
+    改编只喂证据包不喂全书，标题优先用现场标题；不传=按文档角度整篇改编（旧行为）。"""
     from ..models import Material
+
+    pitch = None
+    if body is not None and body.pitch is not None:
+        p = body.pitch
+        thesis = str((p or {}).get("thesis") or "").strip()
+        ev = [str(x).strip() for x in ((p or {}).get("evidence") or []) if str(x).strip()]
+        if not thesis:
+            raise HTTPException(status_code=400, detail="pitch 缺判断（thesis）")
+        if len(ev) < 2:
+            raise HTTPException(status_code=400, detail="pitch 证据不足（evidence ≥2 条）")
+        pitch = {"scene": str((p or {}).get("scene") or "")[:300],
+                 "thesis": thesis[:120],
+                 "title": str((p or {}).get("title") or "")[:40],
+                 "evidence": ev[:5]}
 
     with Session(engine) as s:
         it = s.get(Material, item_id)
@@ -141,8 +162,41 @@ async def adapt_content_item(item_id: int, user: User = Depends(require_user)) -
             raise HTTPException(status_code=404, detail="清单项不存在")
         if (it.stage or "") != "pending":
             raise HTTPException(status_code=409, detail=f"当前状态 {it.stage} 不能改编（done=已改编过）")
-    job = await runner.submit("article_adapt", {"item_id": item_id},
+    job = await runner.submit("article_adapt", {"item_id": item_id, "pitch": pitch} if pitch
+                              else {"item_id": item_id},
                               dedup_key=f"1:adapt:{item_id}")
+    return {"job_id": job.id}
+
+
+@router.post("/content-items/{item_id}/pitches", status_code=202)
+async def content_item_pitches(item_id: int, user: User = Depends(require_user)) -> dict:
+    """开选题会（2026-11-21 阶段 2）：源文抽 5 个现场（scene/thesis/title/evidence）。
+
+    结果存 job.result.pitches；空源/无现场走重试梯子，前端给「跳过选题」兜底。"""
+    from ..models import Material
+
+    with Session(engine) as s:
+        it = s.get(Material, item_id)
+        if it is None or it.origin_type != "kb_doc":
+            raise HTTPException(status_code=404, detail="清单项不存在")
+    job = await runner.submit("article_pitch", {"item_id": item_id},
+                              dedup_key=f"1:apitch:{item_id}")
+    return {"job_id": job.id}
+
+
+@router.post("/content-items/{item_id}/note-angles", status_code=202)
+async def content_item_note_angles(item_id: int, user: User = Depends(require_user)) -> dict:
+    """笔记选题会（2026-11-21 阶段 3）：源文抽 5 个角度三元组（人群+痛点+搜索词）。
+
+    结果存 job.result.angles；前端给「跳过，手动填」兜底（小红书方向旧行为）。"""
+    from ..models import Material
+
+    with Session(engine) as s:
+        it = s.get(Material, item_id)
+        if it is None or it.origin_type != "kb_doc":
+            raise HTTPException(status_code=404, detail="清单项不存在")
+    job = await runner.submit("note_pitch", {"item_id": item_id},
+                              dedup_key=f"1:npitch:{item_id}")
     return {"job_id": job.id}
 
 

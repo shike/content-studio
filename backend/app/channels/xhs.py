@@ -1,12 +1,14 @@
 """小红书线（PRD R5）：图文笔记生成 + 封面模板渲染。
 
-- 选题：手动发起（素材库选料/热点/一手案例），本期不做每日自动产线（R5.2 宁缺勿滥）；
-- 笔记稿：note_generate（标题≤20/正文 300~800/标签 3~8/合规红线同公众号）；
-- 封面：模板渲染（品牌底色+标题大字+署名角标，Pillow 直出），不做 AI 生图（R5.3）；
+- 选题：选题会出角度三元组（2026-11-21 阶段 3）或手动发起，每日自动产线仍不做（R5.2 宁缺勿滥）；
+- 笔记稿：note_generate（三元组进稿/标题必含搜索词/首行搜索词/收藏钩子/站队点/轻质量闸）；
+- 封面：模板渲染（品牌底色+大字+副标+署名角标，Pillow 直出），不做 AI 生图（R5.3）；
 - 发布：人工（R5.4），publications 登记；不做浏览器自动化（R5.5）。
 """
 from __future__ import annotations
 
+import asyncio
+import re
 
 from sqlmodel import Session
 
@@ -19,7 +21,7 @@ from ..prompts import render
 from ..settings import settings
 
 
-def render_cover(title_big: str, tenant_id: int, out_name: str) -> str:
+def render_cover(title_big: str, tenant_id: int, out_name: str, sub: str = "") -> str:
     """封面模板：1080×1440（3:4），品牌墨绿底 + 白纸标题大字 + 署名角标。
     标题自动折行（每行 ≤6 字封顶，最多 5 行）。失败抛异常（调用方显式降级可见）。"""
     from PIL import Image, ImageDraw, ImageFont
@@ -58,6 +60,10 @@ def render_cover(title_big: str, tenant_id: int, out_name: str) -> str:
     for ln in lines:
         draw.text((100, y), ln, font=font, fill="#f5f1e6")
         y += int(size * 1.25)
+    # 副标（2026-11-21 阶段 3：补一句利益/悬念，与大字互补；金色小字压在大字块下方）
+    sub = (sub or "").strip()[:14]
+    if sub:
+        draw.text((100, min(y + 20, H - 320)), sub, font=_font(56), fill="#" + accent)
     if signature:
         draw.text((100, H - 200), signature[:16], font=_font(52), fill="#f5f1e6")
 
@@ -81,6 +87,10 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
         material_ids = list((c.payload or {}).get("material_ids") or [])
         idea_title = c.title
         angle = str((c.payload or {}).get("angle") or "")
+        # 角度三元组（2026-11-21 阶段 3 选题会选定；空=手填旧行为）
+        audience = str((c.payload or {}).get("audience") or "")
+        pain = str((c.payload or {}).get("pain") or "")
+        keyword = str((c.payload or {}).get("keyword") or "")
         from ..tenant_brand import brand_of
 
         persona_text = brand_of(tenant_id)["persona"]
@@ -118,9 +128,18 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
                 kit = await ensure_prod_kit(m.id)
                 break
 
+    # 角度三元组注入（2026-11-21 阶段 3）：对着人群说话、从痛点切入、搜索词进标题与首行
+    angle_lines = [x for x in (f"- 写给谁：{audience}" if audience else "",
+                               f"- 痛点：{pain}" if pain else "",
+                               f"- 搜索词：{keyword}" if keyword else "") if x]
+    angle_block = "\n".join(angle_lines) if angle_lines else "（无三元组——按切角/素材自由发挥）"
+    if keyword:
+        angle_block += f"\n写稿硬约束：搜索词「{keyword}」必须进标题与正文首行；对着这个人群说话，从痛点切入。"
+
     ctx.set_progress(15, "生成笔记稿（候选标题/正文/标签）")
     data = await gateway.complete_json(
-        [{"role": "user", "content": render("note_generate", PERSONA=persona_text, KIT=kit_block(kit))
+        [{"role": "user", "content": render("note_generate", PERSONA=persona_text, KIT=kit_block(kit),
+                                            ANGLE_BLOCK=angle_block, ANGLE_KEYWORD=keyword or "（无）")
           + "\n\n选题：" + (idea_title or "（无标题，按素材自由发挥）")
           + ("\n\n素材：\n" + "\n\n".join(blocks) if blocks else "\n\n素材：（无——按选题与人设写常青干货）")}],
         max_tokens=2048, thinking="disabled")
@@ -173,15 +192,47 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
             if n_title:
                 title = n_title[:30]
     cover_title = str(data.get("cover_title") or "").strip()[:10]
+    cover_sub = str(data.get("cover_sub") or "").strip()[:14]
     if not title or not body:
         raise RuntimeError("笔记生成空响应（title/body 缺失），稍后自动重试")
+
+    # ── 轻质量闸（2026-11-21 阶段 3）：机检+一次轻审，红提示落 payload.issues，不拦发布 ──
+    ctx.set_progress(80, "轻质量体检（机检+轻审）")
+    issues: list[str] = []
+    n_chars = len(re.sub(r"\s", "", body))
+    if n_chars < 300 or n_chars > 800:
+        issues.append(f"正文 {n_chars} 字出 300~800 区间")
+    if not (3 <= len(tags) <= 8):
+        issues.append(f"标签 {len(tags)} 个出 3~8 区间")
+    if keyword and keyword not in body[:80]:
+        issues.append(f"正文首行没有搜索词「{keyword}」")
+    if keyword and all(keyword not in t for t in ([title] + options)):
+        issues.append(f"标题都没有搜索词「{keyword}」")
+    if cover_title and cover_title in title:
+        issues.append("封面大字与标题原词重复（要换说法）")
+    for w in ("保证收益", "百分百", "稳赚", "宝子们", "小编", "总的来说", "综上所述", "本文", "这篇笔记"):
+        if w in body:
+            issues.append(f"正文出现禁词「{w}」")
+    try:
+        lr = await gateway.complete_json(
+            [{"role": "user", "content":
+              "小红书笔记轻审（只报真问题，每条 ≤30 字，没有问题给空数组）：\n"
+              "1. AI 腔：元叙述（这篇/本文）、书面长句、总结腔；\n"
+              "2. 封面与标题是否呼应（大字「" + (cover_title or "无") + "」标题「" + title[:20] + "」）；\n"
+              "3. 收藏钩子是否真实存在：正文里有没有真能截图带走的清单/步骤/表。\n"
+              "正文：\n" + body +
+              '\n输出 JSON：{"issues": ["..."]}'}],
+            max_tokens=1024, thinking="disabled")
+        issues += [str(x)[:60] for x in (lr or {}).get("issues") or []][:3]
+    except Exception as e:  # noqa: BLE001 轻审失败不挡成稿
+        ctx.set_progress(82, f"轻审跳过（{type(e).__name__}）")
 
     ctx.set_progress(70, "渲染封面（品牌模板）")
     cover_path = ""
     try:
-        cover_path = await __import__("asyncio").to_thread(
+        cover_path = await asyncio.to_thread(
             render_cover, cover_title or title[:10], tenant_id,
-            f"xhs_{content_id}.png")
+            f"xhs_{content_id}.png", sub=cover_sub)
     except Exception as e:  # noqa: BLE001 封面失败不挡成稿（可手补）
         ctx.set_progress(72, f"封面渲染失败（可后台补）：{type(e).__name__}: {str(e)[:60]}")
 
@@ -191,6 +242,8 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
         p["note_state"] = "review"
         p["tags"] = tags
         p["cover"] = cover_path
+        p["cover_sub"] = cover_sub
+        p["issues"] = issues  # 红提示（终审参考，不拦发布）
         c.payload = p
         c.title = title[:30]
         c.body = body

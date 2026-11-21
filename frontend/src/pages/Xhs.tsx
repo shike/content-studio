@@ -16,6 +16,7 @@ interface NoteRow {
   tags: string[]
   cover: string
   cover_url?: string
+  issues?: string[]  // 轻质量闸红提示（终审参考，不拦发布）
   status: string  // drafting|review|ready|published|failed
   material_ids: number[]
   publication: { url?: string; published_at?: string; mode?: string }
@@ -89,6 +90,10 @@ export default function Xhs() {
   const [loaded, setLoaded] = useState(false)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [edit, setEdit] = useState<{ id: number; title: string; body: string } | null>(null)
+  const [pubForm, setPubForm] = useState<number | null>(null)   // 发布登记展开的笔记 id
+  const [pubUrl, setPubUrl] = useState('')
+  const [pubBusy, setPubBusy] = useState(false)
+  const [pubErr, setPubErr] = useState('')
 
   const load = useCallback(() => {
     api<{ items: NoteRow[]; total: number }>('/channels/xhs/notes?limit=50')
@@ -185,6 +190,11 @@ export default function Xhs() {
                               <span key={t} className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-600">#{t}</span>
                             ))}
                           </div>
+                          {(n.issues || []).length > 0 && (
+                            <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-red-600">
+                              质量提示（终审参考）：{(n.issues || []).join('；')}
+                            </div>
+                          )}
                           {n.cover_url && (
                             <img src={n.cover_url} alt="封面" className="w-36 rounded-xl border border-slate-200" />
                           )}
@@ -195,8 +205,10 @@ export default function Xhs() {
                             <button className="btn-ghost btn-sm" onClick={() => rerenderCover(n.id)}>
                               <RefreshCw size={12} className="inline" /> 重渲染封面
                             </button>
-                            {n.status === 'ready' && (
-                              <span className="btn-ghost btn-sm cursor-default">人工发布 → 回来贴链接（发布登记在数据域接入后开放本页表单）</span>
+                            {!n.publication?.url && (
+                              <button className="btn-ghost btn-sm" onClick={() => setPubForm(pubForm === n.id ? null : n.id)}>
+                                发布登记
+                              </button>
                             )}
                             {!n.publication?.url && (
                               <button className="btn-ghost btn-sm text-red-500" onClick={() => removeOne(n.id)}>
@@ -204,6 +216,28 @@ export default function Xhs() {
                               </button>
                             )}
                           </div>
+                          {pubForm === n.id && (
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <input value={pubUrl} onChange={(e) => setPubUrl(e.target.value)}
+                                  placeholder="发布后贴笔记链接（小红书 App 分享复制）"
+                                  className="min-w-0 flex-1 rounded-lg border border-[#E8ECF0] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-emerald-400" />
+                                <button disabled={!pubUrl.trim() || pubBusy}
+                                  onClick={() => {
+                                    setPubBusy(true); setPubErr('')
+                                    api(`/channels/xhs/contents/${n.id}/publish`, {
+                                      method: 'POST', body: JSON.stringify({ mode: 'manual', url: pubUrl.trim() }),
+                                    })
+                                      .then(() => { setPubForm(null); setPubUrl(''); load() })
+                                      .catch((e) => setPubErr(apiErrText(e)))
+                                      .finally(() => setPubBusy(false))
+                                  }}
+                                  className="rounded-full bg-emerald-600 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">登记</button>
+                              </div>
+                              {pubErr && <div className="mt-1 text-[11.5px] text-red-600">{pubErr}</div>}
+                              <div className="mt-1 text-[11px] text-slate-400">登记后到「数据 · 作品表现」补录曝光/赞/收藏，看判卷（互动率 ≥3% = 爆文线）。</div>
+                            </div>
+                          )}
                         </>
                       )}
                     </div>

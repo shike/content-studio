@@ -167,6 +167,53 @@ def _collect(tenant_id: int, week_start: date, week_end: date) -> dict:
     }
 
 
+def _judge_facts(tenant_id: int, week_start: date, week_end: date) -> dict:
+    """三平台判卷段（2026-11-21 阶段 4）：本周发布登记的作品逐一判爆款/过线/待改进。
+
+    数据=MetricsSnapshot（publication 最新行）→ payload.stats 兜底 → 抖音自有 SelfVideo 联表；
+    线=judgement.py 假设值。周报只呈数字，判卷权在数据。"""
+    from datetime import datetime as _dt
+
+    from ..analytics.judgement import judge
+    from ..models import Content, Publication
+
+    week_s = week_start.isoformat()
+    week_e = week_end.isoformat() + "~"
+    items: list[dict] = []
+    with Session(engine) as s:
+        pubs = s.exec(select(Publication).where(  # type: ignore[attr-defined]
+            Publication.tenant_id == tenant_id,  # type: ignore[attr-defined]
+            Publication.published_at >= week_s,  # type: ignore[attr-defined]
+            Publication.published_at <= week_e)).all()  # type: ignore[attr-defined]
+        vids = {v.aweme_id: v for v in s.exec(select(SelfVideo)).all()  # type: ignore[attr-defined]
+                if v.aweme_id}
+        import re as _re
+
+        for p in pubs:
+            c = s.get(Content, p.content_id)
+            if c is None:
+                continue
+            snap = s.exec(select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+                MetricsSnapshot.subject_type == "publication",  # type: ignore[attr-defined]
+                MetricsSnapshot.subject_id == c.id)  # type: ignore[attr-defined]
+                .order_by(MetricsSnapshot.date.desc())).first()  # type: ignore[attr-defined]
+            m = dict((snap.metrics if snap else None) or (c.payload or {}).get("stats") or {})
+            if p.platform == "douyin" and not m.get("play"):
+                mm = _re.search(r"video/(\d+)", p.url or "")
+                v = vids.get(mm.group(1)) if mm else None
+                if v is not None:
+                    m = dict(v.stats or {})
+            verdict = judge(p.platform, m)
+            items.append({"platform": p.platform, "kind": c.kind,
+                          "title": (c.title or "")[:30],
+                          "verdict": verdict["verdict"], "value": verdict["value"],
+                          "detail": verdict["detail"]})
+    summary: dict[str, int] = {}
+    for it in items:
+        summary[it["verdict"]] = summary.get(it["verdict"], 0) + 1
+    return {"items": items, "summary": summary}
+
+
 async def _interpret(facts: dict) -> str:
     """LLM 解读（3~5 句：为什么好/下周建议）。失败返回空串（周报数字仍在）。"""
     try:
@@ -199,6 +246,7 @@ async def build_weekly_report(tenant_id: int, force: bool = False,
             return {"week": row.period_start, **(row.payload or {})}
     facts = _collect(tenant_id, ws, we)
     facts["cards"], facts["cards_unmatched"] = _card_matches(tenant_id)
+    facts["judgement"] = _judge_facts(tenant_id, ws, we)
     facts["summary"] = await _interpret(facts)
     with Session(engine) as s:
         row = s.exec(select(AnalyticsReport).where(
