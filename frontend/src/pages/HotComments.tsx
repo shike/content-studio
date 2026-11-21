@@ -9,8 +9,16 @@ import MaterialDossier from './MaterialDossier'
  * 出监控清单作者 + 白名单话题（fde/企业ai落地/企业知识库）的高赞评论
  * （赞 ≥ hot_comment_bar，默认 50）——受众用赞投票的共鸣点，
  * 点「生成口播稿」走弹药匹配 + 形态读稿闸，成稿进「人设号 · 视频稿」。
- * 供给靠评论补采任务持续补齐与 7 天滚动刷新。
+ * 预筛（2026-11-20 阶段 1）：三道门前移——doable 可做，no_story/no_target/dup 灰掉带原因，
+ * pending=预筛还没跑到（跟着 doable 排）。供给靠评论补采/刷新 + 预筛任务持续补齐。
  */
+
+const VERDICT_LABEL: Record<string, string> = {
+  no_story: '没有真事',
+  no_target: '点不出对象',
+  dup: '重复事件',
+  done: '已做过稿',
+}
 
 interface HotComment {
   material_id: number
@@ -19,6 +27,9 @@ interface HotComment {
   likes: number
   author?: string
   source: string
+  verdict?: string
+  reason?: string
+  dup_of?: string
 }
 
 interface GenState { phase: 'busy' | 'done'; label: string; text: string; scriptId?: number }
@@ -102,18 +113,29 @@ export default function HotComments() {
             const key = `${h.material_id}:${h.idx}`
             const g = gen[key]
             const open = expanded === key
+            const blocked = h.verdict === 'no_story' || h.verdict === 'no_target'
+              || h.verdict === 'dup' || h.verdict === 'done'
             return (
               <div key={key}
-                className={`cursor-pointer rounded-xl border bg-white px-4 py-3 transition ${open ? 'border-emerald-300' : 'border-[#E8ECF0] hover:border-slate-300'}`}
+                className={`cursor-pointer rounded-xl border px-4 py-3 transition ${blocked ? 'border-[#E8ECF0] bg-slate-50 opacity-70' : open ? 'border-emerald-300 bg-white' : 'border-[#E8ECF0] bg-white hover:border-slate-300'}`}
                 onClick={() => setExpanded(open ? null : key)}>
                 <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="num-serif shrink-0 text-[15px] font-bold text-amber-700">{h.likes}赞</span>
-                  <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed text-slate-800">「{h.comment}」</span>
-                  <button onClick={(e) => { e.stopPropagation(); fire(h) }} disabled={g?.phase === 'busy'}
-                    className="shrink-0 rounded-full bg-emerald-600 px-3 py-1 text-[12px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
-                    生成口播稿
-                  </button>
+                  <span className={`num-serif shrink-0 text-[15px] font-bold ${blocked ? 'text-slate-400' : 'text-amber-700'}`}>{h.likes}赞</span>
+                  <span className={`min-w-0 flex-1 text-[13.5px] leading-relaxed ${blocked ? 'text-slate-500' : 'text-slate-800'}`}>「{h.comment}」</span>
+                  {blocked ? (
+                    <span className="shrink-0 rounded-full bg-slate-200 px-2.5 py-1 text-[11.5px] font-medium text-slate-500">
+                      {VERDICT_LABEL[h.verdict || ''] || h.verdict}
+                    </span>
+                  ) : (
+                    <button onClick={(e) => { e.stopPropagation(); fire(h) }} disabled={g?.phase === 'busy'}
+                      className="shrink-0 rounded-full bg-emerald-600 px-3 py-1 text-[12px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-40">
+                      生成口播稿
+                    </button>
+                  )}
                 </div>
+                {blocked && h.reason && (
+                  <div className="mt-1 text-[11.5px] text-slate-400">{h.reason}{h.verdict === 'dup' && h.dup_of ? `（与「${h.dup_of}」重复）` : ''}</div>
+                )}
                 <div className="mt-1 flex items-center gap-2 text-[11.5px] text-slate-400">
                   <span className="truncate">来源：{h.author || '监控号'}《{h.source}》</span>
                   <span className="ml-auto flex shrink-0 items-center gap-0.5 text-slate-400">

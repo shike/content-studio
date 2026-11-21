@@ -19,7 +19,7 @@ from ..db import engine
 from ..jobs.errors import TransientError
 from ..jobs.runner import (JobContext, register_concurrent, register_executor,
                            register_owed)
-from ..models import Job, Material, MaterialAnalysis, Source
+from ..models import Content, Job, Material, MaterialAnalysis, Source
 from ..settings import settings
 from . import service
 from .collectors import douyin_list
@@ -176,9 +176,10 @@ async def material_watch_scan(ctx: JobContext, payload: dict) -> dict:
 # 2026-11-20 用户裁决 1+2+3：每视频存前 40 条、存档 7 天滚动刷新（每天最多一批防风控）。
 
 
-def _recapture_plan() -> tuple[list[Material], list[Material]]:
+def _recapture_plan(refresh_before: datetime | None = None) -> tuple[list[Material], list[Material]]:
     """评论补采计划：(无存档, 超刷新窗)。监控号 + 热评白名单话题两条线；
-    无存档按热度降序优先，过期存档按最旧优先；连败 3 次停采。"""
+    无存档按热度降序优先；过期存档按视频热度降序（高热评论区先刷新）。
+    refresh_before=一次性补档的固定截止点（只刷此前的旧档，刷过的自然出列）。"""
     from .hot_comments import hot_scope, in_hot_scope
 
     with Session(engine) as s:
@@ -196,8 +197,11 @@ def _recapture_plan() -> tuple[list[Material], list[Material]]:
             if cur is None or (a.version or 0) > (cur.version or 0):
                 latest[a.material_id] = a
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    days = max(1, int(settings.comment_refresh_days or 7))
-    stale_before = now - timedelta(days=days)
+    if refresh_before is not None:
+        stale_before = refresh_before
+    else:
+        days = max(1, int(settings.comment_refresh_days or 7))
+        stale_before = now - timedelta(days=days)
 
     def _hotness(m: Material) -> int:
         st = m.stats or {}
@@ -223,7 +227,8 @@ def _recapture_plan() -> tuple[list[Material], list[Material]]:
             continue
         stale.append((a.created_at, m))
     missing.sort(key=_hotness, reverse=True)
-    stale.sort(key=lambda x: x[0] or now)
+    # 刷新优先高热视频：同样刷一批，评论多的视频更可能捞出新的过线热评
+    stale.sort(key=lambda x: (-_hotness(x[1]), x[0] or now))
     return missing, [m for _, m in stale]
 
 
@@ -238,7 +243,15 @@ async def comment_recapture(ctx: JobContext, payload: dict) -> dict:
 
     cap = 80   # 单轮上限：80×(75s 抓取窗+18s 静默) ≈ 2h < task_timeout 4h
     pace_s = 18  # 视频间静默窗：评论接口连发易触发风控窗
-    missing, stale = _recapture_plan()
+    # 一次性补档：payload 带固定截止点（ISO，naive UTC），只刷此前的旧档，可多批接力
+    before_raw = (payload or {}).get("refresh_before")
+    refresh_before = None
+    if before_raw:
+        try:
+            refresh_before = datetime.fromisoformat(str(before_raw)).replace(tzinfo=None)
+        except ValueError:
+            refresh_before = None
+    missing, stale = _recapture_plan(refresh_before)
     targets = missing + stale
     batch = targets[:cap]
     if not batch:
@@ -298,6 +311,14 @@ async def comment_recapture(ctx: JobContext, payload: dict) -> dict:
         await asyncio.sleep(pace_s)
     tail = f"；剩余 {max(0, len(targets) - len(batch))} 条 owed 下轮续扫" if len(targets) > len(batch) else ""
     ctx.set_progress(100, f"评论补采/刷新完成：成功 {ok} / 失败 {fail}{tail}")
+    # 新评论过线后先预筛再上雷达（三道门前移，2026-11-20 阶段 1）
+    try:
+        from ..jobs.runner import runner
+
+        await runner.submit("hot_comment_screen", {"auto": True},
+                            dedup_key="1:hot_comment_screen")
+    except Exception as e:  # noqa: BLE001 预筛排队失败不影响补采本身
+        print(f"[comment_recapture] 预筛排队失败: {type(e).__name__}: {str(e)[:80]}")
     return {"queue": len(targets), "missing": len(missing), "stale": len(stale),
             "ok": ok, "fail": fail, "notes": notes[:12]}
 
@@ -322,6 +343,108 @@ def owed_comment_recapture() -> list[tuple[dict, str]]:
 
 register_concurrent("comment_recapture")
 register_owed("comment_recapture", owed_comment_recapture)
+
+
+# ── 热评预筛（2026-11-20 阶段 1）：三道门前移到选题层——雷达不再按赞数裸排，
+# 先判「背后有没有真事 / 能不能点名对象 / 是否同事件重复」，页面上不可做的灰掉。
+# 屏幕结果落 MaterialAnalysis(kind=comment_screen)，键=评论文本，评论刷新不冲掉。
+
+
+def _screen_pending(cap: int = 40) -> tuple[list[dict], list[str]]:
+    """待筛热评 + 已做过稿的评论全文。做过稿=口播稿 payload 的文本锚（新稿自带，
+    旧稿按存档解析）。"""
+    from .hot_comments import collect_hot_comments, scripted_comment_texts, screen_map
+
+    with Session(engine) as s:
+        items, _bar = collect_hot_comments(s)
+        done = list(scripted_comment_texts(s))
+    screened = screen_map(s)
+    pending = [x for x in items
+               if x["comment"][:60] not in screened and x["comment"] not in done]
+    return pending[:cap], [t for t in done if t][:30]
+
+
+@register_executor("hot_comment_screen")
+async def hot_comment_screen(ctx: JobContext, payload: dict) -> dict:
+    """热评可成稿性预筛批量（light，LLM 一次判完本批）：doable/no_story/no_target/dup
+    四档 + 大白话 reason，落 kind=comment_screen。批内循环到筛完（≤5 轮，纯 LLM 秒级）；
+    owed 兜底：有欠筛任务补队。批内不许再 submit 自己——light 在跑时同类合并会被吞。"""
+    from ..llm import gateway
+    from ..prompts import render
+    from .enrich import _save_analysis
+    from .hot_comments import screen_map
+
+    total_screened = total_doable = 0
+    for _round in range(5):
+        pending, done = _screen_pending()
+        if not pending:
+            break
+        ctx.set_progress(min(90, 20 + 15 * _round), f"第 {_round + 1} 轮预筛 {len(pending)} 条")
+        lines = "\n".join(
+            f"{i + 1}｜{x['likes']} 赞｜《{(x['source'] or '')[:30]}》｜{x['comment']}"
+            for i, x in enumerate(pending))
+        data = await gateway.complete_json(
+            [{"role": "user", "content": render(
+                "comment_screen", DONE="\n".join(f"- {t[:80]}" for t in done) or "（暂无）",
+                COMMENTS=lines)}],
+            max_tokens=4000, thinking="disabled")
+        verdicts: dict[int, dict] = {}
+        for it in (data or {}).get("items") or []:
+            try:
+                i = int((it or {}).get("i") or 0)
+            except (TypeError, ValueError):
+                continue
+            v = str((it or {}).get("verdict") or "")
+            if i < 1 or i > len(pending) or v not in ("doable", "no_story", "no_target", "dup"):
+                continue
+            verdicts[i] = {"verdict": v, "reason": str((it or {}).get("reason") or "")[:80],
+                           "dup_of": str((it or {}).get("dup_of") or "")[:40]}
+        if not verdicts:
+            raise RuntimeError("预筛结果为空（LLM 输出无法解析）")
+
+        by_material: dict[int, list[dict]] = {}
+        for i, x in enumerate(pending, 1):
+            if i in verdicts:
+                by_material.setdefault(int(x["material_id"]), []).append(
+                    {"t": x["comment"][:60], **verdicts[i]})
+        with Session(engine) as s:
+            for mid, new_items in by_material.items():
+                prev = s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
+                    MaterialAnalysis.material_id == mid,  # type: ignore[attr-defined]
+                    MaterialAnalysis.kind == "comment_screen")  # type: ignore[attr-defined]
+                    .order_by(MaterialAnalysis.version.desc())).first()  # type: ignore[attr-defined]
+                merged: dict[str, dict] = {}
+                for it in ((prev.payload or {}).get("items") or []) if prev is not None else []:
+                    if isinstance(it, dict) and it.get("t"):
+                        merged[str(it["t"])] = {k: it.get(k, "") for k in
+                                                ("verdict", "reason", "dup_of")}
+                for it in new_items:
+                    merged[it["t"]] = {k: it.get(k, "") for k in ("verdict", "reason", "dup_of")}
+                m_row = s.get(Material, mid)
+                _save_analysis(s, mid, (m_row.tenant_id if m_row else 1) or 1,
+                               "comment_screen",
+                               {"items": [{"t": t, **v} for t, v in merged.items()]},
+                               model="llm")
+            s.commit()
+        total_screened += len(verdicts)
+        total_doable += sum(1 for v in verdicts.values() if v["verdict"] == "doable")
+    with Session(engine) as s:
+        remaining = len(_screen_pending()[0])
+    ctx.set_progress(100, f"预筛完成 {total_screened} 条（可成稿 {total_doable}），余 {remaining} 条下轮续")
+    return {"screened": total_screened, "doable": total_doable, "remaining": remaining}
+
+
+register_concurrent("hot_comment_screen")
+
+
+def owed_hot_comment_screen() -> list[tuple[dict, str]]:
+    """欠任务声明（兜底）：还有热评没过预筛 → 补队（comment_recapture 尾部已主动 submit）。"""
+    if _screen_pending()[0]:
+        return [({"auto": True}, "1:hot_comment_screen")]
+    return []
+
+
+register_owed("hot_comment_screen", owed_hot_comment_screen)
 
 
 @register_executor("material_resolve")

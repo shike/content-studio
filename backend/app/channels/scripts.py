@@ -381,7 +381,8 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
             s, tenant_id=1, channel_key="persona",
             title_hint=f"热评口播：{comment[:30]}",
             payload={"script_state": "generated", "account_type": "persona",
-                     "hot_comment": {"material_id": material_id, "idx": cidx},
+                     "hot_comment": {"material_id": material_id, "idx": cidx,
+                                     "text": comment[:60]},  # 文本锚：评论刷新会重排 idx
                      "form_check": chk, "story": story, "turn": turn})
         script.versions = [{"label": "照片子写", "hook": body.split("\n")[0][:40],
                             "body": body, "notes": turn}]
@@ -391,6 +392,12 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
         s.add(script)
         s.commit()
         script_id = script.id
+        # 素材引用追溯（判卷/去重消费面，2026-11-20 阶段 1 补录）
+        from ..materials.service import record_usage
+
+        record_usage(s, tenant_id=1, material_id=material_id,
+                     target_type="content", target_id=script.id, role="source")
+        s.commit()
     ctx.set_progress(100, f"完成（均 {chk['avg']} 字/最长 {chk['max']}/书面标点 {chk['book']}）")
     return {"script_id": script_id, "form": chk, "story": story, "turn": turn}
 

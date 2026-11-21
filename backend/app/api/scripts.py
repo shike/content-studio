@@ -199,6 +199,43 @@ def list_scripts(status: str = "", limit: int = 50, offset: int = 0,
         return resp
 
 
+@router.get("/perf")
+def scripts_perf(user: User = Depends(require_user)) -> dict:
+    """口播判卷（2026-11-20 阶段 1）：已发布到抖音的视频稿 ↔ 创作者中心回流数据。
+    纯联表不加扫描：publications(platform=douyin) 的 url 提 aweme_id，
+    对 self_videos.stats（self_scan 回写）→ 播放 ≥3 万=已达爆款范本线
+    （self_scan 收割线，达线即自动进 viral_gene_samples）。"""
+    import re
+
+    from ..models import SelfVideo
+
+    with Session(engine) as s:
+        pubs = s.exec(select(Publication).where(  # type: ignore[attr-defined]
+            Publication.platform == "douyin")).all()  # type: ignore[attr-defined]
+        contents = {c.id: c for c in s.exec(select(Content).where(  # type: ignore[attr-defined]
+            Content.kind == "video_script")).all()}  # type: ignore[attr-defined]
+        vids = {v.aweme_id: v for v in s.exec(select(SelfVideo)).all()  # type: ignore[attr-defined]
+                if v.aweme_id}
+        rows: list[dict] = []
+        for p in pubs:
+            c = contents.get(p.content_id)
+            if c is None:
+                continue
+            m = re.search(r"video/(\d+)", p.url or "")
+            v = vids.get(m.group(1)) if m else None
+            st = dict(v.stats or {}) if v is not None else {}
+            play = int(st.get("play") or 0)
+            rows.append({
+                "content_id": c.id, "title_hint": c.title or "", "url": p.url or "",
+                "published_at": p.published_at or "",
+                "play": play, "digg": int(st.get("digg") or 0),
+                "comment": int(st.get("comment") or 0),
+                "viral": play >= 30000,          # =self_scan 收割线
+                "has_data": v is not None,       # False=已登记、创作者中心还没回流
+            })
+    return {"items": rows}
+
+
 @router.get("/{script_id}")
 def get_script(script_id: int, user: User = Depends(require_user)) -> dict:
     with Session(engine) as s:

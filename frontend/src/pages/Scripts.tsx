@@ -42,10 +42,27 @@ function scriptSource(s: Script): { label: string; cls: string } | null {
   return null
 }
 
+/** 口播判卷（2026-11-20 阶段 1）：发布登记 ↔ 创作者中心回流数据（/scripts/perf 联表）。 */
+interface ScriptPerf {
+  content_id: number
+  url: string
+  published_at: string
+  play: number
+  digg: number
+  comment: number
+  viral: boolean
+  has_data: boolean
+}
+
+function fmtWan(n: number): string {
+  return n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}万` : String(n)
+}
+
 export default function Scripts({ accountType }: { accountType?: 'persona' | 'leadgen' }) {
   const [scripts, setScripts] = useState<Script[]>([])
   const [allScripts, setAllScripts] = useState<Script[]>([])
   const [oreTitles, setOreTitles] = useState<Record<number, string>>({}) // 获客矿建稿脚本的标题映射
+  const [perf, setPerf] = useState<Record<number, ScriptPerf>>({}) // 发布判卷：content_id → 回流数据
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
@@ -81,6 +98,9 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
         .then((d) => setOreTitles(Object.fromEntries((d.items || []).map((b) => [b.id, b.title]))))
         .catch(() => {})
     }
+    api<{ items: ScriptPerf[] }>('/scripts/perf')
+      .then((d) => setPerf(Object.fromEntries((d.items || []).map((x) => [x.content_id, x]))))
+      .catch(() => {}) // 判卷数据拉不到不挡脚本列表
     return allS.items
   }, [offset, status, accountType])
 
@@ -419,6 +439,11 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${src.cls}`}>{src.label}</span>
                       ) : null
                     })()}
+                    {perf[s.id] && perf[s.id].has_data && (
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium num-serif ${perf[s.id].viral ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {fmtWan(perf[s.id].play)}播放{perf[s.id].viral ? '·爆款' : ''}
+                      </span>
+                    )}
                     <span className={`badge shrink-0 ${STATUS_BADGE[s.status] || 'bg-slate-200 text-slate-600'}`}>
                       {STATUS_LABEL[s.status] || s.status}
                     </span>
@@ -525,6 +550,20 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
                         </div>
                       ) : (
                         <div className="py-6 text-center text-sm text-slate-400">生成中，稍等片刻后刷新</div>
+                      )}
+                      {perf[s.id] && (
+                        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px]">
+                          {perf[s.id].has_data ? (
+                            <span className={perf[s.id].viral ? 'font-semibold text-violet-700' : 'text-slate-600'}>
+                              发布数据：{fmtWan(perf[s.id].play)} 播放 · {fmtWan(perf[s.id].digg)} 赞 · {fmtWan(perf[s.id].comment)} 评
+                              {perf[s.id].viral && ' · 已达爆款线 3 万，自动进范本库（下次生成当范本）'}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">
+                              已登记发布（{perf[s.id].published_at}）· 创作者中心数据还没回流，回流后这里出播放数据
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}

@@ -240,41 +240,33 @@ def hot_comments(user: User = Depends(require_user)) -> dict:
     来源（2026-11-20 用户裁决）：**监控清单作者 + 白名单话题**（settings.hot_comment_topics，
     默认 fde/企业ai落地/企业知识库）——监控号按 source_id、存量按作者名双匹配；话题素材按
     source_id 或旧档 note 里的「话题回填#话题名」认领。泛话题（ai/workbuddy）噪声太大不并入。
-    评论存档多版本时只取最新版（否则同条评论重复出现）。"""
-    from ..materials.hot_comments import hot_scope, in_hot_scope
-    from ..models import MaterialAnalysis
+    评论存档多版本时只取最新版（否则同条评论重复出现）。
+    预筛（2026-11-20 阶段 1）：三道门前移——hot_comment_screen 执行器判四档
+    （doable/no_story/no_target/dup），排序 doable 在前；未筛的当 doable 显示。"""
+    from ..materials.hot_comments import (collect_hot_comments, scripted_comment_texts,
+                                          screen_map)
 
     with Session(engine) as s:
-        row = s.get(AppSetting, "hot_comment_bar")
-        try:
-            bar = int(row.value) if row is not None and row.value else 50
-        except (TypeError, ValueError):
-            bar = 50
-        scope = hot_scope(s)
-        latest: dict[int, MaterialAnalysis] = {}
-        for a in s.exec(select(MaterialAnalysis).where(  # type: ignore[attr-defined]
-                MaterialAnalysis.kind == "comments")).all():  # type: ignore[attr-defined]
-            cur = latest.get(a.material_id)
-            if cur is None or (a.version or 0) > (cur.version or 0):
-                latest[a.material_id] = a
-        items: list[dict] = []
-        for a in latest.values():
-            m = s.get(Material, a.material_id)
-            if m is None or not in_hot_scope(m, scope):
-                continue  # 只出监控清单作者 + 白名单话题
-            for i, it in enumerate((a.payload or {}).get("items") or []):
-                if not isinstance(it, dict):
-                    continue
-                t = str(it.get("t") or "").strip()
-                try:
-                    d = int(it.get("d") or 0)
-                except (TypeError, ValueError):
-                    continue
-                if d >= bar and t:
-                    items.append({"material_id": a.material_id, "idx": i, "comment": t[:200],
-                                  "likes": d, "author": m.author or "",
-                                  "source": m.title or ""})
-    items.sort(key=lambda x: -x["likes"])
+        items, bar = collect_hot_comments(s)
+        screened = screen_map(s)
+        done_texts = scripted_comment_texts(s)
+    for x in items:
+        if x["comment"][:60] in done_texts:
+            x["verdict"], x["reason"], x["dup_of"] = "done", "这条评论已经出过稿", ""
+            continue
+        v = screened.get(x["comment"][:60])
+        if v and v.get("verdict"):
+            x["verdict"] = v["verdict"]
+            x["reason"] = v.get("reason") or ""
+            x["dup_of"] = v.get("dup_of") or ""
+        else:
+            x["verdict"] = "pending"
+            x["reason"] = ""
+            x["dup_of"] = ""
+    # 两级排序：可成稿在前（pending 跟 doable 同层——还没判的先按赞数走），
+    # 同档内按赞数降序
+    items.sort(key=lambda x: (0 if x["verdict"] in ("doable", "pending") else 1,
+                              -x["likes"]))
     # 上限 100（原 50）：并入话题线后条数变多，50 会把监控线的低赞热评挤出列表
     return {"items": items[:100], "bar": bar, "total": len(items)}
 
