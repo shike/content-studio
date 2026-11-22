@@ -50,6 +50,9 @@ def _status() -> dict:
         "comment_refresh_days": settings.comment_refresh_days,
         "managed_keys": sorted(MANAGED),  # 可在本页修改的键（前端按需展示）
     }
+    from ..channels.visual import default_template
+
+    st["xhs_cover_template"] = default_template(1)
     st.update(stored_secret_state())  # *_set 状态（密钥明文绝不回传）
     return st
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Feather, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { CoverTemplates, VisualDecks } from './VisualTab'
 import { api, apiErrText, waitJob } from '../api'
 import { EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 
@@ -83,7 +84,15 @@ function NewIdeaForm({ onCreated }: { onCreated: () => void }) {
   )
 }
 
+type XhsTab = 'notes' | 'covers' | 'decks'
+const TABS: { id: XhsTab; label: string }[] = [
+  { id: 'notes', label: '笔记稿' },
+  { id: 'covers', label: '封面模板库' },
+  { id: 'decks', label: '图文卡片' },
+]
+
 export default function Xhs() {
+  const [xhsTab, setXhsTab] = useState<XhsTab>('notes')
   const [notes, setNotes] = useState<NoteRow[]>([])
   const [total, setTotal] = useState(0)
   const [error, setError] = useState('')
@@ -134,6 +143,18 @@ export default function Xhs() {
     <div>
       <PageHeader icon={Feather} title="小红书"
         desc="独立经营号 · 图文笔记先行：从素材库/热点手动发起，AI 出笔记稿与封面，发布永远人工、发布后贴链接登记。" />
+      <div className="mb-5 flex items-center gap-1.5 border-b border-[#E8ECF0] pb-2.5">
+        {TABS.map((t2) => (
+          <button key={t2.id} onClick={() => setXhsTab(t2.id)}
+            className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${xhsTab === t2.id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+            {t2.label}
+          </button>
+        ))}
+      </div>
+      {xhsTab === 'covers' && <CoverTemplates />}
+      {xhsTab === 'decks' && <VisualDecks />}
+      {xhsTab !== 'notes' ? null : (
+      <>
       <NewIdeaForm onCreated={load} />
       <ErrorLine text={error} />
       {!loaded ? null : notes.length === 0 ? (
@@ -247,6 +268,8 @@ export default function Xhs() {
             })}
           </div>
         </>
+      )}
+      </>
       )}
     </div>
   )

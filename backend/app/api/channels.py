@@ -227,12 +227,13 @@ async def rerender_cover(content_id: int, body: dict | None = None,
             raise HTTPException(status_code=404, detail="note not found")
         big = str((body or {}).get("cover_title") or c.title or "")[:10]
         sub = str((c.payload or {}).get("cover_sub") or "")
+        template = str((body or {}).get("template") or "")
         tenant_id = c.tenant_id or 1
     import asyncio
 
     try:
         path = await asyncio.to_thread(xhs_line.render_cover, big, tenant_id,
-                                       f"xhs_{content_id}.png", sub=sub)
+                                       f"xhs_{content_id}.png", sub=sub, template=template)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"封面渲染失败：{e}") from None
     with Session(engine) as s:

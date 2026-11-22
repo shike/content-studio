@@ -22,57 +22,14 @@ from ..prompts import render
 from ..settings import settings
 
 
-def render_cover(title_big: str, tenant_id: int, out_name: str, sub: str = "") -> str:
-    """封面模板：1080×1440（3:4），品牌墨绿底 + 白纸标题大字 + 署名角标。
-    标题自动折行（每行 ≤6 字封顶，最多 5 行）。失败抛异常（调用方显式降级可见）。"""
-    from PIL import Image, ImageDraw, ImageFont
+def render_cover(title_big: str, tenant_id: int, out_name: str, sub: str = "",
+                 template: str = "") -> str:
+    """封面渲染（M7 2026-11-22 委托视觉工厂模板库）：template 空=设置页默认模板。
+    保留原签名（note_generate/重渲染端点零改动）。失败抛异常（调用方显式降级可见）。"""
+    from .visual import default_template, render_cover_template
 
-    from ..tenant_brand import brand_of
-
-    brand = brand_of(tenant_id)
-    accent = (brand.get("accent") or "#c9a227").lstrip("#")
-    primary = (brand.get("primary") or "#0a2f24").lstrip("#")
-    signature = (brand.get("signature") or "").strip()
-
-    W, H = 1080, 1440
-    img = Image.new("RGB", (W, H), "#" + primary)
-    draw = ImageDraw.Draw(img)
-    # 顶部金条 + 底部细线（品牌点缀，与站内 moxt 主题同源）
-    draw.rectangle([0, 0, W, 16], fill="#" + accent)
-    draw.rectangle([80, H - 120, W - 80, H - 116], fill="#" + accent)
-
-    def _font(size: int):
-        for cand in ("/System/Library/Fonts/PingFang.ttc",
-                     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-                     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"):
-            try:
-                return ImageFont.truetype(cand, size)
-            except Exception:  # noqa: BLE001
-                continue
-        return ImageFont.load_default()
-
-    # 标题大字：按字数自适应字号，自动折行
-    text = (title_big or "").strip()[:12] or "笔记"
-    size = 150 if len(text) <= 6 else 120
-    font = _font(size)
-    per_line = max(4, int(6 * (150 / size)))
-    lines = [text[i:i + per_line] for i in range(0, len(text), per_line)][:5]
-    y = 300
-    for ln in lines:
-        draw.text((100, y), ln, font=font, fill="#f5f1e6")
-        y += int(size * 1.25)
-    # 副标（2026-11-21 阶段 3：补一句利益/悬念，与大字互补；金色小字压在大字块下方）
-    sub = (sub or "").strip()[:14]
-    if sub:
-        draw.text((100, min(y + 20, H - 320)), sub, font=_font(56), fill="#" + accent)
-    if signature:
-        draw.text((100, H - 200), signature[:16], font=_font(52), fill="#f5f1e6")
-
-    covers = settings.data_dir / "covers" / str(tenant_id or 1)
-    covers.mkdir(parents=True, exist_ok=True)
-    path = covers / out_name
-    img.save(path, "PNG")
-    return str(path)
+    return render_cover_template(template or default_template(tenant_id), title_big,
+                                 sub, tenant_id, f"covers/{out_name}")
 
 
 @register_executor("note_generate")

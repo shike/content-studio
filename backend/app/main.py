@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (accounts, analytics, articles, auth_api as auth_routes, cards, channels, contents, kb, stats, crawl, falsify, health, jobs, llm, materials, metrics, motifs, sources,
+from .api import (accounts, analytics, articles, auth_api as auth_routes, cards, channels, contents, kb, stats, crawl, falsify, health, jobs, llm, materials, metrics, motifs, sources, visual,
                   tenant_api, public_media, schedules, scripts, settings as settings_api, style,
                   watch)
 from .db import engine, init_db
@@ -24,6 +24,7 @@ from .channels.persona import service as _card_service  # noqa: F401
 from .materials import executors as _materials_executors  # noqa: F401  素材域执行器（scan/analyze/discover/backfill/topic/hl）
 from .channels import xhs as _xhs_executors  # noqa: F401  内容域执行器（note_generate）
 from .channels import moments as _moments_executors  # noqa: F401  朋友圈文案（M9 moments_generate）
+from .channels import visual as _visual_executors  # noqa: F401  视觉工厂（M7 visual_deck）
 from .channels import scripts as _script_service  # noqa: F401  （链带 selfstyle 执行器注册）
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -121,6 +122,7 @@ app.include_router(articles.router, dependencies=[Depends(require_ready_user)])
 app.include_router(channels.router, dependencies=[Depends(require_ready_user)])
 app.include_router(contents.router, dependencies=[Depends(require_ready_user)])
 app.include_router(motifs.router, dependencies=[Depends(require_ready_user)])
+app.include_router(visual.router, dependencies=[Depends(require_ready_user)])
 app.include_router(materials.router, dependencies=[Depends(require_ready_user)])
 app.include_router(sources.router, dependencies=[Depends(require_ready_user)])
 app.include_router(watch.router, dependencies=[Depends(require_ready_user)])
