@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import (accounts, analytics, articles, auth_api as auth_routes, cards, channels, contents, kb, stats, crawl, falsify, health, jobs, llm, materials, metrics, motifs, sources, visual,
+from .api import (accounts, analytics, articles, auth_api as auth_routes, cards, channels, contents, kb, stats, crawl, falsify, health, jobs, llm, materials, metrics, motifs, search, sources, visual,
                   tenant_api, public_media, schedules, scripts, settings as settings_api, style,
                   watch)
 from .db import engine, init_db
@@ -123,6 +123,7 @@ app.include_router(channels.router, dependencies=[Depends(require_ready_user)])
 app.include_router(contents.router, dependencies=[Depends(require_ready_user)])
 app.include_router(motifs.router, dependencies=[Depends(require_ready_user)])
 app.include_router(visual.router, dependencies=[Depends(require_ready_user)])
+app.include_router(search.router, dependencies=[Depends(require_ready_user)])
 app.include_router(materials.router, dependencies=[Depends(require_ready_user)])
 app.include_router(sources.router, dependencies=[Depends(require_ready_user)])
 app.include_router(watch.router, dependencies=[Depends(require_ready_user)])

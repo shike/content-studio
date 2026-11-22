@@ -327,13 +327,14 @@ function WatchTab() {
   )
 }
 
-type Tab = 'watch' | 'pool' | 'falsify' | 'kb' | 'motifs'
+type Tab = 'watch' | 'pool' | 'falsify' | 'kb' | 'motifs' | 'search'
 
 /** 旧 tab 键 → 三 tab 兼容映射（收件箱/全部素材=素材池；采集源/候选=监控清单）。 */
 function normalizeTab(tabId?: string): Tab {
   if (tabId === 'kb') return 'kb'
   if (tabId === 'falsify') return 'falsify'
   if (tabId === 'motifs') return 'motifs'
+  if (tabId === 'search') return 'search'
   if (tabId === 'pool' || tabId === 'topics' || tabId === 'inbox' || tabId === 'all') return 'pool'
   return 'watch' // sources / cand / 未知 → 监控清单
 }
@@ -350,6 +351,7 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
     { id: 'falsify', label: '实测打假' },
     { id: 'kb', label: '知识库' },
     { id: 'motifs', label: '母题' },
+    { id: 'search', label: '搜全库' },
   ]
 
   return (
@@ -369,6 +371,70 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
       {tab === 'falsify' && <FalsifyPanel onNavigate={onNavigate} />}
       {tab === 'kb' && <KbTab onNavigate={onNavigate} />}
       {tab === 'motifs' && <MotifsTab onNavigate={onNavigate} />}
+      {tab === 'search' && <SearchAllTab />}
+    </div>
+  )
+}
+
+/* ─────────────────────────── Tab ⑥ 搜全库（遗留收尾批 M11） ─────────────────────────── */
+
+/** 统一资料检索：一个搜索框跨素材/稿件/母题三实体快速定位（各域仍有专属搜索）。 */
+function SearchAllTab() {
+  const [q, setQ] = useState('')
+  const [result, setResult] = useState<{ materials: { id: number; title: string; origin_type: string; status: string }[]; contents: { id: number; title: string; kind: string; status: string }[]; motifs: { id: number; title: string; status: string }[] } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const run = () =>
+    (async () => {
+      if (!q.trim()) return
+      setBusy(true); setError('')
+      try {
+        const d = await api<{ materials: typeof result extends null ? never : NonNullable<typeof result>['materials']; contents: NonNullable<typeof result>['contents']; motifs: NonNullable<typeof result>['motifs'] }>(
+          `/search?q=${encodeURIComponent(q.trim())}`)
+        setResult(d)
+      } catch (e) { setError(String(e).replace(/^Error:\s*/, '')) } finally { setBusy(false) }
+    })()
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') run() }}
+          placeholder="搜全库：素材 / 稿件 / 母题标题与正文…"
+          className="min-w-0 flex-1 rounded-lg border border-[#E8ECF0] px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+        <button onClick={run} disabled={busy || !q.trim()}
+          className="rounded-full bg-[#0a2f24] px-3.5 py-1.5 text-[12.5px] font-medium text-[#f0e9d5] transition hover:opacity-90 disabled:opacity-40">
+          搜索
+        </button>
+      </div>
+      {error && <div className="mb-3 text-[12.5px] text-red-600">{error}</div>}
+      {result && (
+        <div className="space-y-3">
+          {(['materials', 'contents', 'motifs'] as const).map((k) => {
+            const items = result[k] || []
+            const LABEL: Record<string, string> = { materials: '素材', contents: '稿件', motifs: '母题' }
+            return (
+              <div key={k} className="rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
+                <div className="text-[12px] font-semibold text-slate-600">{LABEL[k]} <span className="num-serif text-slate-400">{items.length}</span></div>
+                {items.length === 0 ? (
+                  <div className="mt-1 text-[12px] text-slate-300">无命中</div>
+                ) : (
+                  <div className="mt-1.5 space-y-1">
+                    {items.map((x) => (
+                      <div key={x.id} className="flex items-center gap-2 text-[13px]">
+                        <span className="shrink-0 text-[11px] text-slate-300">#{x.id}</span>
+                        <span className="min-w-0 flex-1 truncate text-slate-700">{(x as { title: string }).title}</span>
+                        <span className="shrink-0 text-[11px] text-slate-400">{(x as { status?: string }).status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

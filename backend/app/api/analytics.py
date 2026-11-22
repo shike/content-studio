@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlmodel import Session, func, select
 
 from ..auth import require_user
@@ -324,8 +325,6 @@ def schedule_overview(days: int = 14, user: User = Depends(require_user)) -> dic
     days = max(1, min(days, 31))
     from datetime import timedelta
 
-    from sqlalchemy import text
-
     with Session(engine) as s:
         planned = s.execute(text(
             "SELECT id, title, kind, payload->>'publish_plan' AS plan FROM contents "
@@ -396,3 +395,58 @@ def publication_series(content_id: int, user: User = Depends(require_user)) -> d
                       "metrics": {k: int((r.metrics or {}).get(k) or 0)
                                   for k in _PUB_KEYS if (r.metrics or {}).get(k)}})
     return {"items": items, "published_at": published_at}
+
+
+@router.get("/pipeline")
+def pipeline_board(user: User = Depends(require_user)) -> dict:
+    """内容计划看板（遗留收尾批 M8）：六列流程视图一次取全。
+
+    列定义：选题待定夺（ideas draft）→ 成稿中（drafting）→ 待终审（review）→
+    待发布（ready 无登记）→ 已发布（published/有登记）→ 已复盘（发布且指标已回流）。
+    只读视图——真实状态流转在各线页面，看板不做拖拽。"""
+    tid = user.tenant_id
+    with Session(engine) as s:
+        def _cards(sql: str, params: dict) -> list[dict]:
+            return [dict(r) for r in s.execute(text(sql), {"tid": tid, **params}).mappings().all()]
+
+        ideas = _cards(
+            "SELECT i.id, i.title_hint AS title, c.key AS channel, i.updated_at "
+            "FROM ideas i JOIN channels c ON c.id=i.channel_id "
+            "WHERE i.tenant_id=:tid AND i.status='draft' ORDER BY i.updated_at DESC LIMIT 40", {})
+        drafting = _cards(
+            "SELECT id, title, kind, updated_at FROM contents WHERE tenant_id=:tid "
+            "AND status='drafting' ORDER BY updated_at DESC LIMIT 40", {})
+        review = _cards(
+            "SELECT id, title, kind, updated_at FROM contents WHERE tenant_id=:tid "
+            "AND status='review' ORDER BY updated_at DESC LIMIT 40", {})
+        ready = _cards(
+            "SELECT c.id, c.title, c.kind, c.updated_at FROM contents c WHERE c.tenant_id=:tid "
+            "AND c.status='ready' AND c.kind IN ('video_script','long_article','note') "
+            "AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.content_id=c.id) "
+            "ORDER BY c.updated_at DESC LIMIT 40", {})
+        published = _cards(
+            "SELECT c.id, c.title, c.kind, c.updated_at FROM contents c WHERE c.tenant_id=:tid "
+            "AND (c.status='published' OR EXISTS (SELECT 1 FROM publications p WHERE p.content_id=c.id)) "
+            "AND NOT EXISTS (SELECT 1 FROM metrics_snapshots ms WHERE ms.subject_type='publication' "
+            "AND ms.subject_id=c.id) ORDER BY c.updated_at DESC LIMIT 40", {})
+        reviewed = _cards(
+            "SELECT c.id, c.title, c.kind, c.updated_at FROM contents c WHERE c.tenant_id=:tid "
+            "AND (c.status='published' OR EXISTS (SELECT 1 FROM publications p WHERE p.content_id=c.id)) "
+            "AND EXISTS (SELECT 1 FROM metrics_snapshots ms WHERE ms.subject_type='publication' "
+            "AND ms.subject_id=c.id) ORDER BY c.updated_at DESC LIMIT 40", {})
+
+    from datetime import datetime as _dt
+
+    now = _dt.utcnow()
+    def _age(rows):
+        for r in rows:
+            try:
+                u = _dt.fromisoformat(str(r["updated_at"]))
+                r["days"] = max(0, (now - u).days)
+            except ValueError:
+                r["days"] = None
+        return rows
+
+    cols = {"ideas": ideas, "drafting": drafting, "review": review,
+            "ready": ready, "published": _age(published), "reviewed": _age(reviewed)}
+    return {"columns": {k: {"n": len(v), "items": v} for k, v in cols.items()}}

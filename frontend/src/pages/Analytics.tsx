@@ -5,6 +5,7 @@ import { EmptyState, ErrorLine, PageHeader, Spark } from '../components'
 import AccountAdmin from './AccountAdmin'
 import ScheduleTab from './ScheduleTab'
 import ContentLedger from './ContentLedger'
+import PipelineTab from './PipelineTab'
 
 /**
  * 数据（PRD R6）：经营看板——总览 / 渠道对比 / 账号趋势 / 作品表现 / 周报。
@@ -638,6 +639,7 @@ export default function Analytics({ onNavigate }: { onNavigate?: (k: string) => 
     { id: 'acc_admin', label: '账号' },
     { id: 'schedule', label: '排期' },
     { id: 'ledger', label: '稿件' },
+    { id: 'pipeline', label: '看板' },
   ]
   return (
     <div>
@@ -651,6 +653,7 @@ export default function Analytics({ onNavigate }: { onNavigate?: (k: string) => 
       {tab === 'acc_admin' && <AccountAdmin />}
       {tab === 'schedule' && <ScheduleTab />}
       {tab === 'ledger' && <ContentLedger onNavigate={onNavigate} />}
+      {tab === 'pipeline' && <PipelineTab onNavigate={onNavigate} />}
     </div>
   )
 }
