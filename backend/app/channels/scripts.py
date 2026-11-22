@@ -6,6 +6,7 @@ import json
 from sqlmodel import Session, select
 
 from ..db import engine
+from ..playbook import playbook_block
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
 from ..models import Content, Idea, Material, MaterialAnalysis, SelfVideo
@@ -418,14 +419,11 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
     return {"script_id": script_id, "form": chk, "story": story, "turn": turn}
 
 
-def _viral_block(hotspot: str) -> str:
-    """爆款基因块（2026-11-18 用户裁决「AI 不判爆款、数据判」：范本=自有账号过闸真实爆款）。
+def _viral_samples_text() -> str:
+    """范本文本（R2-2 起存 JSON {"items":[...]}；旧文本值兜底兼容，下次扫描重算自动迁移）。
+    渲染出的范本块与旧格式逐字一致，生成侧零变化。"""
+    import json as _json
 
-    挂靠热点才注入（无热点=干货稿，不硬装情绪——实证公式：热点×立场×一线视角缺一不爆）。
-    范本库 app_settings.viral_gene_samples 由回流循环自动更新（self_scan 收尾收割播放 ≥3 万样本）。"""
-    hotspot = (hotspot or "").strip()
-    if not hotspot:
-        return ""
     from sqlmodel import Session
 
     from ..db import engine
@@ -433,7 +431,29 @@ def _viral_block(hotspot: str) -> str:
 
     with Session(engine) as s:
         row = s.get(AppSetting, "viral_gene_samples")
-        samples = (row.value or "").strip() if row else ""
+        raw = (row.value or "").strip() if row else ""
+    if not raw:
+        return ""
+    try:
+        items = (_json.loads(raw) or {}).get("items") or []
+        blocks = [f"【范本｜{int(x.get('play') or 0)} 播放·{x.get('comment', '?')} 评】《{str(x.get('title') or '')[:40]}》\n"
+                  f"{str(x.get('body') or '').strip()[:1400]}" for x in items if isinstance(x, dict)]
+        if blocks:
+            return "\n\n".join(blocks)
+    except ValueError:
+        pass
+    return raw  # 旧文本格式兜底
+
+
+def _viral_block(hotspot: str) -> str:
+    """爆款基因块（2026-11-18 用户裁决「AI 不判爆款、数据判」：范本=自有账号过闸真实爆款）。
+
+    挂靠热点才注入（无热点=干货稿，不硬装情绪——实证公式：热点×立场×一线视角缺一不爆）。
+    范本库 app_settings.viral_gene_samples 由回流循环自动更新（self_scan 收尾收割 ≥收割线样本）。"""
+    hotspot = (hotspot or "").strip()
+    if not hotspot:
+        return ""
+    samples = _viral_samples_text()
     if not samples:
         samples = "（范本库暂空——等自有账号回流积累，先按公式写）"
     return (
@@ -650,6 +670,7 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
                             discipline_mode=discipline_mode, card_discipline=card_discipline,
                             my_style=build_my_style(use_style), length_spec=length_spec,
                             version_label="打法名", version_note="打法一句话"))
+    prompt += playbook_block("script")
     # 2026-11-05 一版精品直出（用户定版：质量优先于选择）：单版本，预算全给打磨环节
     ctx.set_progress(20, "生成精品脚本（单版全预算）——大模型整篇写作中，本步约 2~4 分钟")
     data = await gateway.complete_json(
@@ -733,7 +754,7 @@ async def script_revise(ctx: JobContext, payload: dict) -> dict:
         [{"role": "user", "content": render("script_revise", PERSONA=brand_of(1)["persona"],
                                             VIRAL_BLOCK=_viral_block(hotspot),
                                             FEEDBACK=feedback[:300],
-                                            DRAFT=draft)}],
+                                            DRAFT=draft) + playbook_block("script")}],
         max_tokens=20000, thinking="disabled")
     new_versions = _normalize_versions((data.get("versions") or []))[:1]
     if not new_versions or not str(new_versions[0].get("body") or "").strip():
@@ -773,7 +794,7 @@ async def _polish_core(versions: list[dict], cta_rule: str,
     ctx_set(65, "批判评审中（整稿挑毛病）")
     data = await gateway.complete_json(
         [{"role": "system", "content": render("script_polish", MY_STYLE=build_my_style(use_style),
-                                              LENGTH=length_spec, CTA_RULE=cta_rule)},
+                                              LENGTH=length_spec, CTA_RULE=cta_rule) + playbook_block("script")},
          {"role": "user", "content": json.dumps(versions, ensure_ascii=False)}],
         max_tokens=20000)  # 同上，v5 动刀清单变长
     polished = _normalize_versions(data.get("versions") or [])

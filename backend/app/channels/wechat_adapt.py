@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, select
 
 from ..db import engine
+from ..playbook import playbook_block
 from ..jobs.errors import TransientError
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
@@ -383,7 +384,7 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
                                                 IDENTITY=identity,
                                                 SOURCE=write_source, ANGLE=angle,
                                                 QUOTES=quotes_block, TITLE_HINT=title_hint,
-                                                FINGERPRINT=fingerprint_brief(hist))}],
+                                                FINGERPRINT=fingerprint_brief(hist)) + playbook_block("article")}],
             max_tokens=20000, thinking="disabled")  # 2026-11-19：4 万字源文开思考链会无限推理，关掉后 83s 出稿
         body = _strip_fence(body)
         lines = body.split("\n")

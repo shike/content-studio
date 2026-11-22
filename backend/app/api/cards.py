@@ -107,3 +107,30 @@ def revive(card_id: int, user: User = Depends(require_user)) -> dict:
         s.add(c)
         s.commit()
         return {"id": c.id, "status": c.status}
+
+
+class ManualCardIn(BaseModel):
+    title_hint: str
+    angle: str = ""  # 切角/备注（可选，进 payload.angle_note）
+
+
+@router.post("", status_code=201)
+def create_manual_card(body: ManualCardIn, user: User = Depends(require_user)) -> dict:
+    """灵感随手存（R4-2 2026-11-22）：一句话手动建靶子卡（draft），备稿时补钩子/主线。
+
+    hook/spine 留空——备稿表单补填（compose 已校验非空）；四证/闸门由备稿链自然补齐。"""
+    from datetime import datetime
+
+    hint = body.title_hint.strip()
+    if not hint:
+        raise HTTPException(status_code=400, detail="灵感内容不能为空")
+    with Session(engine) as s:
+        card = Idea(tenant_id=user.tenant_id,
+                    channel_id=channel_id_of(s, "persona"),
+                    batch_date=datetime.now().strftime("%Y-%m-%d"),
+                    source="manual", title_hint=hint[:60],
+                    payload={"angle_note": body.angle.strip()[:200]})
+        s.add(card)
+        s.commit()
+        s.refresh(card)
+        return _dict(card)

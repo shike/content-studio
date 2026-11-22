@@ -81,6 +81,8 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
   const [chip, setChip] = useState<'draft' | 'approved' | 'jail'>('draft')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [form, setForm] = useState({ hook: '', spine: '', angle: ANGLES[0] })
+  const [idea, setIdea] = useState('')
+  const [ideaBusy, setIdeaBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [booted, setBooted] = useState(false)
   const [factoryBusy, setFactoryBusy] = useState(false)
@@ -143,6 +145,18 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
     setForm({ hook: c.hook, spine: c.spine, angle: ANGLES[0] })
   }
 
+  const saveIdea = () =>
+    guard(async () => {
+      if (!idea.trim()) return
+      setIdeaBusy(true)
+      try {
+        await api('/cards', { method: 'POST', body: JSON.stringify({ title_hint: idea.trim() }) })
+        setIdea('')
+        setMsg('灵感已存卡 ✓ 备稿时补钩子和主线')
+        await load()
+      } finally { setIdeaBusy(false) }
+    })
+
   const compose = (c: TopicCard) =>
     guard(async () => {
       const d = await api<{ job_id: number; script_id: number }>(`/cards/${c.id}/compose`, {
@@ -186,6 +200,19 @@ export default function HotTargets({ onNavigate }: { onNavigate: (k: string) => 
             {factoryBusy ? <RefreshCw size={13} className="animate-spin" /> : <Flame size={13} />} 立即开工
           </button>
         </div>
+      </div>
+
+      {/* 灵感随手存（R4-2）：一句话手动建卡，进选题流备稿 */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2.5">
+        <span className="text-[12px] font-medium tracking-wide text-slate-400">随手记灵感</span>
+        <input value={idea} onChange={(e) => setIdea(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') saveIdea() }}
+          placeholder="想到什么记什么（一句话=一张卡），备稿时再补钩子和主线"
+          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+        <button onClick={saveIdea} disabled={ideaBusy || !idea.trim()}
+          className="rounded-full bg-[#0a2f24] px-3.5 py-1.5 text-[12.5px] font-medium text-[#f0e9d5] transition hover:opacity-90 disabled:opacity-40">
+          存卡
+        </button>
       </div>
 
       {/* chips */}

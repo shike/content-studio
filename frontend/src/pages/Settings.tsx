@@ -113,6 +113,10 @@ export default function Settings({ displayName = '', role = 'member', onLogout }
         {ownBrand === null ? <Busy text="品牌配置加载中…" /> : <BrandForm initial={ownBrand} onSave={saveOwnBrand} />}
       </div>
 
+      <PublishTargetsCard />
+      <PlaybookCard />
+      <JudgementLinesCard />
+
       {conf && (
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
           {/* LLM 与联网检索（原两张卡合并，2026-10-29 版面收敛） */}
@@ -374,5 +378,221 @@ function AccountBar({ displayName, role, onLogout }: {
         </button>
       )}
     </>
+  )
+}
+
+
+/** 创作手册（R2-1）：三线系统规范速览（只读）+ 号主附加手册（可编辑，生成时注入）。 */
+const PL: { id: 'script' | 'note' | 'article'; label: string }[] = [
+  { id: 'script', label: '口播' },
+  { id: 'note', label: '小红书' },
+  { id: 'article', label: '公众号' },
+]
+const PB_LABEL: Record<string, string> = { script: '口播', note: '小红书', article: '公众号' }
+
+function PlaybookCard() {
+  const [data, setData] = useState<Record<string, { brief: string[]; mine: string }> | null>(null)
+  const [tab, setTab] = useState<'script' | 'note' | 'article'>('script')
+  const [draft, setDraft] = useState('')
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  const load = useCallback(() => {
+    api<Record<string, { brief: string[]; mine: string }>>('/settings/playbook')
+      .then((d) => { setData(d); setDraft(d[tab]?.mine || '') })
+      .catch((e) => setErr(apiErrText(e)))
+  }, [tab])
+  useEffect(load, [load])
+
+  const save = async () => {
+    setErr(''); setMsg('')
+    try {
+      const d = await api<Record<string, { brief: string[]; mine: string }>>('/settings/playbook', {
+        method: 'PUT', body: JSON.stringify({ [tab]: draft }),
+      })
+      setData(d); setMsg('已保存，下次生成生效')
+    } catch (e) { setErr(apiErrText(e)) }
+  }
+
+  const cur = data?.[tab]
+  return (
+    <div className="card mb-4 space-y-3 p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <Radar size={16} className="text-emerald-600" /> 创作手册
+        <span className="text-xs font-normal text-slate-400">你的附加规则生成时注入，优先级高于系统规范；与合规红线冲突时红线赢</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        {PL.map((x) => (
+          <button key={x.id} onClick={() => setTab(x.id)}
+            className={`rounded-full px-3 py-1 text-[12.5px] font-medium transition ${tab === x.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            {x.label}
+          </button>
+        ))}
+      </div>
+      {cur && (
+        <>
+          <div className="rounded-lg bg-slate-50 px-3 py-2.5">
+            <div className="text-[11px] font-medium tracking-wide text-slate-400">{PB_LABEL[tab]}线系统规范（只读速览，完整规范随提示词发版）</div>
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[12.5px] leading-relaxed text-slate-600">
+              {cur.brief.map((x, i) => <li key={i}>{x}</li>)}
+            </ul>
+          </div>
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={5}
+            placeholder={`写你的${PB_LABEL[tab]}线附加规则（每行一条；例：结尾永远停在一个事实上；禁用词：躺赚）。留空=只用系统规范。`}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-emerald-400" />
+          <div className="flex items-center gap-3">
+            <button onClick={save} className="btn-accent btn-sm"><Save size={13} /> 保存手册</button>
+            {msg && <span className="text-[12px] text-emerald-600">{msg}</span>}
+            {err && <span className="text-[12px] text-red-600">{err}</span>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** 判卷线（R2-3）：六条线设置可调（AppSetting judgement_lines 覆盖，缺省=调研假设常数），PUT 即生效。 */
+function JudgementLinesCard() {
+  const [cur, setCur] = useState<Record<string, number> | null>(null)
+  const [defaults, setDefaults] = useState<Record<string, number>>({})
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  const load = useCallback(() => {
+    api<{ current: Record<string, number>; defaults: Record<string, number> }>('/settings/judgement-lines')
+      .then((d) => {
+        setCur(d.current); setDefaults(d.defaults)
+        setDraft(Object.fromEntries(Object.entries(d.current).map(([k, v]) => [k, String(v)])))
+      })
+      .catch((e) => setErr(apiErrText(e)))
+  }, [])
+  useEffect(load, [load])
+
+  const save = async () => {
+    setErr(''); setMsg('')
+    const lines: Record<string, number> = {}
+    for (const [k, v] of Object.entries(draft)) {
+      const n = Number(v)
+      if (Number.isFinite(n) && n > 0 && cur && n !== cur[k]) lines[k] = n
+    }
+    if (!Object.keys(lines).length) { setMsg('没有改动'); return }
+    try {
+      const d = await api<{ current: Record<string, number> }>('/settings/judgement-lines', {
+        method: 'PUT', body: JSON.stringify({ lines }),
+      })
+      setCur(d.current); setMsg('已生效（判卷/范本收割/晨报立即跟新线）')
+    } catch (e) { setErr(apiErrText(e)) }
+  }
+
+  const FIELDS: { k: string; label: string; hint: string }[] = [
+    { k: 'viral_play', label: '抖音爆款线（播放）', hint: '达线=进范本库' },
+    { k: 'pass_play', label: '抖音过线（播放）', hint: '' },
+    { k: 'xhs_viral_rate', label: '小红书爆文线（互动率 %）', hint: '存小数，如 0.03' },
+    { k: 'xhs_pass_rate', label: '小红书过线（互动率 %）', hint: '' },
+    { k: 'wechat_viral_rate', label: '公众号优质线（完读率 %）', hint: '存小数，如 0.65' },
+    { k: 'wechat_pass_rate', label: '公众号合格线（完读率 %）', hint: '' },
+  ]
+
+  return (
+    <div className="card mb-4 space-y-3 p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <BrainCircuit size={16} className="text-violet-500" /> 判卷线
+        <span className="text-xs font-normal text-slate-400">默认=调研假设值；跑 2~4 周后按自家数据分布改</span>
+      </div>
+      {cur && (
+        <>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-3">
+            {FIELDS.map((f) => (
+              <label key={f.k} className="block">
+                <div className="text-xs text-slate-400">{f.label}</div>
+                <input value={draft[f.k] ?? ''} onChange={(e) => setDraft({ ...draft, [f.k]: e.target.value })}
+                  inputMode="decimal"
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+                <div className="mt-0.5 text-[11px] text-slate-300">
+                  {f.hint || `默认 ${defaults[f.k]}`}
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={save} className="btn-accent btn-sm"><Save size={13} /> 保存判卷线</button>
+            <button onClick={() => { setDraft(Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, String(v)]))) }}
+              className="btn-ghost btn-sm">恢复默认值</button>
+            {msg && <span className="text-[12px] text-emerald-600">{msg}</span>}
+            {err && <span className="text-[12px] text-red-600">{err}</span>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+
+/** 发布节奏（R3-1）：每周各平台计划发布条数（0=不限）；今天页晨报按它报偏差。 */
+function PublishTargetsCard() {
+  const [cur, setCur] = useState<Record<string, number> | null>(null)
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  const load = useCallback(() => {
+    api<{ targets: Record<string, number> }>('/settings/publish-targets')
+      .then((d) => {
+        setCur(d.targets)
+        setDraft(Object.fromEntries(Object.entries(d.targets).map(([k, v]) => [k, String(v)])))
+      })
+      .catch((e) => setErr(apiErrText(e)))
+  }, [])
+  useEffect(load, [load])
+
+  const save = async () => {
+    setErr(''); setMsg('')
+    const targets: Record<string, number> = {}
+    for (const [k, v] of Object.entries(draft)) {
+      const n = parseInt(v, 10)
+      if (!Number.isFinite(n) || n < 0 || n > 99) { setErr('节奏必须是 0~99 的整数'); return }
+      targets[k] = n
+    }
+    try {
+      const d = await api<{ targets: Record<string, number> }>('/settings/publish-targets', {
+        method: 'PUT', body: JSON.stringify({ targets }),
+      })
+      setCur(d.targets)
+      setMsg('已生效（今天页晨报开始按目标报偏差）')
+    } catch (e) { setErr(apiErrText(e)) }
+  }
+
+  const FIELDS: { k: string; label: string }[] = [
+    { k: 'douyin_week', label: '抖音 · 每周条数' },
+    { k: 'wechat_week', label: '公众号 · 每周篇数' },
+    { k: 'xhs_week', label: '小红书 · 每周篇数' },
+  ]
+  return (
+    <div className="card mb-4 space-y-3 p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <Radar size={16} className="text-sky-500" /> 发布节奏
+        <span className="text-xs font-normal text-slate-400">每周目标条数（0=不限）；实发在「数据 · 排期」看，晨报报偏差</span>
+      </div>
+      {cur && (
+        <>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {FIELDS.map((f) => (
+              <label key={f.k} className="block">
+                <div className="text-xs text-slate-400">{f.label}</div>
+                <input value={draft[f.k] ?? ''} onChange={(e) => setDraft({ ...draft, [f.k]: e.target.value })}
+                  inputMode="numeric" placeholder="0=不限"
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-[13px] outline-none focus:border-emerald-400" />
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={save} className="btn-accent btn-sm"><Save size={13} /> 保存节奏</button>
+            {msg && <span className="text-[12px] text-emerald-600">{msg}</span>}
+            {err && <span className="text-[12px] text-red-600">{err}</span>}
+          </div>
+        </>
+      )}
+    </div>
   )
 }

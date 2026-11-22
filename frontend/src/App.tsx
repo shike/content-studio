@@ -188,7 +188,7 @@ export default function App() {
               onTab={(t) => setStageTab((m) => ({ ...m, materials: t }))} onNavigate={navTo} />
           )}
           {active === 'xhs' && <Xhs />}
-          {active === 'analytics' && <Analytics />}
+          {active === 'analytics' && <Analytics onNavigate={navTo} />}
           {active === 'tasks' && <Tasks onNavigate={navTo} />}
           {active === 'settings' && <SettingsPage displayName={me?.display_name ?? ''} role={me?.role ?? 'member'}
             onLogout={() => { setMe(null); setAuthed(false) }} />}

@@ -347,6 +347,26 @@ def style_summary(user: User = Depends(require_user)) -> dict:
         return {"note": (row.value if row is not None else "") or ""}
 
 
+class StyleNoteIn(BaseModel):
+    note: str
+
+
+@router.put("/style-summary")
+def put_style_summary(body: StyleNoteIn, user: User = Depends(require_user)) -> dict:
+    """人工修正公众号风格画像（R4-5 2026-11-22）：下一篇文章生成即注入。"""
+    from ..models import AppSetting
+
+    with Session(engine) as s:
+        row = s.get(AppSetting, "article_style_note")
+        if row is None:
+            s.add(AppSetting(key="article_style_note", value=body.note.strip()[:3000]))
+        else:
+            row.value = body.note.strip()[:3000]
+            s.add(row)
+        s.commit()
+    return {"note": body.note.strip()[:3000]}
+
+
 @router.post("/extract-style", status_code=202)
 async def extract_style(user: User = Depends(require_user)) -> dict:
     """从已成文长文提取公众号风格画像。"""

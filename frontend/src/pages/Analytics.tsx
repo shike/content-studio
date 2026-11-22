@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { BarChart3, RefreshCw } from 'lucide-react'
 import { api, apiErrText, waitJob } from '../api'
 import { EmptyState, ErrorLine, PageHeader, Spark } from '../components'
+import AccountAdmin from './AccountAdmin'
+import ScheduleTab from './ScheduleTab'
+import ContentLedger from './ContentLedger'
 
 /**
  * 数据（PRD R6）：经营看板——总览 / 渠道对比 / 账号趋势 / 作品表现 / 周报。
@@ -193,6 +196,22 @@ function WeeklyReportCard() {
             </div>
           </div>
         )
+      })()}
+      {(() => {
+        const vs = rep?.violations as { text: string; n: number }[] | undefined
+        return Array.isArray(vs) && vs.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+            <div className="text-[11px] font-medium tracking-wide text-amber-800">质量违规 Top{vs.length}（机检/审校，改规则参考）</div>
+            <div className="mt-1.5 space-y-1 text-[12.5px] text-amber-900">
+              {vs.map((v, i) => (
+                <div key={i} className="flex gap-2">
+                  <span className="num-serif shrink-0 text-amber-700">×{v.n}</span>
+                  <span className="min-w-0 flex-1">{v.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null
       })()}
       {Boolean(rep?.summary) && <SummaryText text={String(rep?.summary ?? "")} />}
     </div>
@@ -442,6 +461,14 @@ function PublicationsTab({ days }: { days: number }) {
   const [bf, setBf] = useState<number | null>(null)   // 展开补录的 content_id
   const [bfVals, setBfVals] = useState<Record<string, string>>({})
   const [bfMsg, setBfMsg] = useState('')
+  const [series, setSeries] = useState<{ id: number; items: { date: string; tn: number | null; metrics: Record<string, number> }[]; published_at: string } | null>(null)
+  const openSeries = (id: number) => {
+    if (series?.id === id) { setSeries(null); return }
+    setSeries(null)
+    api<{ items: { date: string; tn: number | null; metrics: Record<string, number> }[]; published_at: string }>(`/analytics/publications/${id}/series`)
+      .then((d) => setSeries({ id, items: d.items || [], published_at: d.published_at || '' }))
+      .catch((e) => setError(apiErrText(e)))
+  }
   const load = useCallback(() => {
     api<{ items: (PubRow & { verdict?: string; value?: number; detail?: string })[]; summary: Record<string, number> }>('/analytics/judgement?days=30')
       .then((d) => { setRows(d.items || []); setSummary(d.summary || {}) })
@@ -478,9 +505,28 @@ function PublicationsTab({ days }: { days: number }) {
       .catch((e) => setBfMsg(apiErrText(e)))
   }
   const sSummary = (['viral', 'pass', 'warn', 'nodata'] as const).filter((v) => summary[v])
+  // 补录到期（R1-2）：发布超 48h 且无指标回流（verdict 未回流=无数据）
+  const dueRows = rows.filter((r) => {
+    if (r.verdict && r.verdict !== 'nodata') return false
+    const t0 = Date.parse((r.published_at || '').replace(' ', 'T') + ':00Z')
+    return Number.isFinite(t0) && Date.now() - t0 > 48 * 3600 * 1000
+  })
   return (
     <div>
       <ErrorLine text={error} />
+      {dueRows.length > 0 && (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/60 px-3.5 py-2.5">
+          <div className="text-[12.5px] font-medium text-amber-800">该补录了 · {dueRows.length} 篇发布超 48 小时还没有指标回流</div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {dueRows.slice(0, 6).map((r) => (
+              <button key={r.content_id} onClick={() => setBf(r.content_id)}
+                className="max-w-[240px] truncate rounded-full bg-white px-2.5 py-1 text-[12px] text-amber-800 underline decoration-amber-300 underline-offset-2 hover:text-amber-950">
+                {r.title || `#${r.content_id}`}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {sSummary.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px] text-slate-500">
           <span className="text-slate-400">判卷汇总：</span>
@@ -502,6 +548,12 @@ function PublicationsTab({ days }: { days: number }) {
                   <span key={k} className="shrink-0 text-[11.5px] text-slate-500">{METRIC_LABEL[k] || k} <b className="num-serif text-slate-800">{num(v)}</b></span>
                 ))}
                 {Object.keys(r.metrics).length === 0 && <span className="shrink-0 text-[11.5px] text-slate-400">指标未回流</span>}
+                {r.content_id != null && (
+                  <button onClick={() => openSeries(r.content_id as number)}
+                    className="shrink-0 rounded-full border border-slate-200 px-2.5 py-1 text-[11.5px] text-slate-500 transition hover:bg-slate-50">
+                    轨迹
+                  </button>
+                )}
                 {r.content_id && r.verdict !== 'viral' && (
                   <button onClick={() => { setBf(bf === r.content_id ? null : r.content_id); setBfVals({}); setBfMsg('') }}
                     className="shrink-0 rounded-full border border-slate-200 px-2.5 py-1 text-[11.5px] text-slate-500 transition hover:bg-slate-50">
@@ -510,6 +562,47 @@ function PublicationsTab({ days }: { days: number }) {
                 )}
                 <span className="shrink-0 text-[11px] text-slate-400">{(r.published_at || '').slice(0, 10)}</span>
               </div>
+              {series?.id === r.content_id && (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  {series.items.length === 0 ? (
+                    <div className="text-[12px] text-slate-400">还没有指标快照（补录后按日累积，这里看成长曲线）</div>
+                  ) : (() => {
+                    const MAIN: Record<string, string> = { douyin: 'play', xiaohongshu: 'exposure', wechat: 'reads' }
+                    const mainKey = MAIN[r.platform] || 'exposure'
+                    return (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-medium tracking-wide text-slate-400">
+                            指标轨迹（{METRIC_LABEL[mainKey] || mainKey}，T+N 相对发布日）
+                          </span>
+                          <Spark data={series.items.map((x) => x.metrics[mainKey] || 0)} wide />
+                        </div>
+                        <table className="mt-2 w-full text-[12px]">
+                          <thead>
+                            <tr className="text-left text-slate-400">
+                              <th className="py-1 font-medium">日期</th><th className="py-1 font-medium">T+N</th>
+                              {Object.keys(series.items[0].metrics).map((k) => (
+                                <th key={k} className="py-1 font-medium">{METRIC_LABEL[k] || k}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="num-serif tabular-nums text-slate-700">
+                            {series.items.map((x) => (
+                              <tr key={x.date} className="border-t border-slate-100">
+                                <td className="py-1">{x.date}</td>
+                                <td className="py-1">{x.tn === null ? '—' : `T+${x.tn}`}</td>
+                                {Object.keys(series.items[0].metrics).map((k) => (
+                                  <td key={k} className="py-1">{(x.metrics[k] || 0).toLocaleString()}</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
               {bf === r.content_id && (
                 <div className="mt-2 border-t border-slate-100 pt-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -534,7 +627,7 @@ function PublicationsTab({ days }: { days: number }) {
   )
 }
 
-export default function Analytics() {
+export default function Analytics({ onNavigate }: { onNavigate?: (k: string) => void } = {}) {
   const [tab, setTab] = useState('overview')
   const [days, setDays] = useState(30)
   const tabs = [
@@ -542,6 +635,9 @@ export default function Analytics() {
     { id: 'channels', label: '渠道对比' },
     { id: 'accounts', label: '账号趋势' },
     { id: 'pubs', label: '作品表现' },
+    { id: 'acc_admin', label: '账号' },
+    { id: 'schedule', label: '排期' },
+    { id: 'ledger', label: '稿件' },
   ]
   return (
     <div>
@@ -552,6 +648,9 @@ export default function Analytics() {
       {tab === 'channels' && <ChannelsTab days={days} />}
       {tab === 'accounts' && <AccountsTab days={days} />}
       {tab === 'pubs' && <PublicationsTab days={days} />}
+      {tab === 'acc_admin' && <AccountAdmin />}
+      {tab === 'schedule' && <ScheduleTab />}
+      {tab === 'ledger' && <ContentLedger onNavigate={onNavigate} />}
     </div>
   )
 }

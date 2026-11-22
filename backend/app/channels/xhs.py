@@ -13,6 +13,7 @@ import re
 from sqlmodel import Session
 
 from ..db import engine
+from ..playbook import playbook_block
 from ..jobs.runner import JobContext, register_executor
 from ..llm import gateway
 from ..materials.service import record_usage
@@ -141,7 +142,8 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
         [{"role": "user", "content": render("note_generate", PERSONA=persona_text, KIT=kit_block(kit),
                                             ANGLE_BLOCK=angle_block, ANGLE_KEYWORD=keyword or "（无）")
           + "\n\n选题：" + (idea_title or "（无标题，按素材自由发挥）")
-          + ("\n\n素材：\n" + "\n\n".join(blocks) if blocks else "\n\n素材：（无——按选题与人设写常青干货）")}],
+          + ("\n\n素材：\n" + "\n\n".join(blocks) if blocks else "\n\n素材：（无——按选题与人设写常青干货）")
+          + playbook_block("note")}],
         max_tokens=2048, thinking="disabled")
     options = [str(t).strip() for t in (data.get("title_options") or []) if str(t).strip()][:5]
     title = str(data.get("title") or "").strip()
@@ -183,7 +185,7 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
             fix = await gateway.complete_json(
                 [{"role": "user", "content":
                   render("note_revise", PERSONA=persona_text, FEEDBACK="补讲这些缺失环节（因果链讲到位、操作落到步骤）："
-                                                                   + "；".join(missing), TITLE=title, DRAFT=body)}],
+                                                                   + "；".join(missing), TITLE=title, DRAFT=body) + playbook_block("note")}],
                 max_tokens=2048, thinking="disabled")
             n_body = str(fix.get("body") or "").strip()
             if n_body:

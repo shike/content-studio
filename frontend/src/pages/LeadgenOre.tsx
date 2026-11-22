@@ -8,6 +8,13 @@ import { EmptyState, ErrorLine, PageHeader, relTime } from '../components'
  * 路由到获客号——这里就是它的消费面）。每行=一条获客矿视频，展开看求学评论原文
  * （需求清单：什么课/什么资料在被求）。老管线「选题库」候选表已被分型路由替代。
  */
+interface LeadPubRow {
+  content_id: number
+  title: string
+  platform: string
+  published_at: string
+  metrics?: { leads?: number }
+}
 interface OreRow {
   id: number
   title: string
@@ -56,11 +63,40 @@ export default function LeadgenOre({ onNavigate }: { onNavigate?: (k: string) =>
       })
   }, [])
 
+  // ── 线索台账（R1-4）：获客线发布登记 × 回填线索数，经营北极星（R3.3）──
+  const [leadRows, setLeadRows] = useState<LeadPubRow[]>([])
+  useEffect(() => {
+    api<{ items: LeadPubRow[] }>('/analytics/publications?limit=30')
+      .then((d) => setLeadRows((d.items || []).filter((x) => (x.metrics?.leads || 0) > 0)))
+      .catch(() => { /* 台账留空不挡矿流 */ })
+  }, [])
+
   return (
     <div>
       <PageHeader icon={Magnet} title="获客选题"
         desc="获客矿素材流——评论区被求资料/求教程的监控视频（分型路由自动归线）。展开看他们在求什么：每条求学评论都是一个获客需求。" />
       {genMsg && <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[13px] text-violet-800">{genMsg}</div>}
+      {/* 线索台账（R1-4）：登记了线索数的发布作品 */}
+      <div className="mb-4 rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-400">线索台账</h3>
+          <span className="num-serif ml-auto text-[18px] font-semibold text-slate-900">
+            {leadRows.reduce((a, b) => a + (b.metrics?.leads || 0), 0).toLocaleString()}
+          </span>
+          <span className="text-[11px] text-slate-400">累计线索（数据页补录回填）</span>
+        </div>
+        {leadRows.length > 0 && (
+          <div className="mt-2 space-y-1.5">
+            {leadRows.slice(0, 5).map((r) => (
+              <div key={r.content_id} className="flex items-center gap-2 text-[13px]">
+                <span className="num-serif shrink-0 text-violet-700">{r.metrics?.leads}</span>
+                <span className="min-w-0 flex-1 truncate text-slate-700">{r.title}</span>
+                <span className="shrink-0 text-[11px] text-slate-400">{r.published_at}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <ErrorLine text={error} />
       {!loaded ? null : rows.length === 0 ? (
         <EmptyState icon={Magnet} title="暂无获客矿"

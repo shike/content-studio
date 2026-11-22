@@ -271,6 +271,17 @@ export default function Workshop() {
                               复制公众号格式
                             </button>
                           )}
+                          {['rendered', 'edited'].includes(a.status) && (
+                            <button className="btn-ghost btn-sm" disabled={!!busy}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                guard(async () => {
+                                  await api(`/articles/${a.id}/render`, { method: 'POST', body: JSON.stringify({}) })
+                                  setError('')
+                                  await load()
+                                })
+                              }}>重新排版</button>
+                          )}
                           {['rendered', 'draft', 'edited'].includes(a.status) && pubFor !== a.id && (
                             <button className="btn-ghost btn-sm" disabled={!!busy}
                               onClick={(e) => { e.stopPropagation(); setPubFor(a.id); setPubUrl('') }}>

@@ -401,6 +401,8 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
         />
       </div>
 
+      <ViralSamplesCard />
+
       {busy && <div className="mt-3"><Busy text={busy} /></div>}
       {error && <div className="mt-3"><ErrorLine text={error} /></div>}
 
@@ -581,6 +583,54 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
         )}
       </div>
 
+    </div>
+  )
+}
+
+
+/** 爆款范本库卡（R2-2 2026-11-22）：self_scan 收割的 ≥收割线自有视频，热点口播自动当 few-shot。 */
+interface ViralSample { play: number; comment: number; title: string; body: string }
+
+function ViralSamplesCard() {
+  const [items, setItems] = useState<ViralSample[] | null>(null)
+  const [line, setLine] = useState(0)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    api<{ items: ViralSample[]; line: number }>('/style/viral-samples')
+      .then((d) => { setItems(d.items || []); setLine(d.line || 0) })
+      .catch(() => setItems([]))
+  }, [])
+  if (items === null) return null
+  return (
+    <div className="card mt-4 p-4">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 text-left">
+        <span className="text-sm font-semibold text-zinc-800">爆款范本库</span>
+        <span className={`badge ${items.length > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'}`}>
+          {items.length > 0 ? `${items.length} 条` : '暂空'}
+        </span>
+        <span className="text-xs text-slate-400">收割线 {line.toLocaleString()} 播放 · 挂热点的口播自动注入当范本</span>
+        <span className="ml-auto text-xs text-slate-400">{open ? '收起' : '展开'}</span>
+      </button>
+      {open && (
+        items.length === 0 ? (
+          <div className="mt-2 text-[12.5px] text-slate-400">
+            等自有视频播放 ≥ 收割线（创作者中心扫描回流）自动进库；范本库空时生成按爆款公式写。
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {items.map((x, i) => (
+              <div key={i} className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+                <div className="flex items-center gap-2 text-[13px]">
+                  <span className="num-serif shrink-0 font-semibold text-violet-700">{x.play.toLocaleString()}</span>
+                  <span className="shrink-0 text-[11px] text-slate-400">{x.comment} 评</span>
+                  <span className="min-w-0 flex-1 truncate font-medium text-slate-800">《{x.title}》</span>
+                </div>
+                <div className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-slate-500">{x.body}</div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
     </div>
   )
 }

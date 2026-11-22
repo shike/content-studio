@@ -309,3 +309,90 @@ async def weekly_recompute(user: User = Depends(require_user)) -> dict:
                               dedup_key=f"data:weekly:{datetime.now():%Y%m%d}",
                               actor=(user.tenant_id, user.id, user.role))
     return {"job_id": job.id}
+
+
+# ── 发布排期与指标轨迹（R3 2026-11-22） ──
+
+_KIND_PLATFORM = {"video_script": "douyin", "long_article": "wechat", "note": "xiaohongshu"}
+
+
+@router.get("/schedule")
+def schedule_overview(days: int = 14, user: User = Depends(require_user)) -> dict:
+    """排期总览（R3-2）：未来 N 天按日分组的排期项 + ready 未排期清单 + 本周已发布。
+
+    排期=Content.payload.publish_plan（人工设定）；平台按 kind 推断（登记后以登记为准）。"""
+    days = max(1, min(days, 31))
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    with Session(engine) as s:
+        planned = s.execute(text(
+            "SELECT id, title, kind, payload->>'publish_plan' AS plan FROM contents "
+            "WHERE tenant_id=:tid AND status IN ('ready','review') "
+            "AND COALESCE(payload->>'publish_plan','')<>'' "
+            "ORDER BY payload->>'publish_plan'"), {"tid": user.tenant_id}).mappings().all()
+        unscheduled = s.execute(text(
+            "SELECT id, title, kind, updated_at FROM contents c "
+            "WHERE tenant_id=:tid AND status='ready' "
+            "AND kind IN ('video_script','long_article','note') "
+            "AND COALESCE(payload->>'publish_plan','')='' "
+            "AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.content_id=c.id) "
+            "ORDER BY updated_at DESC LIMIT 30"), {"tid": user.tenant_id}).mappings().all()
+        local_today = datetime.now()
+        monday = (local_today - timedelta(days=local_today.weekday())).strftime("%Y-%m-%d")
+        published_week = s.execute(text(
+            "SELECT p.content_id, p.platform, p.published_at, c.title FROM publications p "
+            "JOIN contents c ON c.id=p.content_id WHERE p.tenant_id=:tid "
+            "AND substr(p.published_at,1,10) >= :monday "
+            "ORDER BY p.published_at DESC LIMIT 30"), {"tid": user.tenant_id, "monday": monday}).mappings().all()
+
+    today_s = local_today.strftime("%Y-%m-%d")
+    horizon = (local_today + timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    by_day: dict[str, list] = {}
+    for r in planned:
+        day = str(r["plan"])[:10]
+        if day < today_s or day > horizon:
+            continue
+        by_day.setdefault(day, []).append({
+            "content_id": int(r["id"]), "title": r["title"], "kind": r["kind"],
+            "publish_plan": str(r["plan"]), "platform": _KIND_PLATFORM.get(r["kind"], ""),
+        })
+    upcoming = [{"date": d, "items": by_day[d]} for d in sorted(by_day)]
+    return {
+        "upcoming": upcoming,
+        "unscheduled": [{"id": int(r["id"]), "title": r["title"], "kind": r["kind"],
+                         "platform": _KIND_PLATFORM.get(r["kind"], "")} for r in unscheduled],
+        "published_week": [dict(r) for r in published_week],
+        "today": today_s,
+    }
+
+
+@router.get("/publications/{content_id}/series")
+def publication_series(content_id: int, user: User = Depends(require_user)) -> dict:
+    """指标轨迹（R3-3）：该作品全部快照按日升序，tn=相对发布登记日的天数（发布日=0）。"""
+    with Session(engine) as s:
+        rows = s.exec(select(MetricsSnapshot).where(  # type: ignore[attr-defined]
+            MetricsSnapshot.tenant_id == user.tenant_id,  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_type == "publication",  # type: ignore[attr-defined]
+            MetricsSnapshot.subject_id == content_id)  # type: ignore[attr-defined]
+            .order_by(MetricsSnapshot.date)).all()  # type: ignore[attr-defined]
+        pub = s.exec(select(Publication).where(  # type: ignore[attr-defined]
+            Publication.content_id == content_id)).first()  # type: ignore[attr-defined]
+        published_at = (pub.published_at or "")[:10] if pub else ""
+    from datetime import date as _date
+
+    try:
+        base = _date.fromisoformat(published_at) if published_at else None
+    except ValueError:
+        base = None
+    items = []
+    for r in rows:
+        try:
+            tn = (_date.fromisoformat(r.date) - base).days if base else None
+        except ValueError:
+            tn = None
+        items.append({"date": r.date, "tn": tn,
+                      "metrics": {k: int((r.metrics or {}).get(k) or 0)
+                                  for k in _PUB_KEYS if (r.metrics or {}).get(k)}})
+    return {"items": items, "published_at": published_at}

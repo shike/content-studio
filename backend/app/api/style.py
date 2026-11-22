@@ -95,3 +95,14 @@ def overview() -> dict:
             "profile": _profile_dict(profile) if profile else None,
             "stats": {"total": total, "analyzed": analyzed},
         }
+
+
+@router.get("/viral-samples")
+def viral_samples(user: User = Depends(require_user)) -> dict:
+    """爆款范本库（R2-2 2026-11-22）：self_scan 收割的 ≥收割线自有视频（结构化）。
+
+    script_generate 热点模式以这些范本做 few-shot——今天跑出来的爆款就是明天的生成范本。"""
+    from ..analytics.judgement import viral_play
+    from ..selfstyle.service import viral_samples_items
+
+    return {"items": viral_samples_items(), "line": viral_play()}

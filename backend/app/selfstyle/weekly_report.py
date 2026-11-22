@@ -247,6 +247,7 @@ async def build_weekly_report(tenant_id: int, force: bool = False,
     facts = _collect(tenant_id, ws, we)
     facts["cards"], facts["cards_unmatched"] = _card_matches(tenant_id)
     facts["judgement"] = _judge_facts(tenant_id, ws, we)
+    facts["violations"] = _violations_facts(tenant_id, ws, we)
     facts["summary"] = await _interpret(facts)
     with Session(engine) as s:
         row = s.exec(select(AnalyticsReport).where(
@@ -274,3 +275,29 @@ def cached_weekly_report(tenant_id: int) -> dict | None:
             return None
         r = rows[0]
         return {"week": r.period_start, **(r.payload or {})}
+
+
+def _violations_facts(tenant_id: int, week_start: date, week_end: date) -> list[dict]:
+    """质量违规 Top3（R1-5）：本周有更新的稿件 payload.issues 聚合，按文本频次取前三。
+
+    issues 来源=轻审/审校/去AI味机检（生成时点落库，不拦发布）；周报只呈现，
+    改哪条规则由人裁决（提示词被自家数据养的入口）。"""
+    from collections import Counter
+    from datetime import datetime as _dt, time as _time
+
+    from sqlalchemy import text as _text
+
+    ws = _dt.combine(week_start, _time.min)
+    we = _dt.combine(week_end, _time.max)
+    counter: Counter = Counter()
+    with Session(engine) as s:
+        rows = s.execute(_text(
+            "SELECT payload->'issues' FROM contents WHERE tenant_id=:tid "
+            "AND status IN ('review','ready','published') "
+            "AND updated_at >= :ws AND updated_at <= :we "
+            "AND jsonb_array_length(COALESCE(payload->'issues','[]'::jsonb)) > 0"),
+            {"tid": tenant_id, "ws": ws, "we": we}).all()
+    for (issues,) in rows:
+        for x in issues or []:
+            counter[str(x)[:60]] += 1
+    return [{"text": t, "n": n} for t, n in counter.most_common(3)]
