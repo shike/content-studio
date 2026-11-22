@@ -4,6 +4,7 @@ import { api, apiErrText, waitJob } from '../api'
 import { ConfirmDeleteButton, EmptyState, ErrorLine, PageHeader, relTime } from '../components'
 import { Chips, Toolbar } from './MaterialsShared'
 import KbTab from './KbTab'
+import MotifsTab from './MotifsTab'
 import FalsifyPanel from './FalsifyPanel'
 import MaterialsPool from './MaterialsPool'
 
@@ -326,12 +327,13 @@ function WatchTab() {
   )
 }
 
-type Tab = 'watch' | 'pool' | 'falsify' | 'kb'
+type Tab = 'watch' | 'pool' | 'falsify' | 'kb' | 'motifs'
 
 /** 旧 tab 键 → 三 tab 兼容映射（收件箱/全部素材=素材池；采集源/候选=监控清单）。 */
 function normalizeTab(tabId?: string): Tab {
   if (tabId === 'kb') return 'kb'
   if (tabId === 'falsify') return 'falsify'
+  if (tabId === 'motifs') return 'motifs'
   if (tabId === 'pool' || tabId === 'topics' || tabId === 'inbox' || tabId === 'all') return 'pool'
   return 'watch' // sources / cand / 未知 → 监控清单
 }
@@ -347,6 +349,7 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
     { id: 'pool', label: '素材池' },
     { id: 'falsify', label: '实测打假' },
     { id: 'kb', label: '知识库' },
+    { id: 'motifs', label: '母题' },
   ]
 
   return (
@@ -365,6 +368,7 @@ export default function Materials({ onNavigate, tabId, onTabChange }: {
       {tab === 'pool' && <MaterialsPool />}
       {tab === 'falsify' && <FalsifyPanel onNavigate={onNavigate} />}
       {tab === 'kb' && <KbTab onNavigate={onNavigate} />}
+      {tab === 'motifs' && <MotifsTab onNavigate={onNavigate} />}
     </div>
   )
 }

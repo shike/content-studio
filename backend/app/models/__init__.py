@@ -274,7 +274,22 @@ class Idea(TenantScoped, TimestampMixin, table=True):
     status: str = Field(default="draft", index=True)
     superseded_by: Optional[int] = None
     content_id: Optional[int] = Field(default=None, index=True)  # 备稿产出的稿件（原 script_id 语义）
+    motif_id: Optional[int] = Field(default=None, foreign_key="motifs.id", index=True)  # 派生母题（M9）
     note: str = ""
+
+
+class Motif(TenantScoped, TimestampMixin, table=True):
+    """母题（M9 2026-11-22）：一个内容主题派生四线成品（口播/长文/小红书/朋友圈）。
+
+    各成品独立走各线生命周期；母题层管派生、追踪矩阵、跨线不重做。"""
+    __tablename__ = "motifs"
+    tenant_id: int = Field(default=0, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = ""
+    note: str = ""  # 切角/备注
+    status: str = Field(default="active", index=True)  # active|archived
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    # payload 约定：{source_kind(素材类型), source_id(素材 id), angle_note}
 
 
 class Content(TenantScoped, TimestampMixin, table=True):

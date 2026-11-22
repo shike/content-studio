@@ -96,6 +96,7 @@ _POLICIES: dict[str, RetryPolicy] = {
     "article_generate": RetryPolicy(task_timeout=3600),
     "article_kb_miner": RetryPolicy(task_timeout=3600),  # 挖掘器：18 篇全文拉取+逐篇评估串行
     "article_adapt": RetryPolicy(task_timeout=3600),  # 改编器：拉源文全文+成文+原创度闸+机检
+    "moments_generate": RetryPolicy(task_timeout=180),  # 朋友圈文案：母题派生（M9，轻量 1~2 条）
     "article_pitch": RetryPolicy(task_timeout=600),   # 选题会：拉全文+一次 LLM 出 5 现场（阶段 2）
     "note_pitch": RetryPolicy(task_timeout=600),      # 笔记选题会：拉全文+一次 LLM 出 5 角度三元组（阶段 3）
     "article_hotspots": RetryPolicy(task_timeout=1200),  # 报题：热点抓取+双 LLM（预筛+提炼）
