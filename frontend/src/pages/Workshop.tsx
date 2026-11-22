@@ -234,6 +234,11 @@ export default function Workshop() {
                         )}
                       </div>
                       <div className="space-y-3 text-[13px] text-slate-600">
+                        {!!(full?.issues?.length || a.issues?.length) && (
+                          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[12.5px] leading-relaxed text-red-600">
+                            AI 味机检（终审参考，不拦发布）：{((full?.issues?.length ? full.issues : a.issues) || []).join('；')}
+                          </div>
+                        )}
                         {(full?.note || a.note) && (
                           <div className="rounded-xl bg-slate-50 px-3 py-2.5 leading-relaxed">
                             {((full?.note || a.note) as string).split('｜').map((seg, i) => (

@@ -551,6 +551,11 @@ export default function Scripts({ accountType }: { accountType?: 'persona' | 'le
                       ) : (
                         <div className="py-6 text-center text-sm text-slate-400">生成中，稍等片刻后刷新</div>
                       )}
+                      {!!s.issues?.length && (
+                        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[12.5px] leading-relaxed text-red-600">
+                          AI 味机检（终审参考，不拦发布）：{s.issues.join('；')}
+                        </div>
+                      )}
                       {perf[s.id] && (
                         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px]">
                           {perf[s.id].has_data ? (

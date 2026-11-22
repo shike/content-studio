@@ -213,6 +213,10 @@ async def note_generate(ctx: JobContext, payload: dict) -> dict:
     for w in ("保证收益", "百分百", "稳赚", "宝子们", "小编", "总的来说", "综上所述", "本文", "这篇笔记"):
         if w in body:
             issues.append(f"正文出现禁词「{w}」")
+    # 去AI味机检（2026-11-22 太上老君框架 P1-4）：确定性规则（假对比/旁白腔/填充词/最长句）
+    from ..materials.deai_lint import lint
+
+    issues += lint(body, "xhs")
     try:
         lr = await gateway.complete_json(
             [{"role": "user", "content":

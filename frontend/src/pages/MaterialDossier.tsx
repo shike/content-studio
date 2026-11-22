@@ -102,6 +102,11 @@ export default function MaterialDossier({ materialId, highlightIdx, onDeleted }:
   const replicable: string[] = Array.isArray(a.replicable_points) ? a.replicable_points : []
   const playbook: string[] = Array.isArray(a.replicable_playbook) ? a.replicable_playbook : []
   const hook = a.hook || null
+  // 拆机制五问键名中文化（2026-11-22 P2）
+  const TD_LABEL: Record<string, string> = {
+    hook_stop: '第一句靠什么停', hook_catch: '钩子被什么接住', attraction: '吸引力类型',
+    audience_width: '人群宽度', ending_reason: '结尾给的理由',
+  }
 
   return (
     <div className="mt-3 space-y-3 border-t border-[#E8ECF0] pt-3" onClick={(e) => e.stopPropagation()}>
@@ -194,6 +199,24 @@ export default function MaterialDossier({ materialId, highlightIdx, onDeleted }:
                 {a.topic_value && <Row k="选题价值" v={a.topic_value} />}
                 {replicable.length > 0 && (
                   <Row k="可复刻点" v={<ul className="list-disc space-y-0.5 pl-4">{replicable.map((t, i) => <li key={i}>{t}</li>)}</ul>} />
+                )}
+                {a.teardown && Object.keys(a.teardown).length > 0 && (
+                  <Row k="为什么爆（机制）" v={
+                    <ul className="list-disc space-y-0.5 pl-4">
+                      {Object.entries(a.teardown as Record<string, string>).filter(([, v]) => v).map(([k, v]) => (
+                        <li key={k}>{TD_LABEL[k] || k}：{v}</li>
+                      ))}
+                    </ul>
+                  } />
+                )}
+                {a.borrow_check && Object.keys(a.borrow_check).length > 0 && (
+                  <Row k="借不借（三关）" v={
+                    <ul className="list-disc space-y-0.5 pl-4">
+                      {Object.entries(a.borrow_check as Record<string, string>).filter(([, v]) => v).map(([k, v]) => (
+                        <li key={k}>{k}：{v}</li>
+                      ))}
+                    </ul>
+                  } />
                 )}
               </>
             )}

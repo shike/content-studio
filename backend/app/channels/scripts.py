@@ -270,6 +270,16 @@ def _material_block(material_id: int) -> str:
         hl = p.get("highlights") or []
         if hl:
             parts.append("亮点：" + "；".join(str(x) for x in hl[:4]))
+        td = p.get("teardown") or {}  # 拆机制五问（2026-11-22 P2：拆机制不拆句子）
+        if isinstance(td, dict) and td:
+            td_lines = [f"{k}：{v}" for k, v in td.items() if str(v).strip()]
+            if td_lines:
+                parts.append("为什么爆（机制）：" + "；".join(td_lines[:5]))
+        bc = p.get("borrow_check") or {}
+        if isinstance(bc, dict) and bc:
+            bc_lines = [f"{k}={v}" for k, v in bc.items() if str(v).strip()]
+            if bc_lines:
+                parts.append("借不借三关：" + "；".join(bc_lines[:3]))
         tv = p.get("topic_value")
         if isinstance(tv, dict) and tv.get("angle"):
             parts.append("拆解建议（只是角度，不是素材原判断）：" + str(tv["angle"])[:300])
@@ -376,6 +386,10 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
         ctx.set_progress(100, f"结构仍未过，不建稿：{reason[:70]}")
         return {"skipped": True, "reason": reason[:160], "material_id": material_id}
 
+    # 去AI味机检（2026-11-22 太上老君框架 P1-4）：与读稿闸互补——读稿闸管形态，这里管 AI 腔
+    from ..materials.deai_lint import lint
+
+    deai = lint(body, "script")
     with Session(_engine) as s:
         script = new_script_content(
             s, tenant_id=1, channel_key="persona",
@@ -383,12 +397,14 @@ async def script_hotcomment(ctx: JobContext, payload: dict) -> dict:
             payload={"script_state": "generated", "account_type": "persona",
                      "hot_comment": {"material_id": material_id, "idx": cidx,
                                      "text": comment[:60]},  # 文本锚：评论刷新会重排 idx
-                     "form_check": chk, "story": story, "turn": turn})
+                     "form_check": chk, "story": story, "turn": turn,
+                     **({"issues": deai} if deai else {})})
         script.versions = [{"label": "照片子写", "hook": body.split("\n")[0][:40],
                             "body": body, "notes": turn}]
         script.status = "review"
         script.note = (f"热评口播｜来源《{src_title[:24]}》｜形态体检：均 {chk['avg']} 字、"
-                       f"最长 {chk['max']}、书面标点 {chk['book']}")
+                       f"最长 {chk['max']}、书面标点 {chk['book']}"
+                       + (f"｜AI味机检 {len(deai)} 项" if deai else ""))
         s.add(script)
         s.commit()
         script_id = script.id
@@ -672,13 +688,20 @@ async def _script_generate(ctx: JobContext, payload: dict) -> dict:
         p["account_type"] = account_type
         if hotspot:
             p["hotspot"] = hotspot  # 迭代重写（script_revise）要知道爆款基因模式在挂谁
+        # 去AI味机检（2026-11-22 太上老君框架 P1-4）：红提示落 payload.issues，不拦发布
+        from ..materials.deai_lint import lint
+
+        deai = lint(versions[0]["body"] if versions else "", "script")
+        if deai:
+            p["issues"] = deai
         script.payload = p
         script.status = "review"
         s.add(script)
         s.commit()
 
-    ctx.set_progress(100, f"完成，产出 {len(versions)} 版")
-    return {"script_id": script_id, "versions": len(versions)}
+    ctx.set_progress(100, f"完成，产出 {len(versions)} 版"
+                     + (f"（AI味机检 {len(deai)} 项）" if deai else ""))
+    return {"script_id": script_id, "versions": len(versions), "deai": len(deai)}
 
 
 @register_executor("script_revise")

@@ -126,6 +126,7 @@ def script_out(c: Content, channel_key: str = "") -> dict:
         "ore_id": p.get("ore_id"),
         "kb_id": p.get("kb_id"),
         "hot_comment": p.get("hot_comment"),
+        "issues": p.get("issues") or [],  # 去AI味机检红提示（2026-11-22，不拦发布）
         "note": c.note or "",
         "created_at": c.created_at, "updated_at": c.updated_at,
     }
@@ -146,6 +147,7 @@ def article_out(c: Content, *, sanitize_html=None) -> dict:
         "title": c.title, "md": c.body or "",
         "note": p.get("note", ""), "kb_sources": p.get("kb_sources") or [],
         "html": p.get("html", ""), "stats": p.get("stats") or {},
+        "issues": p.get("issues") or [],  # 去AI味机检红提示（2026-11-22，不拦发布）
         "status": p.get("article_state", _content_status_to_article(c.status)),
         "created_at": c.created_at, "updated_at": c.updated_at,
         "publish_url": "", "published_at": "",

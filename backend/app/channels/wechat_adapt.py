@@ -637,6 +637,13 @@ async def article_adapt(ctx: JobContext, payload: dict) -> dict:
             if soft_left:  # 语言/表述建议修订后仍有残留：落 note 给用户终审参考（不拦发布）
                 p["note"] = (p.get("note") or "") + "｜语言建议残留：" + "；".join(
                     x[:44] for x in soft_left[:2])[:200]
+            # 去AI味机检（2026-11-22 太上老君框架 P1-4）：公众号提示词不动，只接红字；
+            # 引用原文（「」内）自动豁免，不误伤源文原话
+            from ..materials.deai_lint import lint
+
+            deai = lint(art.body, "wechat")
+            if deai:
+                p["issues"] = deai
             art.payload = p
             art.status = "ready"
             s.add(art)

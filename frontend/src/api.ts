@@ -86,6 +86,7 @@ export interface Script {
   falsify_item_id?: number | null // 打假清单成稿
   kb_id?: number | null         // 知识库建稿
   hot_comment?: { material_id: number; idx: number } | null // 热评口播稿
+  issues?: string[]         // 去AI味机检红提示（2026-11-22，不拦发布）
   title_hint?: string      // 生成来源标题快照
   versions: ScriptVersion[]
   teleprompter_text: string
@@ -101,6 +102,7 @@ export interface Article {
   kb_sources?: { title: string }[] | null
   id: number
   note?: string
+  issues?: string[]         // 去AI味机检红提示（2026-11-22，不拦发布）
   md: string
   html: string
   status: string
