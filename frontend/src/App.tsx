@@ -54,7 +54,7 @@ const NAVMAP: Record<string, NavTarget> = {
 }
 
 const DEFAULT_TAB: Partial<Record<SectionKey, string>> = {
-  today: 'today',
+  today: 'cockpit',
   persona: 'topics',
   leadgen: 'topics',
   article: 'workshop',

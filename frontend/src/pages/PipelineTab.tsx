@@ -80,6 +80,11 @@ export default function PipelineTab({ onNavigate }: { onNavigate?: (k: string) =
           })}
         </div>
       )}
+      {board && (board.columns.published?.n ?? 0) === 0 && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">
+          已发布=0——发完记得回登记（数据 · 补录带）；已发布/已复盘/排期/轨迹靠登记的数据喂养。
+        </div>
+      )}
       {board && (
         <div className="mt-3 text-[11px] text-slate-300">
           卡片时间：{relTime(new Date().toISOString())} 拉取 · 停留≥3 天标黄（该催自己了）

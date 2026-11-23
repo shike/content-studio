@@ -4,10 +4,12 @@ import { Spark } from '../components'
 import { fetchCardStats } from '../counts'
 import HotComments from './HotComments'
 import KbTab from './KbTab'
+import PipelineTab from './PipelineTab'
 
 /**
- * 今天（2026-11-18 用户定版）：三个平级 tab——
- * 晨报=指标/长文/管线（tab 名用户 2026-11-18 三次定稿：今日→数据→晨报）；热门评论=监控作者高赞评论→口播；知识库=未产出文档→长文图文。
+ * 今天（2026-11-23 驾驶舱定版）：四个 tab——
+ * 驾驶舱=运营主轴（六列流程看板为主体 + 决策队列/行动清单/发布节奏，默认首 tab）；
+ * 晨报=纯报表（指标/每日一篇/情报速览/昨夜管线）；热门评论=监控作者高赞评论→口播；知识库=未产出文档→长文图文。
  * 两条产线各占一 tab（源不同、产物不同），素材池归素材库。
  */
 
@@ -38,20 +40,21 @@ const PIPE_LABEL: Record<string, string> = {
   hl_search_daily: '组局挖掘（获客）',
 }
 
-type TodayTab = 'today' | 'comments' | 'kb'
+type TodayTab = 'cockpit' | 'today' | 'comments' | 'kb'
 
 const TABS: { id: TodayTab; label: string }[] = [
+  { id: 'cockpit', label: '驾驶舱' },
   { id: 'today', label: '晨报' },
   { id: 'comments', label: '热门评论' },
   { id: 'kb', label: '知识库' },
 ]
 
-export default function Today({ onNavigate, tab = 'today', onTab }: {
+export default function Today({ onNavigate, tab = 'cockpit', onTab }: {
   onNavigate: (k: string) => void
   tab?: string
   onTab?: (t: string) => void
 }) {
-  const active: TodayTab = (TABS.some((t) => t.id === tab) ? tab : 'today') as TodayTab
+  const active: TodayTab = (TABS.some((t) => t.id === tab) ? tab : 'cockpit') as TodayTab
   const [kpis, setKpis] = useState({ fans: 0, fansDelta: 0, play: 0, profileViews: 0 })
   const [fansHist, setFansHist] = useState<number[]>([])
   const [playHist, setPlayHist] = useState<number[]>([])
@@ -122,7 +125,7 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
 
       {active === 'comments' ? <HotComments />
         : active === 'kb' ? <KbTab mode="today" onNavigate={onNavigate} />
-          : (
+          : active === 'today' ? (
         <>
           {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
 
@@ -201,7 +204,12 @@ export default function Today({ onNavigate, tab = 'today', onTab }: {
             </section>
           </div>
 
-          {/* ── 决策队列 / 行动清单（R1-1）：要我审的 + 要我做的 ── */}
+        </>
+      ) : (
+        <>
+          {/* ── 驾驶舱（2026-11-23 定版）：六列流程看板为主体 + 决策三块 ── */}
+          <PipelineTab onNavigate={onNavigate} />
+          {/* ── 决策队列 / 行动清单 / 发布节奏（R1/R3 迁入）：要我审的 + 要我做的 ── */}
           {brief && (
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
               <section className="rounded-xl border border-[#E8ECF0] bg-white px-4 py-3">
